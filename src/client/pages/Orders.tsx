@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../config';
 import { Table, Column } from '../components/Table';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { getGeneralSettings } from '../utils/generalSettings';
+import { printInvoice, PrintableSale } from '../utils/invoicePrint';
+import ReturnModal from '../components/ReturnModal';
 
 interface HistoryItem {
   productId?: string;
@@ -16,6 +19,7 @@ interface HistoryRow {
   _id: string;
   number: string;
   createdAt: string;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
@@ -38,9 +42,27 @@ interface ProductOption {
   _id: string;
   name: string;
   sku?: string;
+  category?: string;
   price: number;
   gstRate?: number;
+  stock?: number;
 }
+
+interface CustomerOption {
+  _id: string;
+  customerCode?: string;
+  memberCode?: string;
+  memberSubscriptionId?: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  source?: 'customer' | 'member';
+  memberStatus?: string;
+}
+
+const normalizePhone = (value: string): string => String(value || '').replace(/\D+/g, '').slice(-10);
+const HISTORY_PAGE_SIZE = 25;
+const PRODUCT_BATCH_SIZE = 120;
 
 interface EditItem {
   productId: string;
@@ -51,6 +73,7 @@ interface EditItem {
 }
 
 interface EditFormState {
+  customerId: string;
   customerName: string;
   customerPhone: string;
   customerEmail: string;
@@ -62,11 +85,20 @@ interface EditFormState {
   items: EditItem[];
 }
 
+interface ReturnLineItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  gstRate: number;
+}
+
 const normalizeSalesRows = (rows: any[]): HistoryRow[] =>
   rows.map((sale) => ({
     _id: sale._id,
     number: sale.invoiceNumber || sale.saleNumber || sale._id?.slice(-6)?.toUpperCase() || '-',
     createdAt: sale.createdAt,
+    customerId: sale.customerId || '',
     customerName: sale.customerName,
     customerPhone: sale.customerPhone,
     customerEmail: sale.customerEmail,
@@ -114,6 +146,7 @@ const normalizeOrdersRows = (rows: any[]): HistoryRow[] =>
   }));
 
 const emptyEditForm = (): EditFormState => ({
+  customerId: '',
   customerName: '',
   customerPhone: '',
   customerEmail: '',
@@ -128,39 +161,109 @@ const emptyEditForm = (): EditFormState => ({
 export const Orders: React.FC = () => {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalHistoryRows, setTotalHistoryRows] = useState(0);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
+  const [hasMoreProducts, setHasMoreProducts] = useState(false);
   const [editingRow, setEditingRow] = useState<HistoryRow | null>(null);
   const [editForm, setEditForm] = useState<EditFormState>(emptyEditForm());
   const [addProductId, setAddProductId] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [printingSaleId, setPrintingSaleId] = useState('');
   const [editError, setEditError] = useState('');
+  const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
+  const [searchingCustomers, setSearchingCustomers] = useState(false);
+  const [returnRow, setReturnRow] = useState<HistoryRow | null>(null);
+
+  const returnModalItems = useMemo<ReturnLineItem[]>(() => {
+    if (!returnRow) return [];
+    const grouped = new Map<string, ReturnLineItem>();
+
+    for (const item of returnRow.items || []) {
+      const productId = String(item.productId || '');
+      const quantity = Number(item.quantity || 0);
+      if (!productId || quantity <= 0) continue;
+
+      const existing = grouped.get(productId);
+      if (existing) {
+        existing.quantity += quantity;
+        continue;
+      }
+
+      grouped.set(productId, {
+        productId,
+        productName: item.name,
+        quantity,
+        unitPrice: Number(item.unitPrice || 0),
+        gstRate: Number(item.gstRate || 0),
+      });
+    }
+
+    return Array.from(grouped.values());
+  }, [returnRow]);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   };
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (page: number, query: string) => {
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * HISTORY_PAGE_SIZE;
+    const params = new URLSearchParams({
+      skip: String(skip),
+      limit: String(HISTORY_PAGE_SIZE),
+    });
+    if (query.trim()) {
+      params.set('q', query.trim());
+    }
+
+    setLoading(true);
     try {
       setError('');
       const headers = getAuthHeaders();
 
       try {
-        const salesResp = await fetchApiJson(apiUrl('/api/sales?limit=200'), { headers });
+        const salesResp = await fetchApiJson(
+          apiUrl(`/api/sales?${params.toString()}`),
+          { headers }
+        );
         const salesRows = normalizeSalesRows(salesResp.data || []);
+        const total = Number(salesResp?.pagination?.total || salesRows.length || 0);
+        const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
         setRows(salesRows);
+        setTotalHistoryRows(total);
+        setHistoryTotalPages(totalPages);
+        if (safePage > totalPages) {
+          setHistoryPage(totalPages);
+        }
         return;
       } catch {
         // fallback below
       }
 
-      const ordersResp = await fetchApiJson(apiUrl('/api/orders?limit=200'), { headers });
+      const ordersResp = await fetchApiJson(
+        apiUrl(`/api/orders?${params.toString()}`),
+        { headers }
+      );
       const orderRows = normalizeOrdersRows(ordersResp.data || []);
+      const total = Number(ordersResp?.pagination?.total || orderRows.length || 0);
+      const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
       setRows(orderRows);
+      setTotalHistoryRows(total);
+      setHistoryTotalPages(totalPages);
+      if (safePage > totalPages) {
+        setHistoryPage(totalPages);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch sales history');
     } finally {
@@ -168,33 +271,142 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (reset = false) => {
+    const skip = reset ? 0 : products.length;
+    if (!reset) setLoadingMoreProducts(true);
     try {
       const headers = getAuthHeaders();
-      const response = await fetchApiJson(apiUrl('/api/products?limit=300'), { headers });
-      setProducts(response.data || []);
+      const response = await fetchApiJson(
+        apiUrl(`/api/products?skip=${skip}&limit=${PRODUCT_BATCH_SIZE}`),
+        { headers }
+      );
+      const incoming: ProductOption[] = Array.isArray(response?.data) ? response.data : [];
+      const total = Number(response?.pagination?.total || incoming.length || 0);
+      setProducts((prev) => {
+        if (reset) return incoming;
+        const merged = [...prev];
+        const existing = new Set(prev.map((row) => row._id));
+        incoming.forEach((row) => {
+          if (!existing.has(row._id)) {
+            existing.add(row._id);
+            merged.push(row);
+          }
+        });
+        return merged;
+      });
+      setHasMoreProducts(skip + incoming.length < total);
     } catch {
       // optional list for edit dialog; ignore failure
+    } finally {
+      if (!reset) setLoadingMoreProducts(false);
     }
   };
 
   useEffect(() => {
-    void fetchHistory();
-    void fetchProducts();
+    void fetchProducts(true);
   }, []);
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const q = search.trim().toLowerCase();
-      if (!q) return true;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setHistoryPage(1);
+      setHistoryQuery(search.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    void fetchHistory(historyPage, historyQuery);
+  }, [historyPage, historyQuery]);
+
+  useEffect(() => {
+    if (!editingRow) return;
+    const phone = normalizePhone(editForm.customerPhone);
+    if (phone.length < 4) {
+      setCustomerMatches([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          setSearchingCustomers(true);
+          const response = await fetchApiJson(apiUrl(`/api/customers/search-unified?q=${encodeURIComponent(phone)}`), {
+            headers: getAuthHeaders(),
+          });
+          setCustomerMatches(Array.isArray(response?.data) ? response.data : []);
+        } catch {
+          setCustomerMatches([]);
+        } finally {
+          setSearchingCustomers(false);
+        }
+      })();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [editForm.customerPhone, editingRow]);
+
+  const productCategories = useMemo(() => {
+    return Array.from(
+      new Set(
+        products
+          .map((product) => String(product.category || '').trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const addableProducts = useMemo(() => {
+    const searchText = productSearch.trim().toLowerCase();
+    return products.filter((product) => {
+      const alreadyInInvoice = editForm.items.some((item) => String(item.productId) === String(product._id));
+      if (alreadyInInvoice) return false;
+      if (Number(product.stock || 0) <= 0) return false;
+      if (productCategoryFilter && String(product.category || '').trim() !== productCategoryFilter) return false;
+      if (!searchText) return true;
       return (
-        row.number.toLowerCase().includes(q)
-        || (row.customerName || '').toLowerCase().includes(q)
-        || (row.customerPhone || '').toLowerCase().includes(q)
-        || (row.customerEmail || '').toLowerCase().includes(q)
+        String(product.name || '').toLowerCase().includes(searchText)
+        || String(product.sku || '').toLowerCase().includes(searchText)
       );
     });
-  }, [rows, search]);
+  }, [products, editForm.items, productSearch, productCategoryFilter]);
+
+  const productSuggestions = useMemo(() => {
+    if (!productSearch.trim()) return [];
+    return addableProducts.slice(0, 10);
+  }, [addableProducts, productSearch]);
+
+  useEffect(() => {
+    if (!addProductId) return;
+    const stillAvailable = addableProducts.some((product) => String(product._id) === String(addProductId));
+    if (!stillAvailable) setAddProductId('');
+  }, [addProductId, addableProducts]);
+
+  const productMapById = useMemo(() => {
+    const map = new Map<string, ProductOption>();
+    for (const row of products) {
+      map.set(String(row._id), row);
+    }
+    return map;
+  }, [products]);
+
+  const originalEditQtyByProduct = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!editingRow) return map;
+    for (const item of editingRow.items || []) {
+      if (!item.productId) continue;
+      map.set(String(item.productId), Number(item.quantity || 0));
+    }
+    return map;
+  }, [editingRow]);
+
+  const getMaxEditableQty = (productId: string): number => {
+    const key = String(productId || '');
+    const originalQty = Number(originalEditQtyByProduct.get(key) || 0);
+    const product = productMapById.get(key);
+    if (!product) {
+      return Math.max(1, originalQty);
+    }
+    return Math.max(0, Number(product.stock || 0) + originalQty);
+  };
 
   const editedTotals = useMemo(() => {
     const subtotal = editForm.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0);
@@ -225,6 +437,46 @@ export const Orders: React.FC = () => {
     [editedTotals.total, paidSoFar]
   );
 
+  const ensureProductsInCache = async (productIds: string[]) => {
+    const missing = Array.from(
+      new Set(
+        productIds
+          .map((id) => String(id || ''))
+          .filter((id) => id && !productMapById.has(id))
+      )
+    );
+    if (!missing.length) return;
+
+    try {
+      const headers = getAuthHeaders();
+      const responses = await Promise.all(
+        missing.map(async (id) => {
+          try {
+            return await fetchApiJson(apiUrl(`/api/products/${id}`), { headers });
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const fetched: ProductOption[] = responses
+        .map((resp) => (resp && resp.data ? (resp.data as ProductOption) : null))
+        .filter((row): row is ProductOption => Boolean(row?._id));
+
+      if (!fetched.length) return;
+
+      setProducts((prev) => {
+        const map = new Map(prev.map((row) => [String(row._id), row]));
+        for (const row of fetched) {
+          map.set(String(row._id), row);
+        }
+        return Array.from(map.values());
+      });
+    } catch {
+      // optional preload only
+    }
+  };
+
   const openEditModal = (row: HistoryRow) => {
     if (row.source !== 'sales') return;
     const mappedItems: EditItem[] = (row.items || [])
@@ -239,6 +491,7 @@ export const Orders: React.FC = () => {
 
     setEditingRow(row);
     setEditForm({
+      customerId: row.customerId || '',
       customerName: row.customerName || '',
       customerPhone: row.customerPhone || '',
       customerEmail: row.customerEmail || '',
@@ -250,22 +503,35 @@ export const Orders: React.FC = () => {
       items: mappedItems,
     });
     setAddProductId('');
+    setProductSearch('');
+    setProductCategoryFilter('');
     setEditError('');
+    setCustomerMatches([]);
+    void ensureProductsInCache(mappedItems.map((item) => item.productId));
   };
 
   const closeEditModal = () => {
     setEditingRow(null);
     setEditForm(emptyEditForm());
     setAddProductId('');
+    setProductSearch('');
+    setProductCategoryFilter('');
     setEditError('');
     setSavingEdit(false);
+    setCustomerMatches([]);
+    setSearchingCustomers(false);
   };
 
   const updateEditItem = (index: number, field: keyof EditItem, value: string) => {
     setEditForm((prev) => {
       const updated = [...prev.items];
       const current = { ...updated[index] };
-      if (field === 'quantity' || field === 'unitPrice' || field === 'gstRate') {
+      if (field === 'quantity') {
+        const numeric = Math.floor(Number(value));
+        const safe = Number.isFinite(numeric) ? numeric : 0;
+        const maxQty = getMaxEditableQty(String(current.productId));
+        current.quantity = Math.max(1, Math.min(maxQty || 1, safe || 1));
+      } else if (field === 'unitPrice' || field === 'gstRate') {
         const numeric = Number(value);
         (current as any)[field] = Number.isFinite(numeric) ? numeric : 0;
       } else {
@@ -282,8 +548,12 @@ export const Orders: React.FC = () => {
 
   const addProductToEdit = () => {
     if (!addProductId) return;
-    const product = products.find((p) => String(p._id) === String(addProductId));
+    const product = addableProducts.find((p) => String(p._id) === String(addProductId));
     if (!product) return;
+    if (Number(product.stock || 0) <= 0) {
+      setEditError(`No stock available for ${product.name}`);
+      return;
+    }
 
     const exists = editForm.items.some((item) => String(item.productId) === String(product._id));
     if (exists) {
@@ -308,6 +578,78 @@ export const Orders: React.FC = () => {
     setAddProductId('');
   };
 
+  const selectCustomer = (customer: CustomerOption) => {
+    setEditForm((prev) => ({
+      ...prev,
+      customerId: customer.source === 'customer' ? customer._id : '',
+      customerName: customer.name || prev.customerName,
+      customerPhone: customer.phone || prev.customerPhone,
+      customerEmail: customer.email || prev.customerEmail,
+    }));
+    setCustomerMatches([]);
+  };
+
+  const mapSaleToPrintable = (sale: any): PrintableSale => ({
+    saleNumber: sale?.saleNumber,
+    invoiceNumber: sale?.invoiceNumber,
+    createdAt: sale?.createdAt,
+    isGstBill: sale?.isGstBill,
+    paymentMethod: sale?.paymentMethod,
+    customerName: sale?.customerName,
+    customerPhone: sale?.customerPhone,
+    customerEmail: sale?.customerEmail,
+    notes: sale?.notes,
+    subtotal: Number(sale?.subtotal || 0),
+    totalGst: Number(sale?.totalGst || 0),
+    totalAmount: Number(sale?.totalAmount || 0),
+    discountAmount: Number(sale?.discountAmount || 0),
+    items: Array.isArray(sale?.items)
+      ? sale.items.map((item: any) => ({
+        productName: item?.productName || item?.name || 'Item',
+        sku: item?.sku,
+        hsnCode: item?.hsnCode,
+        quantity: Number(item?.quantity || 0),
+        unitPrice: Number(item?.unitPrice || 0),
+        gstRate: Number(item?.gstRate || 0),
+        gstAmount: Number(item?.gstAmount || 0),
+        lineTotal: Number(item?.lineTotal || 0),
+      }))
+      : [],
+  });
+
+  const printSaleInvoice = async (saleId: string, preloadedSale?: any) => {
+    if (!saleId) return;
+    setPrintingSaleId(saleId);
+    try {
+      const sale = preloadedSale || (await fetchApiJson(apiUrl(`/api/sales/${saleId}`), { headers: getAuthHeaders() }))?.data;
+      if (!sale) {
+        throw new Error('Invoice data not found');
+      }
+      const ok = printInvoice(mapSaleToPrintable(sale), getGeneralSettings());
+      if (!ok) {
+        throw new Error('Unable to open print window. Please allow popups and try again.');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Failed to print invoice');
+    } finally {
+      setPrintingSaleId('');
+    }
+  };
+
+  const openReturnModal = (row: HistoryRow) => {
+    if (row.source !== 'sales') return;
+    setReturnRow(row);
+  };
+
+  const closeReturnModal = (created?: boolean) => {
+    setReturnRow(null);
+    if (created) {
+      setSuccessMessage('Return created successfully. Awaiting approval.');
+      setTimeout(() => setSuccessMessage(''), 3500);
+      void fetchHistory(historyPage, historyQuery);
+    }
+  };
+
   const saveInvoiceEdit = async () => {
     if (!editingRow) return;
     if (!editForm.items.length) {
@@ -316,6 +658,12 @@ export const Orders: React.FC = () => {
     }
     if (editForm.items.some((item) => Number(item.quantity || 0) <= 0)) {
       setEditError('All item quantities must be greater than zero');
+      return;
+    }
+    const stockViolation = editForm.items.find((item) => Number(item.quantity || 0) > getMaxEditableQty(item.productId));
+    if (stockViolation) {
+      const maxQty = getMaxEditableQty(stockViolation.productId);
+      setEditError(`Quantity for ${stockViolation.productName} exceeds available stock. Max allowed: ${maxQty}`);
       return;
     }
 
@@ -336,8 +684,9 @@ export const Orders: React.FC = () => {
           unitPrice: Number(item.unitPrice || 0),
           gstRate: Number(item.gstRate || 0),
         })),
+        customerId: editForm.customerId || undefined,
         customerName: editForm.customerName,
-        customerPhone: editForm.customerPhone,
+        customerPhone: normalizePhone(editForm.customerPhone) || editForm.customerPhone,
         customerEmail: editForm.customerEmail,
         notes: editForm.notes,
         paymentMethod: editForm.paymentMethod,
@@ -354,7 +703,7 @@ export const Orders: React.FC = () => {
 
       const message = response.message || 'Invoice updated successfully';
       closeEditModal();
-      await fetchHistory();
+      await fetchHistory(historyPage, historyQuery);
       setSuccessMessage(message);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err: any) {
@@ -367,6 +716,7 @@ export const Orders: React.FC = () => {
   const statusClass = (value: string) => {
     const normalized = String(value || '').toLowerCase();
     if (normalized === 'completed') return 'bg-emerald-400/10 text-emerald-400 ring-emerald-400/20';
+    if (normalized === 'returned') return 'bg-sky-400/10 text-sky-300 ring-sky-300/20';
     if (normalized === 'pending' || normalized === 'processing') return 'bg-amber-400/10 text-amber-300 ring-amber-300/20';
     return 'bg-red-400/10 text-red-300 ring-red-300/20';
   };
@@ -374,14 +724,17 @@ export const Orders: React.FC = () => {
   const columns: Column<HistoryRow>[] = [
     {
       header: 'Invoice',
+      sortValue: (row) => row.number,
       render: (row) => <span className="font-medium text-white">{row.number}</span>,
     },
     {
       header: 'Date',
+      sortValue: (row) => new Date(row.createdAt).getTime(),
       render: (row) => new Date(row.createdAt).toLocaleString(),
     },
     {
       header: 'Customer',
+      sortValue: (row) => row.customerName || 'Walk-in Customer',
       render: (row) => (
         <div>
           <p className="text-white">{row.customerName || 'Walk-in Customer'}</p>
@@ -391,6 +744,7 @@ export const Orders: React.FC = () => {
     },
     {
       header: 'Items',
+      sortValue: (row) => row.items?.length || 0,
       render: (row) => (
         <ul className="list-disc list-inside">
           {row.items.map((item, idx) => (
@@ -403,10 +757,12 @@ export const Orders: React.FC = () => {
     },
     {
       header: 'Total',
+      sortValue: (row) => Number(row.totalAmount || 0),
       render: (row) => <span className="font-bold text-white">{formatCurrency(row.totalAmount)}</span>,
     },
     {
       header: 'Payment',
+      sortValue: (row) => row.paymentMethod || '',
       render: (row) => (
         <div className="space-y-1">
           <div className="capitalize">{row.paymentMethod}</div>
@@ -421,6 +777,7 @@ export const Orders: React.FC = () => {
     },
     {
       header: 'Status',
+      sortValue: (row) => row.status || '',
       render: (row) => (
         <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset capitalize ${statusClass(row.status)}`}>
           {row.status}
@@ -429,19 +786,44 @@ export const Orders: React.FC = () => {
     },
     {
       header: 'Action',
-      render: (row) => (
-        row.source === 'sales' ? (
-          <button
-            type="button"
-            className="rounded-md bg-indigo-500/20 px-2 py-1 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/30"
-            onClick={() => openEditModal(row)}
-          >
-            Edit Invoice
-          </button>
+      sortable: false,
+      render: (row) => {
+        const canCreateReturn =
+          row.source === 'sales'
+          && row.invoiceStatus === 'posted'
+          && Array.isArray(row.items)
+          && row.items.some((item) => Boolean(item.productId) && Number(item.quantity || 0) > 0);
+
+        return row.source === 'sales' ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              className="rounded-md bg-indigo-500/20 px-2 py-1 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/30"
+              onClick={() => openEditModal(row)}
+            >
+              Edit Invoice
+            </button>
+            <button
+              type="button"
+              disabled={printingSaleId === row._id}
+              className="rounded-md bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void printSaleInvoice(row._id)}
+            >
+              {printingSaleId === row._id ? 'Printing...' : 'Print'}
+            </button>
+            <button
+              type="button"
+              disabled={!canCreateReturn}
+              className="rounded-md bg-amber-500/20 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => openReturnModal(row)}
+            >
+              Create Return
+            </button>
+          </div>
         ) : (
           <span className="text-xs text-gray-500">-</span>
-        )
-      ),
+        );
+      },
     },
   ];
 
@@ -465,7 +847,34 @@ export const Orders: React.FC = () => {
           placeholder="Search by invoice/customer/phone/email..."
           className="mb-4 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
         />
-        <Table data={filteredRows} columns={columns} emptyMessage="No sales history found" />
+        <p className="mb-3 text-xs text-gray-400">Search works across all invoices with page-wise results.</p>
+        <Table data={rows} columns={columns} emptyMessage="No sales history found" />
+        {totalHistoryRows > 0 && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-400">
+            <span>
+              Showing {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, totalHistoryRows)} of {totalHistoryRows} invoices
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
+                disabled={historyPage <= 1 || loading}
+                className="rounded border border-white/20 px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Prev
+              </button>
+              <span className="text-gray-300">Page {historyPage} / {historyTotalPages}</span>
+              <button
+                type="button"
+                onClick={() => setHistoryPage((prev) => Math.min(historyTotalPages, prev + 1))}
+                disabled={historyPage >= historyTotalPages || loading}
+                className="rounded border border-white/20 px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {editingRow && (
@@ -493,15 +902,23 @@ export const Orders: React.FC = () => {
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <input
-                value={editForm.customerName}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, customerName: e.target.value }))}
-                placeholder="Customer Name"
+                value={editForm.customerPhone}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const changed = normalizePhone(value) !== normalizePhone(editForm.customerPhone);
+                  setEditForm((prev) => ({
+                    ...prev,
+                    customerPhone: value,
+                    customerId: changed ? '' : prev.customerId,
+                  }));
+                }}
+                placeholder="Customer Phone (search first)"
                 className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
               />
               <input
-                value={editForm.customerPhone}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, customerPhone: e.target.value }))}
-                placeholder="Customer Phone"
+                value={editForm.customerName}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, customerName: e.target.value }))}
+                placeholder="Customer Name"
                 className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
               />
               <input
@@ -540,6 +957,30 @@ export const Orders: React.FC = () => {
                 className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
               />
             </div>
+            {searchingCustomers && <p className="mt-1 text-xs text-gray-400">Searching customers...</p>}
+            {!searchingCustomers && customerMatches.length > 0 && (
+              <div className="mt-2 max-h-32 overflow-y-auto rounded border border-white/10 bg-black/40 p-1">
+                {customerMatches.map((customer) => (
+                  <button
+                    key={customer._id}
+                    type="button"
+                    onClick={() => selectCustomer(customer)}
+                    className="block w-full rounded px-2 py-1 text-left text-xs text-gray-200 hover:bg-white/10"
+                  >
+                    {customer.name} | {customer.phone || '-'} {customer.customerCode ? `(${customer.customerCode})` : ''}
+                    {customer.source === 'member' && (
+                      <span className="ml-1 text-indigo-200">[Member{customer.memberCode ? ` ${customer.memberCode}` : ''}]</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!searchingCustomers && normalizePhone(editForm.customerPhone).length >= 10 && customerMatches.length === 0 && !editForm.customerId && !editForm.customerName.trim() && (
+              <p className="mt-1 text-xs text-amber-300">No customer found. Saving will create/update customer from these details.</p>
+            )}
+            {!!editForm.customerId && (
+              <p className="mt-1 text-xs text-emerald-300">Existing customer selected from database</p>
+            )}
 
             <textarea
               value={editForm.notes}
@@ -569,11 +1010,15 @@ export const Orders: React.FC = () => {
 
               {editForm.items.map((item, idx) => (
                 <div key={`${item.productId}-${idx}`} className="grid grid-cols-12 gap-2 border-b border-white/10 px-3 py-2">
-                  <div className="col-span-4 text-sm text-white">{item.productName}</div>
+                  <div className="col-span-4">
+                    <p className="text-sm text-white">{item.productName}</p>
+                    <p className="text-[11px] text-gray-500">Max: {getMaxEditableQty(item.productId)}</p>
+                  </div>
                   <div className="col-span-2">
                     <input
                       type="number"
                       min="1"
+                      max={Math.max(1, getMaxEditableQty(item.productId))}
                       step="1"
                       value={item.quantity}
                       onChange={(e) => updateEditItem(idx, 'quantity', e.target.value)}
@@ -613,28 +1058,97 @@ export const Orders: React.FC = () => {
               ))}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => {
+                    setProductSearch(e.target.value);
+                    setAddProductId('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && productSuggestions.length > 0) {
+                      e.preventDefault();
+                      const first = productSuggestions[0];
+                      setAddProductId(first._id);
+                      setProductSearch(first.name);
+                    }
+                  }}
+                  placeholder="Search product by name or SKU"
+                  className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+                />
+                {productSuggestions.length > 0 && !addProductId && (
+                  <div className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-md border border-white/10 bg-gray-950 shadow-xl">
+                    {productSuggestions.map((product) => (
+                      <button
+                        key={product._id}
+                        type="button"
+                        onClick={() => {
+                          setAddProductId(product._id);
+                          setProductSearch(product.name);
+                        }}
+                        className="block w-full border-b border-white/5 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/10"
+                      >
+                        <div className="font-medium text-white">{product.name}</div>
+                        <div className="text-[11px] text-gray-400">
+                          {product.sku || product._id}{product.category ? ` | ${product.category}` : ''} | Stock: {Number(product.stock || 0)}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <select
+                value={productCategoryFilter}
+                onChange={(e) => {
+                  setProductCategoryFilter(e.target.value);
+                  setAddProductId('');
+                }}
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+              >
+                <option value="" className="bg-gray-900">All categories (optional)</option>
+                {productCategories.map((category) => (
+                  <option key={category} value={category} className="bg-gray-900">
+                    {category}
+                  </option>
+                ))}
+              </select>
               <select
                 value={addProductId}
                 onChange={(e) => setAddProductId(e.target.value)}
-                className="min-w-[240px] rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
               >
                 <option value="">Add product to invoice...</option>
-                {products
-                  .filter((p) => !editForm.items.some((it) => String(it.productId) === String(p._id)))
-                  .map((product) => (
-                    <option key={product._id} value={product._id} className="bg-gray-900">
-                      {product.name} ({product.sku || product._id})
-                    </option>
-                  ))}
+                {addableProducts.map((product) => (
+                  <option key={product._id} value={product._id} className="bg-gray-900">
+                    {product.name} ({product.sku || product._id}){product.category ? ` - ${product.category}` : ''} | Stock: {Number(product.stock || 0)}
+                  </option>
+                ))}
               </select>
-              <button
-                type="button"
-                onClick={addProductToEdit}
-                className="rounded-md bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30"
-              >
-                Add Item
-              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-gray-400">{addableProducts.length} product(s) available</p>
+              <div className="flex items-center gap-2">
+                {hasMoreProducts && (
+                  <button
+                    type="button"
+                    onClick={() => void fetchProducts(false)}
+                    disabled={loadingMoreProducts}
+                    className="rounded-md border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingMoreProducts ? 'Loading products...' : 'Load More Products'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={addProductToEdit}
+                  disabled={!addProductId}
+                  className="rounded-md bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Add Item
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-white/5 p-3 text-sm md:grid-cols-4">
@@ -667,6 +1181,14 @@ export const Orders: React.FC = () => {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
+                disabled={printingSaleId === editingRow._id}
+                className="rounded-md bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void printSaleInvoice(editingRow._id)}
+              >
+                {printingSaleId === editingRow._id ? 'Printing...' : 'Print Invoice'}
+              </button>
+              <button
+                type="button"
                 className="rounded-md bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
                 onClick={closeEditModal}
               >
@@ -683,6 +1205,17 @@ export const Orders: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {returnRow && (
+        <ReturnModal
+          open={Boolean(returnRow)}
+          saleId={returnRow._id}
+          saleNumber={returnRow.number}
+          items={returnModalItems}
+          token={localStorage.getItem('token') || ''}
+          onClose={closeReturnModal}
+        />
       )}
     </>
   );

@@ -1,8 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { IUser } from '@shared/types';
 import { PageKey, PermissionMatrix } from '@shared/rbac';
 import { getGeneralSettings } from '../utils/generalSettings';
+import {
+  FONT_SCALE_STEP,
+  ResolvedUiPreferences,
+  UI_PREFERENCES_UPDATED_EVENT,
+  applyAndPersistUiPreferencesLocal,
+  clampFontScale,
+  loadUiPreferencesFromServer,
+  normalizeUiPreferences,
+  readUiPreferencesFromStorage,
+  saveUiPreferencesToServer,
+} from '../utils/uiPreferences';
 
 interface NavbarProps {
   user: Partial<IUser> | null;
@@ -18,6 +29,7 @@ const menuItems = [
   { key: 'orders' as PageKey, name: 'Orders', path: '/orders', category: 'Sales' as MenuCategory, icon: '📄' },
   { key: 'returns' as PageKey, name: 'Returns', path: '/returns', category: 'Sales' as MenuCategory, icon: '↩️' },
   { key: 'reports' as PageKey, name: 'Reports', path: '/reports', category: 'Sales' as MenuCategory, icon: '📈' },
+  { key: 'sales' as PageKey, name: 'Customers', path: '/customers', category: 'Sales' as MenuCategory, icon: '🧑' },
   { key: 'products' as PageKey, name: 'Products', path: '/products', category: 'Catalog' as MenuCategory, icon: '📦' },
   { key: 'categories' as PageKey, name: 'Categories', path: '/categories', category: 'Catalog' as MenuCategory, icon: '🗂️' },
   { key: 'employees' as PageKey, name: 'Employees', path: '/employees', category: 'People' as MenuCategory, icon: '👥' },
@@ -27,7 +39,10 @@ const menuItems = [
   { key: 'facilities' as PageKey, name: 'Facility Setup', path: '/facilities/setup', category: 'Operations' as MenuCategory, icon: '🛠️' },
   { key: 'facilities' as PageKey, name: 'Facility Booking', path: '/facilities', category: 'Operations' as MenuCategory, icon: '🏟️' },
   { key: 'facilities' as PageKey, name: 'Event Booking', path: '/events', category: 'Operations' as MenuCategory, icon: '📅' },
+  { key: 'memberships' as PageKey, name: 'Create Plan', path: '/membership-plans/create', category: 'Operations' as MenuCategory, icon: '🧩' },
+  { key: 'memberships' as PageKey, name: 'Create Subscription', path: '/membership-subscriptions/create', category: 'Operations' as MenuCategory, icon: '📝' },
   { key: 'memberships' as PageKey, name: 'Memberships', path: '/memberships', category: 'Operations' as MenuCategory, icon: '🎫' },
+  { key: 'memberships' as PageKey, name: 'Membership Reports', path: '/membership-reports', category: 'Operations' as MenuCategory, icon: '📊' },
   { key: 'settings' as PageKey, name: 'Settings', path: '/settings', category: 'Admin' as MenuCategory, icon: '⚙️' },
   { key: 'accounting' as PageKey, name: 'Accounting', path: '/accounting', category: 'Admin' as MenuCategory, icon: '📚' },
   { key: 'user-management' as PageKey, name: 'Users', path: '/user-management', category: 'Admin' as MenuCategory, icon: '🛡️' },
@@ -40,11 +55,34 @@ const pathMatches = (currentPath: string, itemPath: string): boolean => {
 
 export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [desktopCategory, setDesktopCategory] = useState<MenuCategory | null>(null);
   const [brandName, setBrandName] = useState('Sarva');
   const [brandLogo, setBrandLogo] = useState('');
+  const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
+  const uiPreferencesRef = useRef<ResolvedUiPreferences>(uiPreferences);
   const allowedMenuItems = menuItems.filter((item) => permissions[item.key]);
+  const themeMode = uiPreferences.themeMode;
+  const fontScale = uiPreferences.fontScale;
+
+  const setAndSyncUiPreferences = (next: ResolvedUiPreferences, persistRemote = true) => {
+    const normalized = applyAndPersistUiPreferencesLocal(next);
+    setUiPreferences(normalized);
+    uiPreferencesRef.current = normalized;
+
+    if (!persistRemote) return;
+    void saveUiPreferencesToServer(normalized)
+      .then((saved) => {
+        if (!saved) return;
+        const synced = applyAndPersistUiPreferencesLocal(saved);
+        setUiPreferences(synced);
+        uiPreferencesRef.current = synced;
+      })
+      .catch(() => {
+        // ignore remote preference save failures
+      });
+  };
 
   useEffect(() => {
     const refreshBrand = () => {
@@ -63,6 +101,60 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
       window.removeEventListener('sarva-settings-updated', refreshBrand as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    uiPreferencesRef.current = uiPreferences;
+  }, [uiPreferences]);
+
+  useEffect(() => {
+    const localPreferences = readUiPreferencesFromStorage();
+    const initialPreferences = user?.uiPreferences
+      ? normalizeUiPreferences(user.uiPreferences)
+      : localPreferences;
+    setAndSyncUiPreferences(initialPreferences, false);
+
+    const loadServerPreferences = async () => {
+      try {
+        const serverPreferences = await loadUiPreferencesFromServer();
+        if (!serverPreferences) return;
+        setAndSyncUiPreferences(serverPreferences, false);
+      } catch {
+        // ignore preference fetch failures
+      }
+    };
+    void loadServerPreferences();
+  }, [user?._id]);
+
+  useEffect(() => {
+    const onPreferencesUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<ResolvedUiPreferences>).detail;
+      if (!detail) return;
+      const normalized = normalizeUiPreferences(detail);
+      setUiPreferences(normalized);
+      uiPreferencesRef.current = normalized;
+    };
+
+    window.addEventListener(UI_PREFERENCES_UPDATED_EVENT, onPreferencesUpdate as EventListener);
+    return () => {
+      window.removeEventListener(UI_PREFERENCES_UPDATED_EVENT, onPreferencesUpdate as EventListener);
+    };
+  }, []);
+
+  const bumpFont = (direction: 1 | -1) => {
+    const next = {
+      ...uiPreferencesRef.current,
+      fontScale: clampFontScale(uiPreferencesRef.current.fontScale + direction * FONT_SCALE_STEP),
+    };
+    setAndSyncUiPreferences(next);
+  };
+
+  const setTheme = (nextTheme: 'dark' | 'light') => {
+    const next = {
+      ...uiPreferencesRef.current,
+      themeMode: nextTheme,
+    };
+    setAndSyncUiPreferences(next);
+  };
 
   const categoryOrder: MenuCategory[] = ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Admin'];
   const categoryIcons: Record<MenuCategory, string> = {
@@ -151,7 +243,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
 
   return (
     <nav className="sticky top-0 z-40 border-b border-white/10 bg-gray-900/90 backdrop-blur">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="w-full px-3 sm:px-6 lg:px-8">
         <div className="flex items-start justify-between gap-3 py-2">
           <div className="flex min-w-0 flex-1 items-start gap-4">
             <div className="flex items-center gap-2 pt-1">
@@ -172,7 +264,10 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
                     <button
                       key={group.category}
                       type="button"
-                      onClick={() => setDesktopCategory(group.category)}
+                      onClick={() => {
+                        setDesktopCategory(group.category);
+                        if (group.category === 'Home') navigate('/');
+                      }}
                       className={categoryButtonClass(group.category, group.category === visibleCategory)}
                     >
                       {categoryIcons[group.category]} {group.category}
@@ -201,6 +296,46 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
           </div>
 
           <div className="hidden shrink-0 items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 lg:flex">
+            <div className="flex items-center gap-1 rounded-md border border-white/15 bg-white/5 p-1">
+              <button
+                type="button"
+                title="Decrease font size"
+                onClick={() => bumpFont(-1)}
+                className="cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                a-
+              </button>
+              <button
+                type="button"
+                title="Increase font size"
+                onClick={() => bumpFont(1)}
+                className="cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                A+
+              </button>
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-white/15 bg-white/5 p-1">
+              <button
+                type="button"
+                title="Dark mode"
+                onClick={() => setTheme('dark')}
+                className={`cursor-pointer rounded-md px-2 py-1 text-sm transition ${
+                  themeMode === 'dark' ? 'bg-indigo-500/25 text-indigo-100' : 'text-gray-200 hover:bg-white/10'
+                }`}
+              >
+                🌙
+              </button>
+              <button
+                type="button"
+                title="Light mode"
+                onClick={() => setTheme('light')}
+                className={`cursor-pointer rounded-md px-2 py-1 text-sm transition ${
+                  themeMode === 'light' ? 'bg-amber-500/25 text-amber-100' : 'text-gray-200 hover:bg-white/10'
+                }`}
+              >
+                ☀️
+              </button>
+            </div>
             <span className="max-w-32 truncate text-sm text-gray-300">{user?.firstName}</span>
             <button
               onClick={onLogout}
@@ -231,7 +366,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
                 <div className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${categoryStyles[group.category].label}`}>
                   {group.category}
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {group.items.map((item) => (
                     <NavLink
                       key={item.name}
@@ -245,6 +380,48 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
                 </div>
               </div>
             ))}
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/5 p-2">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  title="Decrease font size"
+                  onClick={() => bumpFont(-1)}
+                  className="cursor-pointer rounded-md border border-white/15 px-2 py-1 text-xs font-semibold text-gray-200 hover:bg-white/10"
+                >
+                  a-
+                </button>
+                <button
+                  type="button"
+                  title="Increase font size"
+                  onClick={() => bumpFont(1)}
+                  className="cursor-pointer rounded-md border border-white/15 px-2 py-1 text-xs font-semibold text-gray-200 hover:bg-white/10"
+                >
+                  A+
+                </button>
+              </div>
+              <div className="flex items-center gap-1 rounded-md border border-white/15 p-1">
+                <button
+                  type="button"
+                  title="Dark mode"
+                  onClick={() => setTheme('dark')}
+                  className={`cursor-pointer rounded-md px-2 py-1 text-sm ${
+                    themeMode === 'dark' ? 'bg-indigo-500/25 text-indigo-100' : 'text-gray-200 hover:bg-white/10'
+                  }`}
+                >
+                  🌙
+                </button>
+                <button
+                  type="button"
+                  title="Light mode"
+                  onClick={() => setTheme('light')}
+                  className={`cursor-pointer rounded-md px-2 py-1 text-sm ${
+                    themeMode === 'light' ? 'bg-amber-500/25 text-amber-100' : 'text-gray-200 hover:bg-white/10'
+                  }`}
+                >
+                  ☀️
+                </button>
+              </div>
+            </div>
             <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
               <span className="text-sm text-gray-300">{user?.firstName}</span>
               <button

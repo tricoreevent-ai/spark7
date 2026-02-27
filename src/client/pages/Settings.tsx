@@ -3,11 +3,22 @@ import {
   DEFAULT_GENERAL_SETTINGS,
   GeneralSettings,
   getGeneralSettings,
-  resetGeneralSettings,
+  loadGeneralSettingsFromServer,
+  mergeGeneralSettings,
   saveGeneralSettings,
 } from '../utils/generalSettings';
 import { printInvoice } from '../utils/invoicePrint';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import {
+  FONT_SCALE_STEP,
+  ResolvedUiPreferences,
+  UI_PREFERENCES_UPDATED_EVENT,
+  applyAndPersistUiPreferencesLocal,
+  clampFontScale,
+  normalizeUiPreferences,
+  readUiPreferencesFromStorage,
+  saveUiPreferencesToServer,
+} from '../utils/uiPreferences';
 
 interface BackupRestoreHistoryItem {
   id: string;
@@ -21,6 +32,8 @@ interface BackupRestoreHistoryItem {
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<GeneralSettings>(() => getGeneralSettings());
+  const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
+  const [uiSettingsMessage, setUiSettingsMessage] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
   const [currentUserRole, setCurrentUserRole] = useState('');
   const [backupInProgress, setBackupInProgress] = useState(false);
@@ -44,12 +57,56 @@ export const Settings: React.FC = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         setCurrentUserRole(String(response?.user?.role || '').toLowerCase());
+        const initialPreferences = normalizeUiPreferences(response?.user?.uiPreferences);
+        const applied = applyAndPersistUiPreferencesLocal(initialPreferences);
+        setUiPreferences(applied);
       } catch {
         // ignore role lookup failure in settings
       }
     };
     void loadCurrentUserRole();
+
+    const loadSharedGeneralSettings = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const merged = await loadGeneralSettingsFromServer(token || undefined, { force: true });
+        setSettings(merged);
+        saveGeneralSettings(merged);
+        window.dispatchEvent(new Event('sarva-settings-updated'));
+      } catch {
+        // keep using local settings when shared settings are unavailable
+      }
+    };
+    void loadSharedGeneralSettings();
   }, []);
+
+  useEffect(() => {
+    const onUiPreferencesUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<ResolvedUiPreferences>).detail;
+      if (!detail) return;
+      setUiPreferences(normalizeUiPreferences(detail));
+    };
+    window.addEventListener(UI_PREFERENCES_UPDATED_EVENT, onUiPreferencesUpdate as EventListener);
+    return () => {
+      window.removeEventListener(UI_PREFERENCES_UPDATED_EVENT, onUiPreferencesUpdate as EventListener);
+    };
+  }, []);
+
+  const updateUiPreferences = async (next: ResolvedUiPreferences) => {
+    const local = applyAndPersistUiPreferencesLocal(next);
+    setUiPreferences(local);
+    try {
+      const saved = await saveUiPreferencesToServer(local);
+      if (saved) {
+        const synced = applyAndPersistUiPreferencesLocal(saved);
+        setUiPreferences(synced);
+      }
+      setUiSettingsMessage('Appearance saved.');
+    } catch {
+      setUiSettingsMessage('Saved locally. Server sync failed.');
+    }
+    setTimeout(() => setUiSettingsMessage(''), 2000);
+  };
 
   const updateBusiness = (field: keyof GeneralSettings['business'], value: string) => {
     setSettings((prev) => ({ ...prev, business: { ...prev.business, [field]: value } }));
@@ -77,30 +134,35 @@ export const Settings: React.FC = () => {
   };
 
   const saveSettings = async () => {
-    const before = getGeneralSettings();
-    saveGeneralSettings(settings);
-    window.dispatchEvent(new Event('sarva-settings-updated'));
-
+    const normalized = mergeGeneralSettings(settings);
     const token = localStorage.getItem('token');
     if (token) {
       try {
-        await fetchApiJson(apiUrl('/api/settings/audit-change'), {
-          method: 'POST',
+        const response = await fetchApiJson(apiUrl('/api/general-settings'), {
+          method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            before,
-            after: settings,
-          }),
+          body: JSON.stringify({ settings: normalized }),
         });
-      } catch (error) {
-        console.error('Failed to submit settings audit log:', error);
+        const saved = mergeGeneralSettings(
+          (response?.data?.settings as Partial<GeneralSettings> | undefined) || normalized
+        );
+        saveGeneralSettings(saved);
+        setSettings(saved);
+        window.dispatchEvent(new Event('sarva-settings-updated'));
+        setSavedMessage('Settings saved and synced for all systems.');
+        setTimeout(() => setSavedMessage(''), 2400);
+        return;
+      } catch (error: any) {
+        console.error('Failed to save shared settings:', error);
       }
     }
 
-    setSavedMessage('Settings saved successfully.');
+    saveGeneralSettings(normalized);
+    window.dispatchEvent(new Event('sarva-settings-updated'));
+    setSavedMessage(token ? 'Saved locally, but server sync failed.' : 'Settings saved locally.');
     setTimeout(() => setSavedMessage(''), 2400);
   };
 
@@ -247,14 +309,6 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const resetSettings = () => {
-    const defaults = resetGeneralSettings();
-    setSettings(defaults);
-    window.dispatchEvent(new Event('sarva-settings-updated'));
-    setSavedMessage('Settings reset to default values.');
-    setTimeout(() => setSavedMessage(''), 2400);
-  };
-
   const nextInvoicePreview = useMemo(() => {
     const number = String(settings.invoice.nextNumber).padStart(6, '0');
     return `${settings.invoice.prefix}${number}`;
@@ -371,13 +425,6 @@ export const Settings: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={resetSettings}
-            className="rounded-md bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/30"
-          >
-            Reset Defaults
-          </button>
-          <button
-            type="button"
             onClick={saveSettings}
             className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
           >
@@ -391,6 +438,68 @@ export const Settings: React.FC = () => {
           {savedMessage}
         </div>
       )}
+
+      <section className={sectionCard}>
+        <h2 className="mb-4 text-lg font-semibold text-white">Appearance</h2>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-200">Theme</p>
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-1.5">
+              <button
+                type="button"
+                title="Dark theme"
+                onClick={() => void updateUiPreferences({ ...uiPreferences, themeMode: 'dark' })}
+                className={`rounded-md px-3 py-1.5 text-sm transition ${
+                  uiPreferences.themeMode === 'dark' ? 'bg-indigo-500/25 text-indigo-100' : 'text-gray-300 hover:bg-white/10'
+                }`}
+              >
+                🌙 Dark
+              </button>
+              <button
+                type="button"
+                title="Light theme"
+                onClick={() => void updateUiPreferences({ ...uiPreferences, themeMode: 'light' })}
+                className={`rounded-md px-3 py-1.5 text-sm transition ${
+                  uiPreferences.themeMode === 'light' ? 'bg-amber-500/25 text-amber-100' : 'text-gray-300 hover:bg-white/10'
+                }`}
+              >
+                ☀️ Light
+              </button>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-200">Font Size</p>
+            <div className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 p-1.5">
+              <button
+                type="button"
+                title="Decrease font size"
+                onClick={() => void updateUiPreferences({
+                  ...uiPreferences,
+                  fontScale: clampFontScale(uiPreferences.fontScale - FONT_SCALE_STEP),
+                })}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                a-
+              </button>
+              <div className="px-2 text-xs font-semibold text-gray-300">{Math.round(uiPreferences.fontScale * 100)}%</div>
+              <button
+                type="button"
+                title="Increase font size"
+                onClick={() => void updateUiPreferences({
+                  ...uiPreferences,
+                  fontScale: clampFontScale(uiPreferences.fontScale + FONT_SCALE_STEP),
+                })}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                A+
+              </button>
+            </div>
+          </div>
+        </div>
+        {uiSettingsMessage && (
+          <p className="mt-3 text-xs text-indigo-200">{uiSettingsMessage}</p>
+        )}
+      </section>
 
       <section className={sectionCard}>
         <h2 className="mb-4 text-lg font-semibold text-white">Business Details</h2>
