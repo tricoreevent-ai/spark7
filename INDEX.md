@@ -80,7 +80,7 @@ npx tsc --noEmit         # Check TypeScript compilation
 ## 📁 Project Structure
 
 ```
-POSOPENAI/
+SARVA/
 ├── src/
 │   ├── server/           # Express backend
 │   │   ├── app.ts

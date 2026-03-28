@@ -20,7 +20,7 @@ export interface IChartAccount extends Document {
 
 const ChartAccountSchema = new Schema<IChartAccount>(
   {
-    accountCode: { type: String, required: true, unique: true, trim: true, uppercase: true, index: true },
+    accountCode: { type: String, required: true, trim: true, uppercase: true, index: true },
     accountName: { type: String, required: true, trim: true, index: true },
     accountType: {
       type: String,
@@ -47,6 +47,8 @@ const ChartAccountSchema = new Schema<IChartAccount>(
   { timestamps: true }
 );
 
+// accountCode must be unique only within a tenant, not globally.
+ChartAccountSchema.index({ tenantId: 1, accountCode: 1 }, { unique: true });
 ChartAccountSchema.index({ accountType: 1, subType: 1, isActive: 1 });
 
 export const ChartAccount = mongoose.model<IChartAccount>('ChartAccount', ChartAccountSchema);

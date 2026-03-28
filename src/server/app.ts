@@ -2,12 +2,15 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import './models/registerTenantPlugin.js';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import orderRoutes from './routes/orders.js';
 import inventoryRoutes from './routes/inventory.js';
+import supplierRoutes from './routes/suppliers.js';
+import purchaseRoutes from './routes/purchases.js';
 import salesRoutes from './routes/sales.js';
 import returnsRoutes from './routes/returns.js';
 import categoryRoutes from './routes/categories.js';
@@ -23,23 +26,74 @@ import userRoutes from './routes/users.js';
 import rbacRoutes from './routes/rbac.js';
 import customerRoutes from './routes/customers.js';
 import creditNoteRoutes from './routes/creditNotes.js';
+import quoteRoutes from './routes/quotes.js';
 import reportsRoutes from './routes/reports.js';
 import settlementRoutes from './routes/settlements.js';
 import settingsRoutes from './routes/settings.js';
+import generalSettingsRoutes from './routes/generalSettings.js';
 import { authMiddleware } from './middleware/auth.js';
-import { requirePageAccess } from './middleware/authorization.js';
-import { ensureDefaultRolesAndPermissions } from './services/rbac.js';
+import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
+import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
 
-dotenv.config();
+const envCandidates = [
+  process.env.APP_ENV_PATH,
+  path.join(path.dirname(process.execPath), '.env'),
+  typeof (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath === 'string'
+    ? path.join((process as NodeJS.Process & { resourcesPath?: string }).resourcesPath as string, '.env')
+    : undefined,
+  path.resolve(process.cwd(), '.env'),
+].filter((value): value is string => Boolean(value));
+
+let loadedEnvPath: string | undefined;
+for (const candidate of envCandidates) {
+  if (fs.existsSync(candidate)) {
+    dotenv.config({ path: candidate });
+    loadedEnvPath = candidate;
+    break;
+  }
+}
+
+if (!loadedEnvPath) {
+  dotenv.config();
+}
 
 const app: Express = express();
 const PORT: number = Number(process.env.PORT) || 3000;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const clientDistPath = path.resolve(__dirname, '../client');
+const DB_RETRY_MS: number = Number(process.env.DB_RETRY_MS) || 15000;
+const clientDistPath = path.resolve(process.cwd(), 'dist/client');
+
+const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+
+const parseCsv = (value: string | undefined): string[] => {
+  if (typeof value !== 'string') return [];
+  return value.split(',').map((part) => part.trim()).filter(Boolean);
+};
+
+// Use SERVE_CLIENT=false when frontend is deployed separately.
+const serveClient = parseBoolean(process.env.SERVE_CLIENT, true);
+const allowedCorsOrigins = parseCsv(process.env.CORS_ORIGIN || process.env.FRONTEND_URL);
+
+if (loadedEnvPath) {
+  console.log(`Loaded environment from ${loadedEnvPath}`);
+} else {
+  console.warn('No .env file found in expected runtime locations. Using process environment/defaults.');
+}
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedCorsOrigins.length === 0 || allowedCorsOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -51,9 +105,13 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // Database connection
 const connectDB = async (): Promise<boolean> => {
   try {
-    const mongoUrl = process.env.DATABASE_URL || 'mongodb+srv://rootchirayil:rootchirayil@microcluster.5kjshke.mongodb.net/posopenai?appName=MicroCluster';
+    const mongoUrl = process.env.DATABASE_URL || 'mongodb+srv://rootchirayil:rootchirayil@microcluster.5kjshke.mongodb.net/sarva?appName=MicroCluster';
     await mongoose.connect(mongoUrl, { serverSelectionTimeoutMS: 10000 });
-    await ensureDefaultRolesAndPermissions();
+    try {
+      await bootstrapDatabaseOnStartup();
+    } catch (bootstrapError) {
+      console.error('Database bootstrap warning:', bootstrapError);
+    }
     console.log('MongoDB connected successfully');
     return true;
   } catch (error) {
@@ -62,14 +120,33 @@ const connectDB = async (): Promise<boolean> => {
   }
 };
 
+let dbConnected = false;
+let dbConnectInProgress = false;
+
+const connectDbWithRetry = async (): Promise<void> => {
+  if (dbConnected || dbConnectInProgress) return;
+  dbConnectInProgress = true;
+  const connected = await connectDB();
+  dbConnectInProgress = false;
+  dbConnected = connected;
+  if (!connected) {
+    console.warn(`Retrying MongoDB connection in ${DB_RETRY_MS} ms...`);
+    setTimeout(() => {
+      void connectDbWithRetry();
+    }, DB_RETRY_MS);
+  }
+};
+
 // Routes will be added here
 app.use('/api/auth', authRoutes);
-app.use('/api/products', authMiddleware, requirePageAccess('products'), productRoutes);
+app.use('/api/products', authMiddleware, requireAnyPageAccess(['products', 'sales']), productRoutes);
 app.use('/api/orders', authMiddleware, requirePageAccess('orders'), orderRoutes);
 app.use('/api/inventory', authMiddleware, requirePageAccess('inventory'), inventoryRoutes);
+app.use('/api/suppliers', authMiddleware, requirePageAccess('inventory'), supplierRoutes);
+app.use('/api/purchases', authMiddleware, requirePageAccess('inventory'), purchaseRoutes);
 app.use('/api/sales', authMiddleware, requirePageAccess('sales'), salesRoutes);
 app.use('/api/returns', authMiddleware, requirePageAccess('returns'), returnsRoutes);
-app.use('/api/categories', authMiddleware, requirePageAccess('categories'), categoryRoutes);
+app.use('/api/categories', authMiddleware, requireAnyPageAccess(['categories', 'products', 'sales']), categoryRoutes);
 app.use('/api/accounting', authMiddleware, requirePageAccess('accounting'), accountingRoutes);
 app.use('/api/employees', authMiddleware, requirePageAccess('employees'), employeeRoutes);
 app.use('/api/attendance', authMiddleware, requirePageAccess('attendance'), attendanceRoutes);
@@ -81,17 +158,26 @@ app.use('/api/memberships', authMiddleware, requirePageAccess('memberships'), me
 app.use('/api/users', authMiddleware, requirePageAccess('user-management'), userRoutes);
 app.use('/api/rbac', authMiddleware, requirePageAccess('user-management'), rbacRoutes);
 app.use('/api/customers', authMiddleware, requirePageAccess('sales'), customerRoutes);
+app.use('/api/quotes', authMiddleware, requirePageAccess('sales'), quoteRoutes);
 app.use('/api/credit-notes', authMiddleware, requirePageAccess('accounting'), creditNoteRoutes);
 app.use('/api/reports', authMiddleware, requirePageAccess('reports'), reportsRoutes);
 app.use('/api/settlements', authMiddleware, requirePageAccess('accounting'), settlementRoutes);
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
+app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
 
-// Serve built frontend (Vite output in dist/client) from the same server.
-app.use(express.static(clientDistPath));
-app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(clientDistPath, 'index.html'));
-});
+if (serveClient) {
+  // Combined mode: API + built frontend served from the same Node process.
+  app.use(express.static(clientDistPath));
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+} else {
+  // Separate mode: backend only, frontend hosted on a different service.
+  app.get('/', (_req: Request, res: Response) => {
+    res.json({ status: 'API server', message: 'Frontend is deployed separately.' });
+  });
+}
 
 // Error handling middleware
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -104,11 +190,21 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // Start server
 const startServer = async () => {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+  mongoose.connection.on('disconnected', () => {
+    dbConnected = false;
+    console.warn('MongoDB disconnected. Reconnecting...');
+    void connectDbWithRetry();
   });
 
-  void connectDB().then((dbConnected) => {
+  const server = app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Frontend serving mode: ${serveClient ? 'combined' : 'separate'}`);
+    if (allowedCorsOrigins.length > 0) {
+      console.log(`CORS allowed origins: ${allowedCorsOrigins.join(', ')}`);
+    }
+  });
+
+  void connectDbWithRetry().then(() => {
     if (!dbConnected) {
       console.warn('Server is up, but database connection is unavailable. Set DATABASE_URL and ensure DB network access.');
     }

@@ -53,6 +53,6 @@ const AttendanceSchema = new Schema<IAttendance>(
   { timestamps: true }
 );
 
-AttendanceSchema.index({ employeeId: 1, dateKey: 1 }, { unique: true });
+AttendanceSchema.index({ tenantId: 1, employeeId: 1, dateKey: 1 }, { unique: true });
 
 export const Attendance = mongoose.model<IAttendance>('Attendance', AttendanceSchema);

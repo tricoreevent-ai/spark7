@@ -266,7 +266,7 @@ Code Organization: Modular & Scalable
 
 ### Can Deploy To:
 - ✅ Local Development
-- ✅ Docker Container
+- ✅ Docker Container  
 - ✅ AWS (EC2, ECS, Lambda)
 - ✅ Google Cloud
 - ✅ Azure

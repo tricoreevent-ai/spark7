@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.env.client
 .env.local
 .DS_Store
 *.log
@@ -14,8 +15,13 @@ coverage/
 .nyc_output/
 temp/
 tmp/
-hostinger-ready/
-hostinger-ready-lite/
-hostinger-deploy/
-hostinger-*.zip
-hostinger-*.tar.gz
+production-ready/
+logs/
+backups/
+installer/
+.cursor/
+.superdesign/
+.windsurfrules
+CLAUDE.md
+src/**/*.js
+src/**/*.js.map

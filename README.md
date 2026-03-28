@@ -1,225 +1,218 @@
-# POS + Inventory + SaaS Application
+# SPARK AI
 
-A comprehensive Point of Sale (POS), Inventory Management, and SaaS solution built with modern web technologies. Features include offline-first capabilities, real-time stock synchronization, multi-language support, and GST compliance.
+SPARK AI is a multi-module business operations system for sports arena, retail, membership, booking, and finance workflows. It combines POS billing, product and inventory control, quotations, customer credit tracking, facilities, memberships, HR, accounting, reporting, and role-based administration in one application.
 
-## Tech Stack
+Key project docs:
+- User manual: [USER_MANUAL.md](./USER_MANUAL.md)
+- Hosting guide: [docs/HOSTING_DEPLOYMENT.md](./docs/HOSTING_DEPLOYMENT.md)
+- Feature audit: [FEATURE_AUDIT.md](./FEATURE_AUDIT.md)
 
-- **Backend**: Node.js + Express + TypeScript
-- **Database**: MongoDB
-- **Frontend**: React + Vite + TypeScript
-- **Desktop App**: Electron
-- **Real-time**: WebSockets
-- **Package Manager**: npm
+## Current Functional Scope
+
+### Sales and customer operations
+- POS billing and invoice creation
+- orders and sales history
+- quotations with approval and draft invoice conversion
+- returns processing
+- customer records with contact and credit controls
+
+### Product and stock operations
+- product entry and catalog management
+- category management
+- inventory visibility and stock adjustments
+- stock alerts
+- procurement, suppliers, and purchase orders
+
+### Operations and people
+- employees
+- attendance
+- shifts
+- payroll
+- facilities and bookings
+- event bookings
+- memberships and membership reports
+
+### Finance and administration
+- accounting workspace
+- receipt and credit note settlement workflows
+- reporting dashboards
+- settings and branding
+- user management and role permissions
+
+## Architecture
+
+### Frontend
+- React
+- Vite
+- TypeScript
+- React Router
+
+### Backend
+- Node.js
+- Express
+- MongoDB with Mongoose
+- JWT authentication
+- Nodemailer
+
+### Desktop packaging
+- Electron
 
 ## Project Structure
 
-```
-src/
-├── server/           # Express backend application
-│   ├── models/       # MongoDB schemas
-│   ├── routes/       # API routes
-│   ├── middleware/   # Express middleware
-│   └── utils/        # Utility functions
-├── client/           # React frontend
-│   ├── components/   # React components
-│   ├── pages/        # Page components
-│   └── hooks/        # Custom React hooks
-├── desktop/          # Electron desktop app
-│   └── main/         # Electron main process
-└── shared/           # Shared types and utilities
-```
-
-## Getting Started
-
-### Prerequisites
-- Node.js (v18+)
-- npm (v9+)
-- MongoDB (local or Atlas)
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd posopenai
+```text
+SPARK AI/
+├─ src/
+│  ├─ client/
+│  │  ├─ components/
+│  │  ├─ hooks/
+│  │  ├─ pages/
+│  │  └─ utils/
+│  ├─ desktop/
+│  │  └─ main/
+│  ├─ server/
+│  │  ├─ middleware/
+│  │  ├─ models/
+│  │  ├─ routes/
+│  │  ├─ services/
+│  │  └─ utils/
+│  └─ shared/
+├─ docs/
+├─ scripts/
+├─ build-deploy.bat
+├─ deploy-app.bat
+├─ run-app.bat
+├─ build-separate-deploy.bat
+└─ USER_MANUAL.md
 ```
 
-2. Install dependencies:
+## Local Development
+
+1. Install dependencies:
+
 ```bash
 npm install
 ```
 
-3. Create `.env` file:
+2. Create local env files from the templates:
+
 ```bash
-cp .env.example .env
+copy .env.example .env
+copy .env.client.example .env.client
 ```
 
-4. Update `.env` with your configuration:
-```env
-PORT=3000
-NODE_ENV=development
-DATABASE_URL=mongodb://localhost:27017/posopenai
-JWT_SECRET=your-secret-key
-VITE_API_URL=http://localhost:3000/api
-```
+3. Start the backend:
 
-### Development
-
-#### Start Backend Server
 ```bash
 npm run dev:server
 ```
-Runs on http://localhost:3000
 
-#### Start Frontend Development Server
+4. Start the frontend:
+
 ```bash
 npm run dev:client
 ```
-Runs on http://localhost:5173
 
-#### Start Electron Desktop App
-```bash
-npm run dev:desktop
+Windows shortcut:
+
+```bat
+run-app.bat
 ```
 
-#### Run All Services (in separate terminals):
+## Build and Deployment Workflow
+
+SPARK AI now follows the same operator-friendly deployment shape used in the `tricore` reference workflow:
+- one repo-level deployment guide
+- one build entry point
+- one deploy wrapper
+- one run helper
+- one generated `production-ready/` output with separate backend and frontend artifacts
+
+### Build deployment packages
+
+```bat
+build-deploy.bat
+```
+
+Or with explicit backend and frontend URLs:
+
+```bat
+build-deploy.bat production-ready https://api.yourdomain.com https://app.yourdomain.com
+```
+
+### Deploy packages
+
+```bat
+deploy-app.bat
+```
+
+This produces:
+- `production-ready/server/`
+- `production-ready/client/`
+- `production-ready/server-deploy.zip`
+- `production-ready/client-deploy.zip`
+
+### Generated deployment structure
+
+```text
+production-ready/
+├─ server/
+│  ├─ dist/server/
+│  ├─ dist/shared/
+│  ├─ package.json
+│  ├─ server.js
+│  ├─ .env.example
+│  └─ DEPLOY_SERVER.txt
+├─ client/
+│  ├─ index.html
+│  ├─ assets/
+│  ├─ .env.client.example
+│  ├─ start-client.bat
+│  └─ DEPLOY_CLIENT.txt
+├─ server-deploy.zip
+└─ client-deploy.zip
+```
+
+## Hosting Model
+
+SPARK AI is prepared for separate hosting:
+- backend on a Node-capable host
+- frontend on static hosting
+
+Backend deployment summary:
+1. Upload `production-ready/server-deploy.zip`.
+2. Create `.env` from `.env.example`.
+3. Set `SERVE_CLIENT=false`.
+4. Set `CORS_ORIGIN` to your frontend URL.
+5. Run `npm install` and `npm start`.
+
+Frontend deployment summary:
+1. Upload `production-ready/client-deploy.zip`.
+2. Set `VITE_API_BASE_URL` to the backend URL.
+3. Configure SPA fallback to `/index.html`.
+
+Full instructions are in [docs/HOSTING_DEPLOYMENT.md](./docs/HOSTING_DEPLOYMENT.md).
+
+## Environment Templates
+
+Server settings live in:
+- `.env.example`
+
+Client settings live in:
+- `.env.client.example`
+
+The deployment build automatically syncs these templates and appends any env keys referenced by the source code.
+
+## Useful Commands
+
 ```bash
-# Terminal 1
 npm run dev:server
-
-# Terminal 2
 npm run dev:client
-
-# Terminal 3 (optional)
-npm run dev:desktop
+npm run build:server
+npm run build:client
+npm run build:production
 ```
 
-### Production Build
+## Notes
 
-```bash
-npm run build
-```
-
-Generates:
-- `dist/server/` - Backend files
-- `dist/client/` - Frontend bundle
-
-### Start Production Server
-```bash
-npm start
-```
-
-## Features
-
-- ✅ Real-time Stock Management
-- ✅ Offline-First Architecture
-- ✅ Multi-Language Support
-- ✅ GST Compliance (India)
-- ✅ Multiple Payment Methods (Razorpay, Card, UPI, Check, Cash)
-- ✅ Desktop & Web Interfaces
-- ✅ RESTful API
-- ✅ WebSocket Real-time Updates
-- ✅ User Authentication & Authorization
-- ✅ Inventory Tracking with Low Stock Alerts
-- ✅ Order Management System
-
-## Implemented APIs
-
-### Authentication
-- User registration and login
-- JWT-based token authentication
-- Profile management
-- Password hashing with bcryptjs
-
-### Products
-- Create, read, update, delete products
-- Product categorization with SKU
-- GST rate management per product
-- Stock management
-
-### Orders
-- Create orders with multiple items
-- Automatic order number generation
-- GST calculation per order
-- Order status tracking
-- Payment status management
-- Order history and details
-
-### Inventory
-- Track stock levels per product
-- Warehouse location management
-- Batch number tracking
-- Expiry date management
-- Low stock alerts
-- Restock tracking
-
-## API Documentation
-
-See [API.md](API.md) for detailed API documentation including:
-- Authentication endpoints
-- Product management endpoints
-- Order processing endpoints
-- Inventory management endpoints
-- Request/response examples
-
----
-
-## Features
-
-- ✅ Real-time Stock Management
-- ✅ Offline-First Architecture
-- ✅ Multi-Language Support
-- ✅ GST Compliance (India)
-- ✅ Multiple Payment Methods (Razorpay, etc.)
-- ✅ Desktop & Web Interfaces
-- ✅ RESTful API
-- ✅ WebSocket Real-time Updates
-
-## API Endpoints
-
-### Health Check
-- `GET /api/health` - Server health status
-
-### Authentication
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user
-- `PUT /api/auth/profile` - Update user profile
-
-### Products
-- `GET /api/products` - List all products
-- `GET /api/products/:id` - Get product details
-- `POST /api/products` - Create product (auth required)
-- `PUT /api/products/:id` - Update product (auth required)
-- `DELETE /api/products/:id` - Delete product (auth required)
-
-### Orders
-- `GET /api/orders` - List user orders (auth required)
-- `POST /api/orders` - Create order (auth required)
-- `GET /api/orders/:id` - Get order details (auth required)
-- `PUT /api/orders/:id/status` - Update order status (auth required)
-
-### Inventory
-- `GET /api/inventory` - List inventory
-- `GET /api/inventory/:productId` - Get product inventory
-- `POST /api/inventory` - Create inventory (auth required)
-- `PUT /api/inventory/:productId` - Update inventory (auth required)
-- `GET /api/inventory/status/low-stock` - Get low stock items
-
-## Environment Variables
-
-See `.env.example` for all available configuration options.
-
-## Next Steps
-
-Coming soon:
-1. ✅ Implement authentication routes
-2. ✅ Create product management API
-3. ✅ Build order processing system
-4. ✅ Add inventory tracking
-5. Implement advanced GST compliance features
-6. Setup Razorpay payment gateway integration
-7. Add WebSocket for real-time updates
-8. Create React components for frontend
-9. Implement offline-first caching
-10. Add multi-language support
+- `production-ready/`, `dist/`, logs, backups, and other local build outputs are not tracked in git.
+- Online sales and e-commerce deployment flows are not part of the SPARK AI hosting workflow.

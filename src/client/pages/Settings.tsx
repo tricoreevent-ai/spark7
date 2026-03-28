@@ -44,6 +44,8 @@ export const Settings: React.FC = () => {
   const [backupRestoreHistory, setBackupRestoreHistory] = useState<BackupRestoreHistoryItem[]>([]);
   const [backupRestoreHistoryLoading, setBackupRestoreHistoryLoading] = useState(false);
   const [backupRestoreHistoryError, setBackupRestoreHistoryError] = useState('');
+  const [mailTestSending, setMailTestSending] = useState(false);
+  const [mailTestMessage, setMailTestMessage] = useState('');
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sectionCard = 'rounded-xl border border-white/10 bg-white/5 p-5';
@@ -133,6 +135,13 @@ export const Settings: React.FC = () => {
     setSettings((prev) => ({ ...prev, printing: { ...prev.printing, [field]: value } }));
   };
 
+  const updateMail = (
+    field: keyof GeneralSettings['mail'],
+    value: string | number | boolean
+  ) => {
+    setSettings((prev) => ({ ...prev, mail: { ...prev.mail, [field]: value } }));
+  };
+
   const saveSettings = async () => {
     const normalized = mergeGeneralSettings(settings);
     const token = localStorage.getItem('token');
@@ -164,6 +173,33 @@ export const Settings: React.FC = () => {
     window.dispatchEvent(new Event('sarva-settings-updated'));
     setSavedMessage(token ? 'Saved locally, but server sync failed.' : 'Settings saved locally.');
     setTimeout(() => setSavedMessage(''), 2400);
+  };
+
+  const testMailSettings = async () => {
+    try {
+      setMailTestSending(true);
+      setMailTestMessage('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setMailTestMessage('Login required to test mail settings.');
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/general-settings/test-email'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ settings: mergeGeneralSettings(settings) }),
+      });
+
+      setMailTestMessage(String(response?.message || 'Test email sent successfully.'));
+    } catch (error: any) {
+      setMailTestMessage(error?.message || 'Failed to send test email');
+    } finally {
+      setMailTestSending(false);
+    }
   };
 
   const isSuperAdmin = currentUserRole === 'super_admin';
@@ -569,6 +605,48 @@ export const Settings: React.FC = () => {
             )}
           </div>
         </div>
+      </section>
+
+      <section className={sectionCard}>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Mail Settings</h2>
+            <p className="mt-1 text-sm text-gray-400">SMTP settings used for test email delivery and future email workflows.</p>
+          </div>
+          <button
+            type="button"
+            onClick={testMailSettings}
+            disabled={mailTestSending}
+            className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {mailTestSending ? 'Sending Test Email...' : 'Send Test Email'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <input className={inputClass} placeholder="App Name" value={settings.mail.appName} onChange={(e) => updateMail('appName', e.target.value)} />
+          <input className={inputClass} placeholder="SMTP Host" value={settings.mail.smtpHost} onChange={(e) => updateMail('smtpHost', e.target.value)} />
+          <input className={inputClass} type="number" placeholder="SMTP Port" value={settings.mail.smtpPort} onChange={(e) => updateMail('smtpPort', Number(e.target.value || 587))} />
+          <input className={inputClass} placeholder="SMTP User" value={settings.mail.smtpUser} onChange={(e) => updateMail('smtpUser', e.target.value)} />
+          <input className={inputClass} type="password" placeholder="SMTP App Password" value={settings.mail.smtpPass} onChange={(e) => updateMail('smtpPass', e.target.value)} />
+          <input className={inputClass} placeholder="From Email" value={settings.mail.smtpFromEmail} onChange={(e) => updateMail('smtpFromEmail', e.target.value)} />
+          <input className={inputClass} placeholder="Recipients (comma separated)" value={settings.mail.smtpToRecipients} onChange={(e) => updateMail('smtpToRecipients', e.target.value)} />
+          <label className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200">
+            <input
+              type="checkbox"
+              checked={settings.mail.smtpSecure}
+              onChange={(e) => updateMail('smtpSecure', e.target.checked)}
+            />
+            Use SSL / Secure SMTP
+          </label>
+        </div>
+
+        <p className="mt-3 text-xs text-gray-400">For Gmail use `smtp.gmail.com`, port `587`, and a Google App Password from the `Tricore` app.</p>
+        {mailTestMessage && (
+          <div className="mt-3 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+            {mailTestMessage}
+          </div>
+        )}
       </section>
 
       <section className={sectionCard}>

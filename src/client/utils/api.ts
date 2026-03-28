@@ -6,22 +6,29 @@ export interface ApiJson {
 }
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
+const LOCAL_API_BASE_URL = 'http://127.0.0.1:3000';
 
 export const getApiBaseUrl = (): string => {
-  const configured = (import.meta as any)?.env?.VITE_API_BASE_URL;
+  const env = (import.meta as any)?.env || {};
+  const configured = env.VITE_API_BASE_URL || env.VITE_API_URL;
   if (typeof configured === 'string' && configured.trim()) {
     return trimTrailingSlash(configured.trim());
   }
 
   if (window.location.protocol === 'file:') {
-    return 'http://localhost:3000';
+    return LOCAL_API_BASE_URL;
   }
 
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://localhost:3000';
+    // Force IPv4 locally because the API server may bind only to 0.0.0.0 on Windows.
+    return LOCAL_API_BASE_URL;
   }
 
-  return '';
+  // For network access from other machines, use current hostname with port 3000
+  // This allows accessing app via http://192.168.x.x:3000 from other machines
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:3000`;
 };
 
 export const apiUrl = (path: string): string => {

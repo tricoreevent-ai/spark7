@@ -28,7 +28,7 @@ const rolePermissionSchema = new Schema<IRolePermissionDocument>(
       default: false,
     },
   },
-  { timestamps: true }
+  { timestamps: true, tenantScoped: false, tenantUniqueRewrite: false } as any
 );
 
 export const RolePermission = mongoose.model<IRolePermissionDocument>('RolePermission', rolePermissionSchema);

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { Facility } from '../models/Facility.js';
 import { FacilityBooking } from '../models/FacilityBooking.js';
+import { Customer } from '../models/Customer.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { MembershipPlan } from '../models/MembershipPlan.js';
 import { generateNumber } from '../services/numbering.js';
@@ -12,6 +13,8 @@ type BookingStatus = 'pending' | 'confirmed' | 'booked' | 'completed' | 'cancell
 type PaymentStatus = 'pending' | 'partial' | 'paid' | 'refunded';
 
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
+const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
 
 const normalizeStatus = (status: any): BookingStatus => {
   const value = String(status || '').trim().toLowerCase();
@@ -94,6 +97,76 @@ const overlappingFacilityBookedUnits = async (
   return overlapping.reduce((sum, row: any) => sum + Math.max(1, Number(row.bookedUnits || 1)), 0);
 };
 
+const findOrCreateCustomerByPhone = async (args: {
+  customerId?: any;
+  customerPhone?: any;
+  customerName?: any;
+  customerEmail?: any;
+  createdBy?: string;
+}) => {
+  const normalizedPhone = normalizePhone(args.customerPhone);
+  const normalizedEmail = normalizeEmail(args.customerEmail);
+  const normalizedName = String(args.customerName || '').trim();
+
+  if (args.customerId) {
+    const existingById = await Customer.findById(args.customerId);
+    if (!existingById) throw new Error('Customer not found');
+    let changed = false;
+    if (normalizedPhone && existingById.phone !== normalizedPhone) {
+      existingById.phone = normalizedPhone;
+      changed = true;
+    }
+    if (normalizedEmail && existingById.email !== normalizedEmail) {
+      existingById.email = normalizedEmail;
+      changed = true;
+    }
+    if (normalizedName && existingById.name !== normalizedName) {
+      existingById.name = normalizedName;
+      changed = true;
+    }
+    if (changed) await existingById.save();
+    return existingById;
+  }
+
+  if (!normalizedPhone) return null;
+
+  const existingByPhone = await Customer.findOne({ phone: normalizedPhone }).sort({ createdAt: -1 });
+  if (existingByPhone) {
+    let changed = false;
+    if (normalizedEmail && !existingByPhone.email) {
+      existingByPhone.email = normalizedEmail;
+      changed = true;
+    }
+    if (normalizedName && existingByPhone.name !== normalizedName) {
+      existingByPhone.name = normalizedName;
+      changed = true;
+    }
+    if (changed) await existingByPhone.save();
+    return existingByPhone;
+  }
+
+  const member = await MemberSubscription.findOne({ phone: normalizedPhone })
+    .select('memberName fullName email')
+    .sort({ updatedAt: -1, createdAt: -1 });
+  const memberName = String(member?.memberName || member?.fullName || '').trim();
+  const memberEmail = normalizeEmail(member?.email);
+
+  const customerCode = await generateNumber('customer_code', { prefix: 'CUST-', padTo: 5 });
+  const customer = await Customer.create({
+    customerCode,
+    name: normalizedName || memberName || `Customer ${normalizedPhone}`,
+    phone: normalizedPhone,
+    email: normalizedEmail || memberEmail || undefined,
+    accountType: 'cash',
+    creditLimit: 0,
+    creditDays: 0,
+    openingBalance: 0,
+    outstandingBalance: 0,
+    createdBy: args.createdBy,
+  });
+  return customer;
+};
+
 router.get('/', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const facilities = await Facility.find().sort({ active: -1, name: 1 });
@@ -170,6 +243,49 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
   }
 });
 
+router.get('/customers/search', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ success: true, data: [] });
+    const normalizedPhone = normalizePhone(q);
+    const regex = new RegExp(q, 'i');
+    const filter: any = {
+      $or: [
+        { name: regex },
+        { customerCode: regex },
+        { phone: regex },
+        { email: regex },
+      ],
+    };
+    if (normalizedPhone) {
+      filter.$or.push({ phone: normalizedPhone });
+    }
+    const customers = await Customer.find(filter)
+      .select('_id customerCode name phone email accountType isBlocked')
+      .sort({ updatedAt: -1, name: 1 })
+      .limit(10);
+    res.json({ success: true, data: customers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to search customers' });
+  }
+});
+
+router.get('/customers/by-phone/:phone', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const phone = normalizePhone(req.params.phone);
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'Valid phone number is required' });
+    }
+    const customer = await Customer.findOne({ phone })
+      .select('_id customerCode name phone email accountType isBlocked')
+      .sort({ updatedAt: -1, createdAt: -1 });
+    if (!customer) return res.json({ success: true, data: null });
+    res.json({ success: true, data: customer });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch customer by phone' });
+  }
+});
+
 router.get('/bookings/list', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { date, startDate, endDate, facilityId, status } = req.query;
@@ -207,6 +323,7 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
   try {
     const {
       facilityId,
+      customerId,
       customerName,
       customerPhone,
       customerEmail,
@@ -225,8 +342,12 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
       bookedUnits,
     } = req.body;
 
-    if (!facilityId || !customerName || !startTime || !endTime) {
-      return res.status(400).json({ success: false, error: 'facilityId, customerName, startTime and endTime are required' });
+    if (!facilityId || !startTime || !endTime) {
+      return res.status(400).json({ success: false, error: 'facilityId, startTime and endTime are required' });
+    }
+    const normalizedPhone = normalizePhone(customerPhone);
+    if (!normalizedPhone) {
+      return res.status(400).json({ success: false, error: 'customerPhone is required' });
     }
 
     const facility = await Facility.findById(facilityId);
@@ -252,6 +373,19 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
     }
 
     let bookingDiscountPercentage = 0;
+    const linkedCustomer = await findOrCreateCustomerByPhone({
+      customerId,
+      customerPhone: normalizedPhone,
+      customerName,
+      customerEmail,
+      createdBy: req.userId,
+    });
+    const resolvedCustomerName = String(linkedCustomer?.name || customerName || '').trim();
+    if (!resolvedCustomerName) {
+      return res.status(400).json({ success: false, error: 'customerName is required for new customer' });
+    }
+    const resolvedCustomerEmail = normalizeEmail(linkedCustomer?.email || customerEmail || '');
+
     if (memberSubscriptionId) {
       const subscription = await MemberSubscription.findById(memberSubscriptionId).populate('planId');
       if (!subscription) {
@@ -308,9 +442,10 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
     const booking = await FacilityBooking.create({
       bookingNumber,
       facilityId,
-      customerName,
-      customerPhone,
-      customerEmail,
+      customerId: linkedCustomer?._id,
+      customerName: resolvedCustomerName,
+      customerPhone: normalizedPhone,
+      customerEmail: resolvedCustomerEmail || undefined,
       memberSubscriptionId: memberSubscriptionId || undefined,
       startTime: start,
       endTime: end,

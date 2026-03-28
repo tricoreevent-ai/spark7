@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IFacilityBooking extends Document {
   bookingNumber?: string;
   facilityId: mongoose.Types.ObjectId;
+  customerId?: mongoose.Types.ObjectId;
   customerName: string;
   customerPhone?: string;
   customerEmail?: string;
@@ -46,6 +47,11 @@ const FacilityBookingSchema = new Schema<IFacilityBooking>(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Facility',
       required: true,
+      index: true,
+    },
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Customer',
       index: true,
     },
     customerName: { type: String, required: true, trim: true },

@@ -17,7 +17,7 @@ interface Return {
   _id: string;
   returnNumber: string;
   userId: string;
-  saleId: string;
+  saleId?: string;
   items: ReturnItem[];
   returnReason?: string;
   reason?: string;
@@ -31,10 +31,15 @@ interface Return {
   updatedAt?: string;
 }
 
+const RETURNS_BATCH_SIZE = 30;
+
 const Returns: React.FC = () => {
   const [returns, setReturns] = useState<Return[]>([]);
   const [selectedReturn, setSelectedReturn] = useState<Return | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreReturns, setHasMoreReturns] = useState(false);
+  const [totalReturns, setTotalReturns] = useState(0);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -43,17 +48,24 @@ const Returns: React.FC = () => {
   const API_BASE = APP_CONFIG.apiBaseUrl;
 
   useEffect(() => {
-    fetchReturns();
-    fetchStats();
+    void fetchReturns(true);
+    void fetchStats();
   }, [filterStatus]);
 
-  const fetchReturns = async () => {
+  const fetchReturns = async (reset = false) => {
     const token = localStorage.getItem('token');
-    setLoading(true);
+    const skip = reset ? 0 : returns.length;
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
     try {
-      const url = filterStatus === 'all' 
-        ? `${API_BASE}/api/returns?limit=50`
-        : `${API_BASE}/api/returns?status=${filterStatus}&limit=50`;
+      const params = new URLSearchParams({
+        skip: String(skip),
+        limit: String(RETURNS_BATCH_SIZE),
+      });
+      if (filterStatus !== 'all') {
+        params.set('status', filterStatus);
+      }
+      const url = `${API_BASE}/api/returns?${params.toString()}`;
       
       const response = await fetch(url, {
         headers: {
@@ -62,35 +74,43 @@ const Returns: React.FC = () => {
       });
       const data = await response.json();
       if (data.success && data.data) {
-        setReturns(data.data);
+        const incoming: Return[] = Array.isArray(data.data) ? data.data : [];
+        const total = Number(data?.pagination?.total || incoming.length || 0);
+        setTotalReturns(total);
+        setReturns((prev) => {
+          if (reset) return incoming;
+          const merged = [...prev];
+          const existing = new Set(prev.map((row) => row._id));
+          incoming.forEach((row) => {
+            if (!existing.has(row._id)) {
+              existing.add(row._id);
+              merged.push(row);
+            }
+          });
+          return merged;
+        });
+        setHasMoreReturns(skip + incoming.length < total);
       }
     } catch (err) {
       setError('Failed to load returns');
       console.error(err);
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      else setLoadingMore(false);
     }
   };
 
   const fetchStats = async () => {
     const token = localStorage.getItem('token');
     try {
-      const response = await fetch(`${API_BASE}/api/returns`, {
+      const response = await fetch(`${API_BASE}/api/returns/stats/summary`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
       const data = await response.json();
       if (data.success && data.data) {
-        const returnsList = data.data;
-        const stats = {
-          total: returnsList.length,
-          approved: returnsList.filter((r: Return) => r.returnStatus === 'approved').length,
-          pending: returnsList.filter((r: Return) => r.returnStatus === 'draft').length,
-          rejected: returnsList.filter((r: Return) => r.returnStatus === 'rejected').length,
-          totalRefunded: returnsList.reduce((sum: number, r: Return) => sum + r.refundAmount, 0),
-        };
-        setStats(stats);
+        setStats(data.data);
       }
     } catch (err) {
       console.error('Failed to load stats:', err);
@@ -114,8 +134,8 @@ const Returns: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setError('');
-        fetchReturns();
-        fetchStats();
+        void fetchReturns(true);
+        void fetchStats();
         if (selectedReturn && selectedReturn._id === returnId) {
           setSelectedReturn(null);
         }
@@ -147,8 +167,8 @@ const Returns: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setError('');
-        fetchReturns();
-        fetchStats();
+        void fetchReturns(true);
+        void fetchStats();
         if (selectedReturn && selectedReturn._id === returnId) {
           setSelectedReturn(null);
         }
@@ -175,8 +195,8 @@ const Returns: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setError('');
-        fetchReturns();
-        fetchStats();
+        void fetchReturns(true);
+        void fetchStats();
         if (selectedReturn && selectedReturn._id === returnId) {
           setSelectedReturn(null);
         }
@@ -215,7 +235,7 @@ const Returns: React.FC = () => {
 
   const filteredReturns = returns.filter(r =>
     r.returnNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.saleId.toLowerCase().includes(searchTerm.toLowerCase())
+    (r.saleId || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (selectedReturn) {
@@ -232,17 +252,23 @@ const Returns: React.FC = () => {
 
   const columns: Column<Return>[] = [
     { header: 'Return #', accessor: 'returnNumber', className: 'font-medium text-white' },
-    { header: 'Sale ID', render: (ret) => ret.saleId.substring(0, 8) + '...' },
-    { header: 'Date', render: (ret) => formatDate(ret.createdAt) },
-    { header: 'Items', render: (ret) => ret.items.length },
-    { header: 'Reason', render: (ret) => ret.reason || ret.returnReason || '-' },
+    {
+      header: 'Sale ID',
+      sortValue: (ret) => ret.saleId || '',
+      render: (ret) => (ret.saleId ? `${ret.saleId.substring(0, 8)}...` : '-'),
+    },
+    { header: 'Date', sortValue: (ret) => new Date(ret.createdAt).getTime(), render: (ret) => formatDate(ret.createdAt) },
+    { header: 'Items', sortValue: (ret) => ret.items.length, render: (ret) => ret.items.length },
+    { header: 'Reason', sortValue: (ret) => ret.reason || ret.returnReason || '', render: (ret) => ret.reason || ret.returnReason || '-' },
     { 
       header: 'Refund Amount', 
+      sortValue: (ret) => Number(ret.refundAmount || 0),
       render: (ret) => formatCurrency(ret.refundAmount),
       className: 'text-right font-medium text-white'
     },
     { 
       header: 'Refund Method', 
+      sortValue: (ret) => ret.refundMethod || '',
       render: (ret) => (
         <span className="inline-flex items-center rounded-md bg-blue-400/10 px-2 py-1 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-400/20 capitalize">
           {ret.refundMethod.replace('_', ' ')}
@@ -251,6 +277,7 @@ const Returns: React.FC = () => {
     },
     { 
       header: 'Status', 
+      sortValue: (ret) => ret.returnStatus || '',
       render: (ret) => (
         <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset uppercase ${
           ret.returnStatus === 'approved' ? 'bg-green-400/10 text-green-400 ring-green-400/20' :
@@ -263,6 +290,7 @@ const Returns: React.FC = () => {
     },
     { 
       header: 'Refund Status', 
+      sortValue: (ret) => ret.refundStatus || '',
       render: (ret) => (
         <span className="inline-flex items-center rounded-md bg-gray-400/10 px-2 py-1 text-xs font-medium text-gray-400 ring-1 ring-inset ring-gray-400/20 uppercase">
           {ret.refundStatus}
@@ -272,6 +300,7 @@ const Returns: React.FC = () => {
     {
       header: 'Actions',
       className: 'text-right',
+      sortable: false,
       render: (ret) => (
         <div className="flex justify-end gap-2">
           <button className="text-indigo-400 hover:text-indigo-300" title="View details" onClick={() => setSelectedReturn(ret)}>
@@ -351,7 +380,6 @@ const Returns: React.FC = () => {
             <option value="draft">Pending Approval</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
-            <option value="returned">Returned</option>
           </select>
         </div>
       </div>
@@ -363,7 +391,24 @@ const Returns: React.FC = () => {
           <p>No returns found</p>
         </div>
       ) : (
-        <Table data={filteredReturns} columns={columns} emptyMessage="No returns found" />
+        <>
+          <Table data={filteredReturns} columns={columns} emptyMessage="No returns found" />
+          <div className="mt-3 flex items-center justify-between rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-400">
+            <span>
+              Loaded {returns.length} of {totalReturns || returns.length} returns
+            </span>
+            {hasMoreReturns && (
+              <button
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void fetchReturns(false)}
+                className="rounded border border-white/20 px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? 'Loading...' : 'Load More'}
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -397,7 +442,7 @@ const ReturnDetailsView: React.FC<ReturnDetailsViewProps> = ({ returnData, onClo
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-400">Sale ID</label>
-            <p className="mt-1 text-lg text-white">{returnData.saleId.substring(0, 12)}...</p>
+            <p className="mt-1 text-lg text-white">{returnData.saleId ? `${returnData.saleId.substring(0, 12)}...` : '-'}</p>
           </div>
         </div>
 

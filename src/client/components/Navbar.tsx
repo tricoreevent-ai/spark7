@@ -19,6 +19,7 @@ interface NavbarProps {
   user: Partial<IUser> | null;
   permissions: PermissionMatrix;
   onLogout: () => void;
+  showCompanyCreationMenu?: boolean;
 }
 
 type MenuCategory = 'Home' | 'Sales' | 'Catalog' | 'People' | 'Operations' | 'Admin';
@@ -27,10 +28,18 @@ const menuItems = [
   { key: 'dashboard' as PageKey, name: 'Dashboard', path: '/', category: 'Home' as MenuCategory, icon: '🏠' },
   { key: 'sales-dashboard' as PageKey, name: 'Sales', path: '/sales-dashboard', category: 'Sales' as MenuCategory, icon: '💰' },
   { key: 'orders' as PageKey, name: 'Orders', path: '/orders', category: 'Sales' as MenuCategory, icon: '📄' },
+  { key: 'sales' as PageKey, name: 'Quotations', path: '/sales/quotes', category: 'Sales' as MenuCategory, icon: '🧾' },
   { key: 'returns' as PageKey, name: 'Returns', path: '/returns', category: 'Sales' as MenuCategory, icon: '↩️' },
   { key: 'reports' as PageKey, name: 'Reports', path: '/reports', category: 'Sales' as MenuCategory, icon: '📈' },
   { key: 'sales' as PageKey, name: 'Customers', path: '/customers', category: 'Sales' as MenuCategory, icon: '🧑' },
+  { key: 'sales' as PageKey, name: 'Product Entry', path: '/products/entry', category: 'Sales' as MenuCategory, icon: '➕' },
+  { key: 'sales' as PageKey, name: 'Product Catalog', path: '/products/catalog', category: 'Sales' as MenuCategory, icon: '📦' },
+  { key: 'sales' as PageKey, name: 'Stock Alerts', path: '/products/alerts', category: 'Sales' as MenuCategory, icon: '🚨' },
   { key: 'products' as PageKey, name: 'Products', path: '/products', category: 'Catalog' as MenuCategory, icon: '📦' },
+  { key: 'products' as PageKey, name: 'Product Entry', path: '/products/entry', category: 'Catalog' as MenuCategory, icon: '➕' },
+  { key: 'products' as PageKey, name: 'Product Catalog', path: '/products/catalog', category: 'Catalog' as MenuCategory, icon: '🗃️' },
+  { key: 'products' as PageKey, name: 'Stock Alerts', path: '/products/alerts', category: 'Catalog' as MenuCategory, icon: '🚨' },
+  { key: 'inventory' as PageKey, name: 'Procurement', path: '/inventory/procurement', category: 'Catalog' as MenuCategory, icon: '🚚' },
   { key: 'categories' as PageKey, name: 'Categories', path: '/categories', category: 'Catalog' as MenuCategory, icon: '🗂️' },
   { key: 'employees' as PageKey, name: 'Employees', path: '/employees', category: 'People' as MenuCategory, icon: '👥' },
   { key: 'attendance' as PageKey, name: 'Attendance', path: '/attendance', category: 'People' as MenuCategory, icon: '🕒' },
@@ -45,6 +54,7 @@ const menuItems = [
   { key: 'memberships' as PageKey, name: 'Membership Reports', path: '/membership-reports', category: 'Operations' as MenuCategory, icon: '📊' },
   { key: 'settings' as PageKey, name: 'Settings', path: '/settings', category: 'Admin' as MenuCategory, icon: '⚙️' },
   { key: 'accounting' as PageKey, name: 'Accounting', path: '/accounting', category: 'Admin' as MenuCategory, icon: '📚' },
+  { key: 'accounting' as PageKey, name: 'Settlements', path: '/accounting/settlements', category: 'Admin' as MenuCategory, icon: '💳' },
   { key: 'user-management' as PageKey, name: 'Users', path: '/user-management', category: 'Admin' as MenuCategory, icon: '🛡️' },
 ];
 
@@ -53,7 +63,7 @@ const pathMatches = (currentPath: string, itemPath: string): boolean => {
   return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
 };
 
-export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) => {
+export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, showCompanyCreationMenu = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
@@ -62,7 +72,19 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
   const [brandLogo, setBrandLogo] = useState('');
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const uiPreferencesRef = useRef<ResolvedUiPreferences>(uiPreferences);
-  const allowedMenuItems = menuItems.filter((item) => permissions[item.key]);
+  const allowedMenuItems = useMemo(() => {
+    const base = menuItems.filter((item) => permissions[item.key]);
+    if (showCompanyCreationMenu && permissions.settings) {
+      base.push({
+        key: 'settings' as PageKey,
+        name: 'Company Create',
+        path: '/admin/company-create',
+        category: 'Admin' as MenuCategory,
+        icon: '🏢',
+      });
+    }
+    return base;
+  }, [permissions, showCompanyCreationMenu]);
   const themeMode = uiPreferences.themeMode;
   const fontScale = uiPreferences.fontScale;
 
@@ -363,9 +385,18 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout }) =
                 key={group.category}
                 className={`rounded-lg border border-white/10 bg-gradient-to-r ${categoryStyles[group.category].panel} p-2`}
               >
-                <div className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${categoryStyles[group.category].label}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (group.category === 'Home') {
+                      navigate('/');
+                      setIsOpen(false);
+                    }
+                  }}
+                  className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${categoryStyles[group.category].label}`}
+                >
                   {group.category}
-                </div>
+                </button>
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {group.items.map((item) => (
                     <NavLink

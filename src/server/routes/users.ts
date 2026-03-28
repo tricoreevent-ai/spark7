@@ -8,6 +8,7 @@ const router = Router();
 
 const sanitizeUser = (user: any) => ({
   _id: user._id.toString(),
+  tenantId: user.tenantId,
   email: user.email,
   firstName: user.firstName,
   lastName: user.lastName,
@@ -63,6 +64,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const user = await User.create({
+      tenantId: req.tenantId,
       email: String(email).toLowerCase().trim(),
       password: await hashPassword(String(password)),
       firstName: String(firstName).trim(),

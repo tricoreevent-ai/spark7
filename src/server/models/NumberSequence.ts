@@ -11,7 +11,6 @@ const NumberSequenceSchema = new Schema<INumberSequenceDocument>(
     key: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       lowercase: true,
     },
@@ -25,5 +24,7 @@ const NumberSequenceSchema = new Schema<INumberSequenceDocument>(
   { timestamps: true }
 );
 
-export const NumberSequence = mongoose.model<INumberSequenceDocument>('NumberSequence', NumberSequenceSchema);
+// sequence key must be unique only within a tenant.
+NumberSequenceSchema.index({ tenantId: 1, key: 1 }, { unique: true });
 
+export const NumberSequence = mongoose.model<INumberSequenceDocument>('NumberSequence', NumberSequenceSchema);

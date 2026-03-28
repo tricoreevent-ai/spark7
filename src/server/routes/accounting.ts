@@ -38,6 +38,11 @@ const toDateRange = (startDate?: string, endDate?: string) => {
 };
 
 const round2 = (value: number) => Number(Number(value || 0).toFixed(2));
+const postedSaleMatch = {
+  saleStatus: { $in: ['completed', 'returned'] },
+  $or: [{ invoiceStatus: 'posted' }, { invoiceStatus: null }, { invoiceStatus: { $exists: false } }],
+};
+const approvedReturnMatch = { returnStatus: 'approved' };
 
 const aggregateSum = async (
   model: any,
@@ -738,9 +743,13 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
     const bankAccount = await getCoreAccount('bank');
     const stockAccount = await getCoreAccount('stock');
 
-    await postOpening(cashAccount, cash.amount, cash.side, 'Opening balance - Cash');
-    await postOpening(bankAccount, bank.amount, bank.side, 'Opening balance - Bank');
-    await postOpening(stockAccount, stock.amount, stock.side, 'Opening balance - Stock');
+    const cashSide: 'debit' | 'credit' = String(cash.side).toLowerCase() === 'credit' ? 'credit' : 'debit';
+    const bankSide: 'debit' | 'credit' = String(bank.side).toLowerCase() === 'credit' ? 'credit' : 'debit';
+    const stockSide: 'debit' | 'credit' = String(stock.side).toLowerCase() === 'credit' ? 'credit' : 'debit';
+
+    await postOpening(cashAccount, cash.amount, cashSide, 'Opening balance - Cash');
+    await postOpening(bankAccount, bank.amount, bankSide, 'Opening balance - Bank');
+    await postOpening(stockAccount, stock.amount, stockSide, 'Opening balance - Stock');
 
     const customerAccounts = Array.isArray(req.body.customerAccounts) ? req.body.customerAccounts : [];
     const supplierAccounts = Array.isArray(req.body.supplierAccounts) ? req.body.supplierAccounts : [];
@@ -1197,8 +1206,8 @@ router.post('/books/bank/reconcile', authMiddleware, async (req: AuthenticatedRe
 const computeNetUntil = async (end: Date) => {
   const fromStart = new Date('1970-01-01T00:00:00.000Z');
 
-  const sales = await aggregateSum(Sale, 'totalAmount', 'createdAt', fromStart, end, { saleStatus: 'completed' });
-  const returns = await aggregateSum(Return, 'refundAmount', 'createdAt', fromStart, end);
+  const sales = await aggregateSum(Sale, 'totalAmount', 'createdAt', fromStart, end, postedSaleMatch);
+  const returns = await aggregateSum(Return, 'refundAmount', 'createdAt', fromStart, end, approvedReturnMatch);
   const creditRefunds = await CreditNote.aggregate([
     { $unwind: '$entries' },
     {
@@ -1228,8 +1237,8 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   const bankAccount = await getCoreAccount('bank');
 
   const [sales, returns, salaries, contracts, daybookRows, receiptRows, transferRows] = await Promise.all([
-    Sale.find({ createdAt: { $gte: start, $lte: end }, saleStatus: 'completed', invoiceStatus: 'posted' }).sort({ createdAt: 1 }),
-    Return.find({ createdAt: { $gte: start, $lte: end }, returnStatus: { $ne: 'rejected' } }).sort({ createdAt: 1 }),
+    Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: 1 }),
+    Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: 1 }),
     SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: 1 }),
     ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: 1 }),
     DayBookEntry.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
@@ -1371,8 +1380,8 @@ router.get('/day-book', authMiddleware, async (req: AuthenticatedRequest, res: R
     end.setHours(23, 59, 59, 999);
 
     const [sales, returns, salaries, contracts, manualEntries, creditNotes] = await Promise.all([
-      Sale.find({ createdAt: { $gte: start, $lte: end }, saleStatus: 'completed' }).sort({ createdAt: 1 }),
-      Return.find({ createdAt: { $gte: start, $lte: end } }).sort({ createdAt: 1 }),
+      Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: 1 }),
+      Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: 1 }),
       SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: 1 }),
       ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: 1 }),
       DayBookEntry.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
@@ -1473,7 +1482,7 @@ router.get('/reports/expense', authMiddleware, async (req: AuthenticatedRequest,
       DayBookEntry.find({ entryType: 'expense', entryDate: { $gte: start, $lte: end } }).sort({ entryDate: -1 }),
       SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: -1 }),
       ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: -1 }),
-      Return.find({ createdAt: { $gte: start, $lte: end }, returnStatus: { $ne: 'rejected' } }).sort({ createdAt: -1 }),
+      Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: -1 }),
     ]);
 
     const rows: Array<Record<string, any>> = [];
@@ -1552,7 +1561,7 @@ router.get('/reports/income', authMiddleware, async (req: AuthenticatedRequest, 
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
 
     const [salesRows, incomeRows] = await Promise.all([
-      Sale.find({ createdAt: { $gte: start, $lte: end }, saleStatus: 'completed', invoiceStatus: 'posted' }).sort({ createdAt: -1 }),
+      Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: -1 }),
       DayBookEntry.find({ entryType: 'income', entryDate: { $gte: start, $lte: end } }).sort({ entryDate: -1 }),
     ]);
 
@@ -1650,13 +1659,12 @@ router.get('/reports/profit-loss', authMiddleware, async (req: AuthenticatedRequ
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
 
     const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, {
-      saleStatus: 'completed',
-      invoiceStatus: 'posted',
+      ...postedSaleMatch,
     });
     const nonSalesIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income' });
     const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
     const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, { status: { $in: ['paid', 'partial'] } });
-    const returnExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end);
+    const returnExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
     const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense' });
 
     const totalIncome = round2(salesIncome + nonSalesIncome);
@@ -1755,14 +1763,14 @@ router.get('/reports/summary', authMiddleware, async (req: AuthenticatedRequest,
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
 
-    const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, { saleStatus: 'completed' });
+    const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, postedSaleMatch);
     const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income' });
 
     const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
     const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, {
       status: { $in: ['paid', 'partial'] },
     });
-    const returnsExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end);
+    const returnsExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
     const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense' });
     const [creditIssuedRows, creditBalanceRows, creditAdjustRows, creditRefundRows] = await Promise.all([
       CreditNote.aggregate([

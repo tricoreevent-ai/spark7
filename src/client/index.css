@@ -12,8 +12,165 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
 
+body.sarva-theme-dark {
+  color-scheme: dark;
+}
+
+body.sarva-theme-light {
+  color-scheme: light;
+  background: linear-gradient(180deg, #f7fafc 0%, #edf2ff 100%);
+  color: #0f172a;
+}
+
+body.sarva-theme-light .bg-gray-900\/90,
+body.sarva-theme-light .bg-gray-900 {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+}
+
+body.sarva-theme-light .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+
+body.sarva-theme-light .bg-black\/10,
+body.sarva-theme-light .bg-black\/20,
+body.sarva-theme-light .bg-black\/60 {
+  background-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+body.sarva-theme-light .border-white\/5,
+body.sarva-theme-light .border-white\/10,
+body.sarva-theme-light .border-white\/15,
+body.sarva-theme-light .border-white\/20 {
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+body.sarva-theme-light .text-white {
+  color: #0f172a !important;
+}
+
+body.sarva-theme-light .text-gray-200 {
+  color: #1e293b !important;
+}
+
+body.sarva-theme-light .text-gray-300 {
+  color: #334155 !important;
+}
+
+body.sarva-theme-light .text-gray-400,
+body.sarva-theme-light .text-gray-500 {
+  color: #475569 !important;
+}
+
+body.sarva-theme-light .placeholder-gray-500::placeholder {
+  color: #64748b !important;
+}
+
+body.sarva-theme-light .shadow-xl,
+body.sarva-theme-light .shadow-\[0_12px_28px_rgba\(2\,6\,23\,0\.35\)\],
+body.sarva-theme-light .shadow-\[0_16px_30px_rgba\(2\,6\,23\,0\.35\)\] {
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.15) !important;
+}
+
+body.sarva-theme-light .from-indigo-500\/20,
+body.sarva-theme-light .via-cyan-500\/10,
+body.sarva-theme-light .to-transparent {
+  filter: saturate(0.85);
+}
+
 #root {
   min-height: 100vh;
+}
+
+/* Full-width shell and responsive behavior for all in-app pages */
+.sarva-shell .mx-auto.max-w-7xl {
+  max-width: none;
+  width: 100%;
+}
+
+.sarva-shell .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+.sarva-shell table {
+  width: 100%;
+}
+
+/* Dashboard visual direction */
+.sarva-dashboard {
+  position: relative;
+}
+
+.sarva-dashboard-hero::after {
+  content: '';
+  position: absolute;
+  inset: -30% -10% auto auto;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle at center, rgba(56, 189, 248, 0.28), rgba(99, 102, 241, 0));
+  filter: blur(16px);
+  animation: sarva-orb-float 9s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.sarva-animate-rise {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: sarva-rise-in 560ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes sarva-rise-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sarva-orb-float {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-18px, 14px, 0) scale(1.06);
+  }
+}
+
+@media (max-width: 640px) {
+  .sarva-shell .rounded-xl,
+  .sarva-shell .rounded-2xl {
+    border-radius: 0.9rem;
+  }
+
+  .sarva-shell .text-3xl {
+    font-size: 1.65rem;
+    line-height: 2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sarva-animate-rise {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+
+  .sarva-dashboard-hero::after {
+    animation: none;
+  }
+}
+
+/* Hard unlock mode for login screen to prevent stale overlays from blocking input. */
+html.sarva-login-unlocked,
+body.sarva-login-unlocked,
+body.sarva-login-unlocked #root {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+body.sarva-login-unlocked .swal2-container,
+body.sarva-login-unlocked .modal-backdrop {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 /* Keep native select dropdown/options dark in Windows browsers */
@@ -62,4 +219,34 @@ select optgroup {
 
 .swal2-confirm.pos-alert-btn:hover {
   filter: brightness(1.08);
+}
+
+a,
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.sarva-product-added {
+  animation: sarva-product-added 0.38s ease-out;
+}
+
+@keyframes sarva-product-added {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0);
+  }
+  40% {
+    transform: scale(1.018);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.14);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0);
+  }
 }

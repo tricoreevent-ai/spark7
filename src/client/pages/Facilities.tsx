@@ -16,8 +16,10 @@ interface Booking {
   _id: string;
   bookingNumber?: string;
   facilityId: Facility;
+  customerId?: string;
   customerName: string;
   customerPhone?: string;
+  customerEmail?: string;
   startTime: string;
   endTime: string;
   status: 'pending' | 'confirmed' | 'booked' | 'completed' | 'cancelled';
@@ -27,6 +29,20 @@ interface Booking {
   totalAmount?: number;
   paidAmount?: number;
   balanceAmount?: number;
+}
+
+interface CustomerOption {
+  _id: string;
+  customerCode?: string;
+  memberCode?: string;
+  memberSubscriptionId?: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  accountType?: 'cash' | 'credit';
+  isBlocked?: boolean;
+  memberStatus?: string;
+  source?: 'customer' | 'member';
 }
 
 const getTodayLocalDate = (): string => {
@@ -84,6 +100,8 @@ const facilityCapacity = (facility?: Partial<Facility> | null): number => {
   return configured > 0 ? Math.floor(configured) : 1;
 };
 
+const normalizePhone = (value: string): string => String(value || '').replace(/\D+/g, '').slice(-10);
+
 const hourSlots = (): string[] => {
   const slots: string[] = [];
   for (let hour = 6; hour <= 22; hour += 1) {
@@ -103,8 +121,10 @@ export const Facilities: React.FC = () => {
 
   const [bookingForm, setBookingForm] = useState({
     facilityId: '',
-    customerName: '',
+    customerId: '',
     customerPhone: '',
+    customerName: '',
+    customerEmail: '',
     bookingDate: getTodayLocalDate(),
     startTime: '09:00',
     endTime: '10:00',
@@ -113,6 +133,9 @@ export const Facilities: React.FC = () => {
     amount: '',
     notes: '',
   });
+  const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
+  const [searchingCustomer, setSearchingCustomer] = useState(false);
+  const [showCustomerDialog, setShowCustomerDialog] = useState(false);
 
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');
@@ -249,6 +272,50 @@ export const Facilities: React.FC = () => {
     setBookingForm((prev) => ({ ...prev, bookingDate: date }));
   }, [date]);
 
+  useEffect(() => {
+    const phone = normalizePhone(bookingForm.customerPhone);
+    if (phone.length < 4) {
+      setCustomerMatches([]);
+      setShowCustomerDialog(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        setSearchingCustomer(true);
+        try {
+          const data = await fetchApiJson(
+            apiUrl(`/api/customers/search-unified?q=${encodeURIComponent(phone)}`),
+            { headers }
+          );
+          const rows = Array.isArray(data?.data) ? data.data : [];
+          setCustomerMatches(rows);
+          if (rows.length > 0 && !bookingForm.customerId) {
+            setShowCustomerDialog(true);
+          }
+        } catch {
+          setCustomerMatches([]);
+        } finally {
+          setSearchingCustomer(false);
+        }
+      })();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [bookingForm.customerId, bookingForm.customerPhone, headers]);
+
+  const selectCustomerOption = (customer: CustomerOption) => {
+    setBookingForm((prev) => ({
+      ...prev,
+      customerId: customer.source === 'customer' ? customer._id : '',
+      customerPhone: customer.phone || prev.customerPhone,
+      customerName: customer.name || prev.customerName,
+      customerEmail: customer.email || prev.customerEmail,
+    }));
+    setCustomerMatches([]);
+    setShowCustomerDialog(false);
+  };
+
   const createBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -256,6 +323,15 @@ export const Facilities: React.FC = () => {
 
     if (!bookingForm.facilityId) {
       setError('Select a facility');
+      return;
+    }
+    const normalizedPhone = normalizePhone(bookingForm.customerPhone);
+    if (!normalizedPhone) {
+      setError('Customer phone is required');
+      return;
+    }
+    if (!bookingForm.customerId && !bookingForm.customerName.trim()) {
+      setError('Customer name is required for new customer');
       return;
     }
 
@@ -284,8 +360,10 @@ export const Facilities: React.FC = () => {
         headers,
         body: JSON.stringify({
           facilityId: bookingForm.facilityId,
+          customerId: bookingForm.customerId || undefined,
           customerName: bookingForm.customerName,
-          customerPhone: bookingForm.customerPhone,
+          customerPhone: normalizedPhone,
+          customerEmail: bookingForm.customerEmail,
           startTime: start.toISOString(),
           endTime: end.toISOString(),
           bookedUnits: requestedBookedUnits,
@@ -298,14 +376,18 @@ export const Facilities: React.FC = () => {
       setMessage('Booking created successfully');
       setBookingForm((prev) => ({
         ...prev,
-        customerName: '',
+        customerId: '',
         customerPhone: '',
+        customerName: '',
+        customerEmail: '',
         startTime: '09:00',
         endTime: '10:00',
         bookedUnits: '1',
         amount: '',
         notes: '',
       }));
+      setCustomerMatches([]);
+      setShowCustomerDialog(false);
       await loadData();
     } catch (e: any) {
       setError(e.message || 'Failed to create booking');
@@ -404,22 +486,55 @@ export const Facilities: React.FC = () => {
               />
             </div>
             <div>
+              <label className="mb-1 block text-xs text-gray-400">Customer Phone (required)</label>
+              <input
+                className={inputClass}
+                placeholder="Enter mobile first"
+                value={bookingForm.customerPhone}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setBookingForm((prev) => ({
+                    ...prev,
+                    customerPhone: value,
+                    customerId: normalizePhone(value) === normalizePhone(prev.customerPhone) ? prev.customerId : '',
+                  }));
+                  setShowCustomerDialog(false);
+                }}
+              />
+              {searchingCustomer && <p className="mt-1 text-[11px] text-gray-400">Searching customers...</p>}
+              {!searchingCustomer && customerMatches.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowCustomerDialog(true)}
+                  className="mt-1 rounded border border-indigo-400/40 bg-indigo-500/10 px-2 py-1 text-[11px] text-indigo-200"
+                >
+                  Found {customerMatches.length} existing match(es). Click to select.
+                </button>
+              )}
+              {!searchingCustomer && normalizePhone(bookingForm.customerPhone).length >= 10 && customerMatches.length === 0 && !bookingForm.customerId && !bookingForm.customerName.trim() && (
+                <p className="mt-1 text-[11px] text-amber-300">No customer found. Enter name to create a new customer.</p>
+              )}
+              {!!bookingForm.customerId && (
+                <p className="mt-1 text-[11px] text-emerald-300">Existing customer selected from database</p>
+              )}
+            </div>
+            <div>
               <label className="mb-1 block text-xs text-gray-400">Customer Name</label>
               <input
                 className={inputClass}
                 placeholder="Customer Name"
-                required
                 value={bookingForm.customerName}
                 onChange={(e) => setBookingForm((prev) => ({ ...prev, customerName: e.target.value }))}
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-400">Customer Phone</label>
+              <label className="mb-1 block text-xs text-gray-400">Customer Email</label>
               <input
                 className={inputClass}
-                placeholder="Customer Phone"
-                value={bookingForm.customerPhone}
-                onChange={(e) => setBookingForm((prev) => ({ ...prev, customerPhone: e.target.value }))}
+                type="email"
+                placeholder="Customer Email (optional)"
+                value={bookingForm.customerEmail}
+                onChange={(e) => setBookingForm((prev) => ({ ...prev, customerEmail: e.target.value }))}
               />
             </div>
             <div>
@@ -594,6 +709,7 @@ export const Facilities: React.FC = () => {
                                   }`}
                                 >
                                   <p className="font-semibold">{booking.customerName}</p>
+                                  {booking.customerPhone && <p>{booking.customerPhone}</p>}
                                   {maxUnits > 1 && (
                                     <p>{Math.max(1, Number(booking.bookedUnits || 1))} court(s)</p>
                                   )}
@@ -638,7 +754,10 @@ export const Facilities: React.FC = () => {
               {bookings.map((booking) => (
                 <tr key={booking._id}>
                   <td className="px-2 py-2 text-sm text-white">{booking.facilityId?.name || '-'}</td>
-                  <td className="px-2 py-2 text-sm text-gray-300">{booking.customerName}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">
+                    <p>{booking.customerName}</p>
+                    {booking.customerPhone && <p className="text-xs text-gray-500">{booking.customerPhone}</p>}
+                  </td>
                   <td className="px-2 py-2 text-sm text-gray-300">{toDisplayTime(booking.startTime)} - {toDisplayTime(booking.endTime)}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{Math.max(1, Number(booking.bookedUnits || 1))}</td>
                   <td className="px-2 py-2 text-sm text-white">{formatCurrency(Number(booking.amount || 0))}</td>
@@ -666,6 +785,52 @@ export const Facilities: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {showCustomerDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-xl rounded-xl border border-white/10 bg-gray-900 p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Select Customer</h3>
+              <button
+                type="button"
+                onClick={() => setShowCustomerDialog(false)}
+                className="rounded bg-white/10 px-2 py-1 text-xs text-gray-200 hover:bg-white/20"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-gray-400">Choose existing customer/member for this mobile, or continue as new customer.</p>
+            <div className="max-h-72 space-y-1 overflow-y-auto rounded border border-white/10 bg-black/30 p-2">
+              {customerMatches.map((customer) => (
+                <button
+                  type="button"
+                  key={customer._id}
+                  onClick={() => selectCustomerOption(customer)}
+                  className="block w-full rounded border border-white/10 px-2 py-2 text-left text-xs text-gray-200 hover:bg-white/10"
+                >
+                  <p className="font-semibold text-white">{customer.name || '-'}</p>
+                  <p>{customer.phone || '-'} {customer.email ? `| ${customer.email}` : ''}</p>
+                  <p className="text-[10px] text-indigo-200">
+                    {customer.source === 'member'
+                      ? `Member ${customer.memberCode ? `(${customer.memberCode})` : ''}`
+                      : `Customer ${customer.customerCode ? `(${customer.customerCode})` : ''}`}
+                  </p>
+                </button>
+              ))}
+              {!customerMatches.length && <p className="text-xs text-gray-400">No matches found.</p>}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCustomerDialog(false)}
+                className="rounded bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/30"
+              >
+                Continue As New Customer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

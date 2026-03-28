@@ -92,7 +92,7 @@ router.get('/database-backup', async (req: AuthenticatedRequest, res: Response) 
       },
     });
 
-    const content = EJSON.stringify(backupPayload, null, 2, { relaxed: false });
+    const content = EJSON.stringify(backupPayload, undefined, 2, { relaxed: false });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="sarva-backup-${stamp}.json"`);

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { Category } from '../models/Category';
-import { Product } from '../models/Product';
+import { Category } from './models/Category';
+import { Product } from './models/Product';
 
 dotenv.config({ path: './.env' });
 

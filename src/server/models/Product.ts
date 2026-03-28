@@ -3,6 +3,15 @@ import { IProduct } from '@shared/types';
 
 type IProductDocument = IProduct & Document;
 
+const PriceTierSchema = new Schema(
+  {
+    tierName: { type: String, trim: true, default: '' },
+    minQuantity: { type: Number, min: 1, default: 1 },
+    unitPrice: { type: Number, min: 0, required: true },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema<IProductDocument>(
   {
     name: {
@@ -15,10 +24,29 @@ const productSchema = new Schema<IProductDocument>(
       unique: true,
       uppercase: true,
     },
+    barcode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      sparse: true,
+      unique: true,
+      index: true,
+    },
     description: String,
     category: {
       type: String,
       required: true,
+    },
+    subcategory: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    itemType: {
+      type: String,
+      enum: ['inventory', 'service', 'non_inventory'],
+      default: 'inventory',
+      index: true,
     },
     price: {
       type: Number,
@@ -29,6 +57,23 @@ const productSchema = new Schema<IProductDocument>(
       type: Number,
       min: 0,
       default: 0,
+    },
+    promotionalPrice: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    promotionStartDate: {
+      type: Date,
+      default: undefined,
+    },
+    promotionEndDate: {
+      type: Date,
+      default: undefined,
+    },
+    priceTiers: {
+      type: [PriceTierSchema],
+      default: [],
     },
     cost: {
       type: Number,
@@ -76,16 +121,43 @@ const productSchema = new Schema<IProductDocument>(
       type: Boolean,
       default: false,
     },
+    serialNumberTracking: {
+      type: Boolean,
+      default: false,
+    },
+    variantSize: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    variantColor: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     minStock: {
       type: Number,
       default: 10,
     },
+    autoReorder: {
+      type: Boolean,
+      default: false,
+    },
+    reorderQuantity: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     unit: {
       type: String,
-      enum: ['piece', 'kg', 'liter', 'meter'],
+      enum: ['piece', 'pcs', 'kg', 'gram', 'liter', 'ml', 'meter', 'box', 'pack', 'dozen'],
       default: 'piece',
     },
-    imageUrl: String,
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     isActive: {
       type: Boolean,
       default: true,

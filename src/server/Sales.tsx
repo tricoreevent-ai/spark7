@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './Sales.css';
-import { formatCurrency } from '../config';
+import { formatCurrency } from '../shared/utils';
 import { IProduct } from '@shared/types';
 
 interface CartItem extends IProduct {

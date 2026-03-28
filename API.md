@@ -2,7 +2,7 @@
 
 ## Base URL
 - Development: `http://localhost:3000/api`
-- Production: `https://api.posopenai.com/api`
+- Production: `https://api.sarva.com/api`
 
 ## Authentication
 Most endpoints require authentication via Bearer token in Authorization header:

@@ -5,11 +5,15 @@ import { IInventory } from '@shared/types';
 interface IInventoryDocument extends Document {
   productId: mongoose.Types.ObjectId | string;
   warehouseLocation?: string;
+  storeLocation?: string;
+  rackLocation?: string;
+  shelfLocation?: string;
   quantity: number;
   reservedQuantity: number;
   lastRestockDate?: Date;
   expiryDate?: Date;
   batchNumber?: string;
+  adjustmentReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -23,6 +27,9 @@ const inventorySchema = new Schema<IInventoryDocument>(
       unique: true,
     },
     warehouseLocation: String,
+    storeLocation: String,
+    rackLocation: String,
+    shelfLocation: String,
     quantity: {
       type: Number,
       required: true,
@@ -37,6 +44,7 @@ const inventorySchema = new Schema<IInventoryDocument>(
     lastRestockDate: Date,
     expiryDate: Date,
     batchNumber: String,
+    adjustmentReason: String,
   },
   { timestamps: true }
 );

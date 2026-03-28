@@ -1,21 +1,26 @@
 import React, { useState } from 'react';
 import { useCategories } from '../hooks/useCategories';
 import { Table, Column } from '../components/Table';
+import { apiUrl, fetchApiJson } from '../utils/api';
 
 export const Categories: React.FC = () => {
   const { categories, loading, error, refetch } = useCategories();
   const [newCategory, setNewCategory] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
+  const [actionError, setActionError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategory.trim()) return;
 
     setSubmitting(true);
+    setActionError('');
+    setMessage('');
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:3000/api/categories', {
+      await fetchApiJson(apiUrl('/api/categories'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -23,16 +28,12 @@ export const Categories: React.FC = () => {
         },
         body: JSON.stringify({ name: newCategory, description })
       });
-
-      if (response.ok) {
-        setNewCategory('');
-        setDescription('');
-        refetch();
-      } else {
-        alert('Failed to create category');
-      }
+      setNewCategory('');
+      setDescription('');
+      setMessage('Category saved successfully.');
+      refetch();
     } catch (err) {
-      console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Failed to create category');
     } finally {
       setSubmitting(false);
     }
@@ -43,13 +44,16 @@ export const Categories: React.FC = () => {
     
     try {
       const token = localStorage.getItem('token');
-      await fetch(`http://localhost:3000/api/categories/${id}`, {
+      setActionError('');
+      setMessage('');
+      await fetchApiJson(apiUrl(`/api/categories/${id}`), {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      setMessage('Category deleted successfully.');
       refetch();
     } catch (err) {
-      console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Failed to delete category');
     }
   };
 
@@ -58,10 +62,11 @@ export const Categories: React.FC = () => {
 
   const columns: Column<typeof categories[0]>[] = [
     { header: 'Name', accessor: 'name', className: 'font-medium text-white' },
-    { header: 'Description', render: (cat) => cat.description || '-' },
+    { header: 'Description', sortValue: (cat) => cat.description || '', render: (cat) => cat.description || '-' },
     {
       header: 'Actions',
       className: 'text-right',
+      sortable: false,
       render: (cat) => (
         <button onClick={() => handleDelete(cat._id)} className="font-medium text-red-400 hover:text-red-300">
           Delete
@@ -73,6 +78,8 @@ export const Categories: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight mb-8">Categories</h1>
+      {message && <div className="mb-4 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
+      {actionError && <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{actionError}</div>}
       
       <div className="mb-8 rounded-lg bg-white/5 p-6 shadow border border-white/10">
         <h2 className="text-lg font-medium leading-6 text-white mb-4">Add New Category</h2>

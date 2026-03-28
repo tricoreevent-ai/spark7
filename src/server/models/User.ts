@@ -8,6 +8,11 @@ interface IUserDocument extends Document, Omit<IUser, '_id'> {
 
 const userSchema = new Schema<IUserDocument>(
   {
+    tenantId: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     email: {
       type: String,
       required: true,
@@ -51,12 +56,25 @@ const userSchema = new Schema<IUserDocument>(
       zipCode: String,
       country: { type: String, default: 'India' },
     },
+    uiPreferences: {
+      themeMode: {
+        type: String,
+        enum: ['dark', 'light'],
+        default: 'dark',
+      },
+      fontScale: {
+        type: Number,
+        default: 1,
+        min: 0.9,
+        max: 1.25,
+      },
+    },
     isActive: {
       type: Boolean,
       default: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true, tenantUniqueRewrite: false } as any
 );
 
 export const User = mongoose.model<IUserDocument>('User', userSchema);

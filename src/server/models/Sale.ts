@@ -4,6 +4,7 @@ export interface ISaleItem {
   productId: string;
   productName: string;
   sku?: string;
+  itemType?: 'inventory' | 'service' | 'non_inventory';
   hsnCode?: string;
   batchNo?: string;
   expiryDate?: Date | string;
@@ -112,6 +113,7 @@ const SaleSchema = new Schema<ISale>(
         productId: String,
         productName: String,
         sku: String,
+        itemType: { type: String, enum: ['inventory', 'service', 'non_inventory'], default: 'inventory' },
         hsnCode: String,
         batchNo: String,
         expiryDate: Date,

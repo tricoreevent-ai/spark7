@@ -179,6 +179,7 @@ export const Orders: React.FC = () => {
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [printingSaleId, setPrintingSaleId] = useState('');
+  const [postingDraftId, setPostingDraftId] = useState('');
   const [editError, setEditError] = useState('');
   const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
@@ -641,6 +642,24 @@ export const Orders: React.FC = () => {
     setReturnRow(row);
   };
 
+  const postDraftInvoice = async (row: HistoryRow) => {
+    if (row.source !== 'sales' || row.invoiceStatus !== 'draft') return;
+    setPostingDraftId(row._id);
+    try {
+      const response = await fetchApiJson(apiUrl(`/api/sales/${row._id}/post`), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      await fetchHistory(historyPage, historyQuery);
+      setSuccessMessage(response?.message || 'Draft posted successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to post draft invoice');
+    } finally {
+      setPostingDraftId('');
+    }
+  };
+
   const closeReturnModal = (created?: boolean) => {
     setReturnRow(null);
     if (created) {
@@ -767,6 +786,7 @@ export const Orders: React.FC = () => {
         <div className="space-y-1">
           <div className="capitalize">{row.paymentMethod}</div>
           {row.invoiceType && <div className="text-xs text-blue-300 uppercase">{row.invoiceType}</div>}
+          {row.invoiceStatus && <div className="text-[11px] text-gray-500 uppercase">Invoice: {row.invoiceStatus}</div>}
           <div className="text-xs text-gray-400 capitalize">{row.paymentStatus}</div>
           {row.invoiceType === 'credit' && (
             <div className="text-xs text-amber-300">Outstanding: {formatCurrency(Number(row.outstandingAmount || 0))}</div>
@@ -811,6 +831,16 @@ export const Orders: React.FC = () => {
             >
               {printingSaleId === row._id ? 'Printing...' : 'Print'}
             </button>
+            {row.invoiceStatus === 'draft' && (
+              <button
+                type="button"
+                disabled={postingDraftId === row._id}
+                className="rounded-md bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void postDraftInvoice(row)}
+              >
+                {postingDraftId === row._id ? 'Posting...' : 'Post Draft'}
+              </button>
+            )}
             <button
               type="button"
               disabled={!canCreateReturn}

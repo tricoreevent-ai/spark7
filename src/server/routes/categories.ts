@@ -24,6 +24,12 @@ router.post('/', authenticate, async (req, res) => {
     });
     
     if (existingCategory) {
+      if (!existingCategory.isActive) {
+        existingCategory.isActive = true;
+        existingCategory.description = description;
+        await existingCategory.save();
+        return res.status(200).json(existingCategory);
+      }
       return res.status(400).json({ error: 'Category already exists' });
     }
 
@@ -32,6 +38,21 @@ router.post('/', authenticate, async (req, res) => {
     res.status(201).json(category);
   } catch (error) {
     res.status(500).json({ error: 'Error creating category' });
+  }
+});
+
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const category = await Category.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    category.isActive = false;
+    await category.save();
+    res.json({ success: true, message: 'Category deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting category' });
   }
 });
 

@@ -1,3 +1,5 @@
+import { apiUrl, fetchApiJson } from './api';
+
 export type PrintProfile = 'a4' | 'thermal80' | 'thermal58';
 
 export interface BusinessSettings {
@@ -38,13 +40,27 @@ export interface PrintingSettings {
   showPrintPreviewHint: boolean;
 }
 
+export interface MailSettings {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFromEmail: string;
+  smtpToRecipients: string;
+  smtpSecure: boolean;
+  appName: string;
+}
+
 export interface GeneralSettings {
   business: BusinessSettings;
   invoice: InvoiceSettings;
   printing: PrintingSettings;
+  mail: MailSettings;
 }
 
 export const GENERAL_SETTINGS_KEY = 'pos_general_settings_v1';
+const LEGACY_GENERAL_SETTINGS_KEYS = ['pos_settings'];
+const GENERAL_SETTINGS_API_PATH = '/api/general-settings';
 
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   business: {
@@ -82,6 +98,16 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     profile: 'a4',
     showPrintPreviewHint: true,
   },
+  mail: {
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUser: '',
+    smtpPass: '',
+    smtpFromEmail: '',
+    smtpToRecipients: '',
+    smtpSecure: false,
+    appName: 'Tricore',
+  },
 };
 
 const safeParse = <T>(raw: string | null): T | null => {
@@ -93,27 +119,81 @@ const safeParse = <T>(raw: string | null): T | null => {
   }
 };
 
-export const getGeneralSettings = (): GeneralSettings => {
-  const saved = safeParse<Partial<GeneralSettings>>(localStorage.getItem(GENERAL_SETTINGS_KEY));
+export const mergeGeneralSettings = (saved?: Partial<GeneralSettings> | null): GeneralSettings => ({
+  business: {
+    ...DEFAULT_GENERAL_SETTINGS.business,
+    ...((saved?.business as Partial<BusinessSettings>) || {}),
+  },
+  invoice: {
+    ...DEFAULT_GENERAL_SETTINGS.invoice,
+    ...((saved?.invoice as Partial<InvoiceSettings>) || {}),
+  },
+  printing: {
+    ...DEFAULT_GENERAL_SETTINGS.printing,
+    ...((saved?.printing as Partial<PrintingSettings>) || {}),
+  },
+  mail: {
+    ...DEFAULT_GENERAL_SETTINGS.mail,
+    ...((saved?.mail as Partial<MailSettings>) || {}),
+  },
+});
 
-  return {
-    business: {
-      ...DEFAULT_GENERAL_SETTINGS.business,
-      ...(saved?.business || {}),
-    },
-    invoice: {
-      ...DEFAULT_GENERAL_SETTINGS.invoice,
-      ...(saved?.invoice || {}),
-    },
-    printing: {
-      ...DEFAULT_GENERAL_SETTINGS.printing,
-      ...(saved?.printing || {}),
-    },
-  };
+const readGeneralSettingsFromStorage = (): GeneralSettings | null => {
+  const current = safeParse<Partial<GeneralSettings>>(localStorage.getItem(GENERAL_SETTINGS_KEY));
+  if (current) return mergeGeneralSettings(current);
+
+  for (const legacyKey of LEGACY_GENERAL_SETTINGS_KEYS) {
+    const legacy = safeParse<Partial<GeneralSettings>>(localStorage.getItem(legacyKey));
+    if (!legacy) continue;
+    const migrated = mergeGeneralSettings(legacy);
+    localStorage.setItem(GENERAL_SETTINGS_KEY, JSON.stringify(migrated));
+    localStorage.removeItem(legacyKey);
+    return migrated;
+  }
+
+  return null;
+};
+
+export const getGeneralSettings = (): GeneralSettings => {
+  return readGeneralSettingsFromStorage() || mergeGeneralSettings(null);
 };
 
 export const saveGeneralSettings = (settings: GeneralSettings): void => {
-  localStorage.setItem(GENERAL_SETTINGS_KEY, JSON.stringify(settings));
+  localStorage.setItem(GENERAL_SETTINGS_KEY, JSON.stringify(mergeGeneralSettings(settings)));
+};
+
+export const loadGeneralSettingsFromServer = async (
+  token?: string,
+  options?: { force?: boolean }
+): Promise<GeneralSettings> => {
+  const fromStorage = readGeneralSettingsFromStorage();
+  const shouldForce = Boolean(options?.force);
+  if (fromStorage && !shouldForce) {
+    return fromStorage;
+  }
+
+  const activeToken = String(token || localStorage.getItem('token') || '').trim();
+  if (!activeToken) {
+    return fromStorage || mergeGeneralSettings(null);
+  }
+
+  try {
+    const response = await fetchApiJson(apiUrl(GENERAL_SETTINGS_API_PATH), {
+      headers: {
+        Authorization: `Bearer ${activeToken}`,
+      },
+    });
+    const shared = response?.data?.settings;
+    if (shared && typeof shared === 'object') {
+      const merged = mergeGeneralSettings(shared as Partial<GeneralSettings>);
+      saveGeneralSettings(merged);
+      return merged;
+    }
+  } catch {
+    // keep local/default values if server sync is unavailable
+  }
+
+  return fromStorage || mergeGeneralSettings(null);
 };
 
 export const resetGeneralSettings = (): GeneralSettings => {

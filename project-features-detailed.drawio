@@ -1,0 +1,217 @@
+﻿<mxfile host="65bd71144e">
+    <diagram id="feature-detailed" name="Detailed Feature Diagram">
+        <mxGraphModel dx="685" dy="643" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="1800" background="none" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="2" value="SARVA Application - Full Detailed Features Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#1f2937;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="20" width="1300" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="Purpose: Explain the complete application in simple business language for non-technical users" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#4b5563;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="70" width="1200" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="SARVA Sports Complex Management Application&#xa;Single system for Sales + Inventory + Accounting + HR + Facilities + Memberships" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;fontSize=16;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1070" y="120" width="860" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="WHO USES THE APP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fafb;strokeColor=#d1d5db;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="110" width="980" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="Business Owner / Admin&#xa;- Monitors full business&#xa;- Controls users and settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#7c3aed;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="155" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="Sales Staff / Cashier&#xa;- Creates bills&#xa;- Handles returns and payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="155" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="Store / Inventory Manager&#xa;- Manages products and stock&#xa;- Handles suppliers and purchases" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="690" y="155" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="13" value="Accountant / Finance Team&#xa;- Maintains vouchers and ledgers&#xa;- Tracks settlement and credit notes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="255" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="14" value="HR / Operations Team&#xa;- Attendance and shift planning&#xa;- Payroll and salary records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="255" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="15" value="Front Desk / Facility Desk&#xa;- Books facilities and events&#xa;- Manages memberships and reminders" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce7f3;strokeColor=#db2777;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="690" y="255" width="290" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="20" value="CORE BUSINESS FEATURES (what each module does)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fafb;strokeColor=#d1d5db;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="380" width="2900" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="22" value="1) Sales and Customer Desk&#xa;- Fast billing screen for daily sales&#xa;- Manage orders and order status&#xa;- Handle returns and refunds&#xa;- Customer records and dues tracking&#xa;- Payment methods: cash/card/UPI/bank&#xa;- Daily sales dashboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="430" width="450" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="23" value="2) Inventory and Purchasing&#xa;- Product catalog and categories&#xa;- Stock in/out and current availability&#xa;- Low stock visibility&#xa;- Supplier management&#xa;- Purchase order lifecycle&#xa;- Inventory transfer tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="430" width="450" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="24" value="3) Accounting and Finance&#xa;- Day book and account ledger&#xa;- Receipt and payment vouchers&#xa;- Credit note handling&#xa;- Sales settlement and outstanding tracking&#xa;- Cash/bank movement visibility&#xa;- Period financial reports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1010" y="430" width="450" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="25" value="4) Employees, Attendance, Payroll&#xa;- Employee profile master&#xa;- Daily attendance marking&#xa;- Shift planning and schedule&#xa;- Payroll generation from attendance&#xa;- Salary payment records&#xa;- HR reporting support" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="430" width="450" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="26" value="5) Facilities, Events, Memberships&#xa;- Facility setup and pricing&#xa;- Single booking and event booking&#xa;- Membership plans and subscriptions&#xa;- Payment status (pending/partial/paid)&#xa;- Expiry and payment reminders&#xa;- Operational tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce7f3;strokeColor=#db2777;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1950" y="430" width="450" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="27" value="6) Admin, Reports, Settings&#xa;- User management&#xa;- Role-based page permissions&#xa;- General business settings and branding&#xa;- System settings and controls&#xa;- Operational and management reports&#xa;- Activity visibility" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#7c3aed;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="2420" y="430" width="490" height="240" as="geometry"/>
+                </mxCell>
+                <mxCell id="30" value="REAL-LIFE WORKFLOWS (how data moves automatically)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fafb;strokeColor=#d1d5db;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="710" width="2900" height="320" as="geometry"/>
+                </mxCell>
+                <mxCell id="32" value="Scenario A: Customer Sale&#xa;1. Cashier creates invoice&#xa;2. Stock quantity decreases automatically&#xa;3. Payment status updates (paid/pending)&#xa;4. Voucher/ledger records are created&#xa;5. Sales dashboards refresh" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfdf5;strokeColor=#16a34a;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="90" y="760" width="650" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="33" value="Scenario B: Supplier Purchase&#xa;1. Team creates purchase entry&#xa;2. Received goods increase stock&#xa;3. Supplier balance is tracked&#xa;4. Finance postings are generated&#xa;5. Cost and stock reports update" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="760" width="650" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="34" value="Scenario C: Payroll Cycle&#xa;1. Attendance captured daily&#xa;2. Shift and payroll logic applied&#xa;3. Salary for period is generated&#xa;4. Salary payment is recorded&#xa;5. HR and finance reports update" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f9ff;strokeColor=#0284c7;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1470" y="760" width="650" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="35" value="Scenario D: Facilities and Memberships&#xa;1. Desk books facility or event&#xa;2. Membership plan/subscription is assigned&#xa;3. Payment tracking continues over time&#xa;4. Due and expiry reminders are generated&#xa;5. Operations and revenue reports update" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#db2777;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="2160" y="760" width="650" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="36" value="BUSINESS OUTCOMES: faster operations | fewer manual errors | clear financial visibility | better customer service | better management decisions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;fontSize=13;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="980" y="995" width="1020" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="40" value="SYSTEM FOUNDATION (what keeps everything reliable)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fafb;strokeColor=#d1d5db;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="1050" width="2900" height="360" as="geometry"/>
+                </mxCell>
+                <mxCell id="42" value="Application Backend&#xa;Express + TypeScript API&#xa;- Receives requests from Web and Desktop UI&#xa;- Executes business logic across all modules&#xa;- Can serve frontend directly in combined deployment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1110" width="540" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="43" value="Security and Access Control&#xa;- JWT login authentication&#xa;- Role-based page permissions (RBAC)&#xa;- Protected routes and authorization checks&#xa;- Input validation and stable error handling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="700" y="1110" width="500" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="44" value="Business Services Layer&#xa;- Number sequences (invoice/voucher/booking)&#xa;- Audit log writing&#xa;- Customer ledger posting&#xa;- Credit note and settlement logic&#xa;- Discount policy and role rules&#xa;- Database baseline initialization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1230" y="1110" width="560" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="45" value="MongoDB Database (Atlas or Local)&#xa;Stores users, products, orders, sales, inventory,&#xa;suppliers, accounting, employees, attendance,&#xa;payroll, facilities, events, memberships, settings" style="shape=cylinder;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1820" y="1090" width="360" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="46" value="Automatic Backup Snapshot&#xa;- DB export at startup&#xa;- Saved to /backups as JSON&#xa;- Recovery support" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="2210" y="1110" width="320" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="47" value="Shared Contracts (src/shared)&#xa;One common definition for types, roles, and page keys&#xa;used by both frontend and backend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#7c3aed;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="1270" width="540" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="48" value="Payment Utility Layer&#xa;- Razorpay helpers (order/signature)&#xa;- Payment validation and fee logic&#xa;- Payment reference generation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce7f3;strokeColor=#db2777;fontSize=12;dashed=1;" parent="1" vertex="1">
+                    <mxGeometry x="700" y="1270" width="500" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="49" value="Governance and Baseline Setup&#xa;- Default roles and permissions&#xa;- Core chart of accounts and opening balance setup&#xa;- Required counters and baseline records" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1230" y="1270" width="560" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="50" value="Reporting and Insights Layer&#xa;Sales, stock, accounting, payroll, and facility/membership analytics for management" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="1820" y="1280" width="710" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="100" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="10" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="101" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="11" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="102" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="12" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="103" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="13" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="104" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="14" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="105" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="15" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="106" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="22" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="107" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="23" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="108" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="24" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="109" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="25" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="110" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="26" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="111" value="module" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="4" target="27" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="112" value="drives" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="22" target="32" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="113" value="updates stock" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="23" target="32" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="114" value="posts finance" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="24" target="32" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="115" value="drives" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="23" target="33" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="116" value="posts finance" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="24" target="33" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="117" value="drives" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="25" target="34" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="118" value="posts finance" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="24" target="34" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="119" value="drives" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="26" target="35" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="120" value="reports" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=11;" parent="1" source="27" target="35" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="121" value="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="32" target="36" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="122" value="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="33" target="36" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="123" value="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="34" target="36" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="124" value="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="35" target="36" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="130" value="powered by" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#0284c7;fontSize=11;" parent="1" source="4" target="42" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="131" value="secured by" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;" parent="1" source="42" target="43" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="132" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#4b5563;fontSize=11;" parent="1" source="43" target="44" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="133" value="reads/writes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#16a34a;fontSize=11;" parent="1" source="44" target="45" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="134" value="snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#ca8a04;fontSize=11;" parent="1" source="45" target="46" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="135" value="initializes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#4b5563;fontSize=11;" parent="1" source="44" target="49" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="136" value="shared definitions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#7c3aed;fontSize=11;" parent="1" source="47" target="4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="137" value="shared definitions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#7c3aed;fontSize=11;" parent="1" source="47" target="42" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="138" value="optional integration" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#db2777;dashed=1;fontSize=11;" parent="1" source="48" target="44" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="139" value="analytics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="45" target="50" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="140" value="management view" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontSize=11;" parent="1" source="50" target="27" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

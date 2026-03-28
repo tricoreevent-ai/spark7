@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './Inventory.css';
-import { formatCurrency } from '../config';
+import { formatCurrency } from '../shared/utils';
 
 interface InventoryItem {
   _id: string;

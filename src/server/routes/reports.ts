@@ -7,8 +7,11 @@ import { AuditLog } from '../models/AuditLog.js';
 import { Attendance } from '../models/Attendance.js';
 import { User } from '../models/User.js';
 import { deriveStoreScope, isAdminAuditViewerRole } from '../services/audit.js';
+import { productRequiresStock } from '../services/salesPricing.js';
 
 const router = Router();
+const toNumber = (value: any): number => Number(value || 0);
+const roundTo2 = (value: number): number => Number(value.toFixed(2));
 
 const parseDateParam = (raw: string | undefined, fallback: Date, endOfDay = false): Date => {
   const value = String(raw || '').trim();
@@ -148,7 +151,10 @@ router.get('/sales-returns', authMiddleware, async (req: AuthenticatedRequest, r
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
 
-    const rows = await Return.find({ createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 });
+    const rows = await Return.find({
+      createdAt: { $gte: start, $lte: end },
+      returnStatus: 'approved',
+    }).sort({ createdAt: -1 });
     const summary = rows.reduce(
       (acc, row) => {
         acc.count += 1;
@@ -392,6 +398,314 @@ router.get('/tax-summary', authMiddleware, async (req: AuthenticatedRequest, res
     res.json({ success: true, data: { salesTax, returnTax } });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate tax summary report' });
+  }
+});
+
+router.get('/inventory-stock-summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'false') === 'true';
+    const category = String(req.query.category || '').trim();
+    const filter: any = {};
+    if (!includeInactive) filter.isActive = true;
+    if (category) filter.category = category;
+
+    const rows = (await Product.find(filter).select('name sku category subcategory stock minStock cost price unit updatedAt itemType'))
+      .filter((row: any) => productRequiresStock(row));
+    const totalProducts = rows.length;
+    const inStock = rows.filter((row: any) => toNumber(row.stock) > 0).length;
+    const lowStock = rows.filter((row: any) => toNumber(row.stock) > 0 && toNumber(row.stock) <= toNumber(row.minStock)).length;
+    const outOfStock = rows.filter((row: any) => toNumber(row.stock) <= 0).length;
+    const totalUnits = rows.reduce((sum, row: any) => sum + toNumber(row.stock), 0);
+    const valuationCost = rows.reduce((sum, row: any) => sum + (toNumber(row.stock) * toNumber(row.cost)), 0);
+    const valuationRetail = rows.reduce((sum, row: any) => sum + (toNumber(row.stock) * toNumber(row.price)), 0);
+
+    res.json({
+      success: true,
+      data: {
+        totalProducts,
+        inStock,
+        lowStock,
+        outOfStock,
+        totalUnits: roundTo2(totalUnits),
+        valuationCost: roundTo2(valuationCost),
+        valuationRetail: roundTo2(valuationRetail),
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate inventory stock summary' });
+  }
+});
+
+router.get('/inventory-low-stock', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'false') === 'true';
+    const category = String(req.query.category || '').trim();
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 250));
+    const skip = Math.max(0, Number(req.query.skip) || 0);
+
+    const filter: any = {};
+    if (!includeInactive) filter.isActive = true;
+    if (category) filter.category = category;
+    if (q) {
+      const regex = new RegExp(q, 'i');
+      filter.$or = [{ name: regex }, { sku: regex }, { barcode: regex }];
+    }
+
+    const rows = (await Product.find(filter).select('name sku barcode category subcategory stock minStock unit cost price updatedAt itemType'))
+      .filter((row: any) => productRequiresStock(row));
+    const low = rows
+      .filter((row: any) => toNumber(row.stock) <= toNumber(row.minStock))
+      .sort((a: any, b: any) => toNumber(a.stock) - toNumber(b.stock));
+
+    const paged = low.slice(skip, skip + limit);
+    res.json({
+      success: true,
+      data: paged,
+      pagination: { total: low.length, skip, limit },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate low stock report' });
+  }
+});
+
+router.get('/inventory-valuation', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'false') === 'true';
+    const category = String(req.query.category || '').trim();
+    const filter: any = {};
+    if (!includeInactive) filter.isActive = true;
+    if (category) filter.category = category;
+
+    const rows = (await Product.find(filter).select('name sku category subcategory stock unit cost price updatedAt itemType'))
+      .filter((row: any) => productRequiresStock(row));
+    const mapped = rows.map((row: any) => {
+      const stock = toNumber(row.stock);
+      const unitCost = toNumber(row.cost);
+      const unitPrice = toNumber(row.price);
+      const costValue = stock * unitCost;
+      const retailValue = stock * unitPrice;
+      return {
+        productId: row._id,
+        name: row.name,
+        sku: row.sku,
+        category: row.category,
+        subcategory: row.subcategory || '',
+        stock,
+        unit: row.unit || 'piece',
+        unitCost: roundTo2(unitCost),
+        unitPrice: roundTo2(unitPrice),
+        costValue: roundTo2(costValue),
+        retailValue: roundTo2(retailValue),
+        potentialMarginValue: roundTo2(retailValue - costValue),
+      };
+    });
+
+    const summary = mapped.reduce(
+      (acc, row) => {
+        acc.totalCostValue += toNumber(row.costValue);
+        acc.totalRetailValue += toNumber(row.retailValue);
+        acc.totalMarginValue += toNumber(row.potentialMarginValue);
+        return acc;
+      },
+      { totalCostValue: 0, totalRetailValue: 0, totalMarginValue: 0 }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        rows: mapped,
+        summary: {
+          totalCostValue: roundTo2(summary.totalCostValue),
+          totalRetailValue: roundTo2(summary.totalRetailValue),
+          totalMarginValue: roundTo2(summary.totalMarginValue),
+        },
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate inventory valuation report' });
+  }
+});
+
+router.get('/inventory-movement', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 300));
+    const skip = Math.max(0, Number(req.query.skip) || 0);
+    const productId = String(req.query.productId || '').trim();
+
+    const filter: any = {
+      module: 'inventory',
+      createdAt: { $gte: start, $lte: end },
+      action: {
+        $in: [
+          'stock_adjustment',
+          'purchase_stock_received',
+          'purchase_stock_returned',
+          'stock_transfer',
+        ],
+      },
+    };
+    if (productId) {
+      filter.$or = [{ entityId: productId }, { 'metadata.productId': productId }];
+    }
+
+    const rows = await AuditLog.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    const total = await AuditLog.countDocuments(filter);
+
+    const summary = rows.reduce(
+      (acc, row: any) => {
+        const action = String(row.action || '');
+        const nestedAction = String(row.metadata?.action || '').toLowerCase();
+        if (action === 'purchase_stock_received') {
+          acc.stockIn += toNumber(row.metadata?.receivedQuantity);
+        } else if (action === 'purchase_stock_returned') {
+          acc.stockOut += toNumber(row.metadata?.returnQuantity);
+        } else if (action === 'stock_transfer') {
+          acc.transferred += toNumber(row.metadata?.quantity);
+        } else if (action === 'stock_adjustment') {
+          const delta = toNumber(row.metadata?.quantityDelta);
+          if (nestedAction === 'set') {
+            acc.adjustments += Math.abs(delta);
+          } else if (nestedAction === 'add' || nestedAction === 'stock_in') {
+            acc.stockIn += Math.abs(delta || toNumber(row.metadata?.quantityInput));
+          } else if (nestedAction === 'subtract' || nestedAction === 'stock_out') {
+            acc.stockOut += Math.abs(delta || toNumber(row.metadata?.quantityInput));
+          } else {
+            acc.adjustments += Math.abs(delta);
+          }
+        }
+        return acc;
+      },
+      { stockIn: 0, stockOut: 0, transferred: 0, adjustments: 0 }
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      summary: {
+        stockIn: roundTo2(summary.stockIn),
+        stockOut: roundTo2(summary.stockOut),
+        transferred: roundTo2(summary.transferred),
+        adjustments: roundTo2(summary.adjustments),
+      },
+      pagination: { total, skip, limit },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate inventory movement report' });
+  }
+});
+
+router.get('/inventory-dead-stock', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.max(1, Number(req.query.days) || 90);
+    const includeInactive = String(req.query.includeInactive || 'false') === 'true';
+    const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+
+    const productFilter: any = { stock: { $gt: 0 } };
+    if (!includeInactive) productFilter.isActive = true;
+    const products = (await Product.find(productFilter).select('name sku category subcategory stock minStock unit updatedAt itemType'))
+      .filter((row: any) => productRequiresStock(row));
+
+    const recentSales = await Sale.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: cutoff },
+          saleStatus: { $in: ['completed', 'returned'] },
+        },
+      },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.productId', qty: { $sum: '$items.quantity' } } },
+    ]);
+    const recentSoldIds = new Set(recentSales.map((row: any) => String(row._id)));
+
+    const lastSaleRows = await Sale.aggregate([
+      { $match: { saleStatus: { $in: ['completed', 'returned'] } } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.productId', lastSoldAt: { $max: '$createdAt' } } },
+    ]);
+    const lastSaleMap = new Map(lastSaleRows.map((row: any) => [String(row._id), row.lastSoldAt]));
+
+    const deadStock = products
+      .filter((product: any) => !recentSoldIds.has(String(product._id)))
+      .map((product: any) => {
+        const lastSoldAt = lastSaleMap.get(String(product._id));
+        const daysSinceLastSale = lastSoldAt
+          ? Math.floor((Date.now() - new Date(lastSoldAt).getTime()) / (24 * 60 * 60 * 1000))
+          : null;
+        return {
+          productId: product._id,
+          name: product.name,
+          sku: product.sku,
+          category: product.category,
+          subcategory: product.subcategory || '',
+          stock: toNumber(product.stock),
+          unit: product.unit || 'piece',
+          lastSoldAt: lastSoldAt || null,
+          daysSinceLastSale,
+        };
+      })
+      .sort((a, b) => toNumber(b.stock) - toNumber(a.stock));
+
+    res.json({
+      success: true,
+      data: deadStock,
+      summary: {
+        daysWindow: days,
+        deadStockCount: deadStock.length,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate dead stock report' });
+  }
+});
+
+router.get('/inventory-fast-moving', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.max(1, Number(req.query.days) || 30);
+    const resultLimit = Math.min(500, Math.max(1, Number(req.query.limit) || 20));
+    const since = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+
+    const rows = await Sale.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: since },
+          saleStatus: { $in: ['completed', 'returned'] },
+        },
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.productId',
+          productName: { $first: '$items.productName' },
+          sku: { $first: '$items.sku' },
+          quantitySold: { $sum: '$items.quantity' },
+          salesAmount: { $sum: '$items.lineTotal' },
+          salesCount: { $sum: 1 },
+        },
+      },
+      { $sort: { quantitySold: -1, salesAmount: -1 } },
+      { $limit: resultLimit },
+    ]);
+
+    res.json({
+      success: true,
+      data: rows.map((row: any) => ({
+        productId: row._id,
+        productName: row.productName || '',
+        sku: row.sku || '',
+        quantitySold: roundTo2(toNumber(row.quantitySold)),
+        salesAmount: roundTo2(toNumber(row.salesAmount)),
+        salesCount: toNumber(row.salesCount),
+      })),
+      summary: {
+        daysWindow: days,
+        count: rows.length,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate fast moving report' });
   }
 });
 

@@ -34,6 +34,6 @@ const ShiftScheduleSchema = new Schema<IShiftSchedule>(
   { timestamps: true }
 );
 
-ShiftScheduleSchema.index({ employeeId: 1, dateKey: 1 }, { unique: true });
+ShiftScheduleSchema.index({ tenantId: 1, employeeId: 1, dateKey: 1 }, { unique: true });
 
 export const ShiftSchedule = mongoose.model<IShiftSchedule>('ShiftSchedule', ShiftScheduleSchema);

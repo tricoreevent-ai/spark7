@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-
+import { apiUrl, fetchApiJson } from '../utils/api';
 export interface Category {
   _id: string;
   name: string;
@@ -20,9 +20,9 @@ export const useCategories = () => {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const response = await fetch('http://localhost:3000/api/categories', { headers });
-      const data = await response.json();
-      setCategories(Array.isArray(data) ? data : []);
+      const data = await fetchApiJson(apiUrl('/api/categories'), { headers });
+      const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      setCategories(rows);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

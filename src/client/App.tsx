@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { EMPTY_PERMISSIONS, PAGE_META, PageKey, PermissionMatrix } from '@shared/rbac';
 import { IUser } from '@shared/types';
 import { formatCurrency } from './config';
@@ -9,25 +9,86 @@ import { AddProduct } from './pages/AddProduct';
 import { Accounting } from './pages/Accounting';
 import { Attendance } from './pages/Attendance';
 import { Categories } from './pages/Categories';
+import { Customers } from './pages/Customers';
 import { EditProduct } from './pages/EditProduct';
 import { Employees } from './pages/Employees';
 import { EventManagement } from './pages/EventManagement';
 import { Facilities } from './pages/Facilities';
 import { FacilitySetup } from './pages/FacilitySetup';
 import { Memberships } from './pages/Memberships';
+import { MembershipReports } from './pages/MembershipReports';
 import { Orders } from './pages/Orders';
 import { Payroll } from './pages/Payroll';
+import { ProductAlerts } from './pages/ProductAlerts';
+import { ProductCenter } from './pages/ProductCenter';
 import { ProductList } from './pages/ProductList';
+import { Procurement } from './pages/Procurement';
+import { Quotations } from './pages/Quotations';
 import { Reports } from './pages/Reports';
 import Returns from './pages/Returns';
 import { Sales } from './pages/Sales';
 import { SalesDashboard } from './pages/SalesDashboard';
+import { SettlementCenter } from './pages/SettlementCenter';
 import { Settings } from './pages/Settings';
 import { Shifts } from './pages/Shifts';
 import { UserManagement } from './pages/UserManagement';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { initializeAutoTooltips } from './utils/autoTooltips';
-import { getGeneralSettings } from './utils/generalSettings';
+import { getGeneralSettings, loadGeneralSettingsFromServer } from './utils/generalSettings';
+import { applyAndPersistUiPreferencesLocal, loadUiPreferencesFromServer } from './utils/uiPreferences';
+
+const SAVED_CREDENTIALS_KEY = 'sarva_saved_credentials';
+const CREDENTIALS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+type SavedCredentials = {
+  email: string;
+  password: string;
+  tenantSlug?: string;
+  expiresAt: number;
+};
+
+type CompanyCreationConfig = {
+  enabled: boolean;
+  requiresAccessKey: boolean;
+};
+
+const readSavedCredentials = (): SavedCredentials | null => {
+  try {
+    const raw = localStorage.getItem(SAVED_CREDENTIALS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedCredentials>;
+    const email = String(parsed.email || '').trim();
+    const password = String(parsed.password || '');
+    const tenantSlug = String(parsed.tenantSlug || '').trim().toLowerCase();
+    const expiresAt = Number(parsed.expiresAt || 0);
+    if (!email || !password || !Number.isFinite(expiresAt)) {
+      localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+      return null;
+    }
+    if (Date.now() > expiresAt) {
+      localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+      return null;
+    }
+    return { email, password, tenantSlug, expiresAt };
+  } catch {
+    localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+    return null;
+  }
+};
+
+const writeSavedCredentials = (email: string, password: string, tenantSlug?: string): void => {
+  const payload: SavedCredentials = {
+    email: String(email || '').trim().toLowerCase(),
+    password: String(password || ''),
+    tenantSlug: String(tenantSlug || '').trim().toLowerCase(),
+    expiresAt: Date.now() + CREDENTIALS_TTL_MS,
+  };
+  localStorage.setItem(SAVED_CREDENTIALS_KEY, JSON.stringify(payload));
+};
+
+const clearSavedCredentials = (): void => {
+  localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+};
 
 const orderedPages: PageKey[] = [
   'dashboard',
@@ -156,6 +217,15 @@ const DashboardHome: React.FC<{
       accent: 'from-emerald-500/25 to-emerald-400/10',
     },
     {
+      key: 'sales',
+      title: 'Quotations',
+      desc: 'Create quotes, revisions, and convert approvals into draft invoices.',
+      path: '/sales/quotes',
+      icon: '🧾',
+      category: 'Sales',
+      accent: 'from-emerald-500/25 to-emerald-400/10',
+    },
+    {
       key: 'returns',
       title: 'Returns',
       desc: 'Handle returns, approvals and reconciliation.',
@@ -174,11 +244,29 @@ const DashboardHome: React.FC<{
       accent: 'from-emerald-500/25 to-emerald-400/10',
     },
     {
+      key: 'sales',
+      title: 'Customers',
+      desc: 'Manage reusable customer profiles by mobile number.',
+      path: '/customers',
+      icon: '🧑',
+      category: 'Sales',
+      accent: 'from-emerald-500/25 to-emerald-400/10',
+    },
+    {
       key: 'products',
       title: 'Products',
-      desc: 'Manage product catalog and pricing.',
+      desc: 'Open the product center for entry, catalog review, and stock alerts.',
       path: '/products',
       icon: '📦',
+      category: 'Catalog',
+      accent: 'from-sky-500/25 to-sky-400/10',
+    },
+    {
+      key: 'products',
+      title: 'Product Entry',
+      desc: 'Create new product records with stock, pricing, and tax settings.',
+      path: '/products/entry',
+      icon: '➕',
       category: 'Catalog',
       accent: 'from-sky-500/25 to-sky-400/10',
     },
@@ -197,6 +285,15 @@ const DashboardHome: React.FC<{
       desc: 'Monitor stock movement and availability.',
       path: '/inventory',
       icon: '📊',
+      category: 'Catalog',
+      accent: 'from-sky-500/25 to-sky-400/10',
+    },
+    {
+      key: 'inventory',
+      title: 'Procurement',
+      desc: 'Manage suppliers, purchase orders and stock receipts.',
+      path: '/inventory/procurement',
+      icon: '🚚',
       category: 'Catalog',
       accent: 'from-sky-500/25 to-sky-400/10',
     },
@@ -256,10 +353,37 @@ const DashboardHome: React.FC<{
     },
     {
       key: 'memberships',
+      title: 'Create Plan',
+      desc: 'Create and maintain membership plans (admin).',
+      path: '/membership-plans/create',
+      icon: '🧩',
+      category: 'Operations',
+      accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
+    },
+    {
+      key: 'memberships',
+      title: 'Create Subscription',
+      desc: 'Register a member and assign a plan.',
+      path: '/membership-subscriptions/create',
+      icon: '📝',
+      category: 'Operations',
+      accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
+    },
+    {
+      key: 'memberships',
       title: 'Memberships',
       desc: 'Configure plans and active member cycles.',
       path: '/memberships',
       icon: '🎫',
+      category: 'Operations',
+      accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
+    },
+    {
+      key: 'memberships',
+      title: 'Membership Reports',
+      desc: 'Review lifecycle, renewal and benefit analytics.',
+      path: '/membership-reports',
+      icon: '📊',
       category: 'Operations',
       accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
     },
@@ -269,6 +393,15 @@ const DashboardHome: React.FC<{
       desc: 'Manage accounting entries and settlements.',
       path: '/accounting',
       icon: '📚',
+      category: 'Admin',
+      accent: 'from-rose-500/25 to-rose-400/10',
+    },
+    {
+      key: 'accounting',
+      title: 'Settlements',
+      desc: 'Handle receipts, credit notes, and day-end closing.',
+      path: '/accounting/settlements',
+      icon: '💳',
       category: 'Admin',
       accent: 'from-rose-500/25 to-rose-400/10',
     },
@@ -292,7 +425,7 @@ const DashboardHome: React.FC<{
     },
   ];
 
-  const visibleModules = modules.filter((module) => permissions[module.key]);
+  const visibleModules = modules.filter((module) => permissions[module.key] || (module.key === 'products' && permissions.sales));
   const quickActions = visibleModules.slice(0, 5);
   const allowedPagesCount = Object.values(permissions).filter(Boolean).length;
 
@@ -317,21 +450,21 @@ const DashboardHome: React.FC<{
   });
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500/20 via-cyan-500/10 to-transparent p-6">
-        <div className="pointer-events-none absolute -right-20 -top-16 h-44 w-44 rounded-full bg-indigo-500/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-24 left-20 h-44 w-44 rounded-full bg-cyan-500/20 blur-3xl" />
-        <div className="relative grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <div className="sarva-dashboard space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="sarva-dashboard-hero sarva-animate-rise relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500/20 via-cyan-500/10 to-transparent p-5 sm:p-6 lg:p-8">
+        <div className="pointer-events-none absolute -right-20 -top-16 h-44 w-44 rounded-full bg-indigo-500/20 blur-3xl lg:h-60 lg:w-60" />
+        <div className="pointer-events-none absolute -bottom-24 left-20 h-44 w-44 rounded-full bg-cyan-500/20 blur-3xl lg:h-60 lg:w-60" />
+        <div className="relative grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div>
             <div className="mb-2 flex items-center gap-3">
               {homeLogo ? (
                 <img
                   src={homeLogo}
                   alt="Business logo"
-                  className="h-14 w-14 rounded-lg border border-white/20 bg-white/10 object-contain p-1.5"
+                  className="h-20 w-20 rounded-lg border border-white/20 bg-white/10 object-contain p-2 sm:h-24 sm:w-24"
                 />
               ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-lg font-bold text-indigo-100">
+                <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-xl font-bold text-indigo-100 sm:h-24 sm:w-24">
                   {String(brandName || 'S').slice(0, 1).toUpperCase()}
                 </div>
               )}
@@ -348,7 +481,7 @@ const DashboardHome: React.FC<{
               Role: <span className="font-semibold text-white">{roleLabel}</span> | Access: <span className="font-semibold text-white">{allowedPagesCount}</span> pages
             </p>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4 lg:ml-auto lg:w-[320px]">
+          <div className="sarva-animate-rise w-full rounded-xl border border-white/10 bg-black/20 p-4 sm:max-w-sm lg:ml-auto" style={{ animationDelay: '90ms' }}>
             <p className="text-xs uppercase tracking-[0.16em] text-gray-300">Today</p>
             <p className="mt-1 text-lg font-semibold text-white">{todayLabel}</p>
             <p className="text-sm text-gray-300">{timeLabel}</p>
@@ -368,15 +501,16 @@ const DashboardHome: React.FC<{
         </div>
       </div>
 
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+      <div className="sarva-animate-rise rounded-xl border border-white/10 bg-white/5 p-4" style={{ animationDelay: '130ms' }}>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">Quick Actions</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {quickActions.map((card) => (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+          {quickActions.map((card, quickIndex) => (
             <button
               key={card.path}
               type="button"
               onClick={() => navigate(card.path)}
-              className={`rounded-lg border border-white/10 bg-gradient-to-br ${card.accent} p-3 text-left transition hover:-translate-y-0.5 hover:border-white/20`}
+              className={`sarva-animate-rise rounded-lg border border-white/10 bg-gradient-to-br ${card.accent} p-3 text-left transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_12px_28px_rgba(2,6,23,0.35)]`}
+              style={{ animationDelay: `${180 + quickIndex * 45}ms` }}
             >
               <p className="text-sm font-semibold text-white">{card.icon} {card.title}</p>
               <p className="mt-1 text-xs text-gray-300 line-clamp-2">{card.desc}</p>
@@ -386,7 +520,7 @@ const DashboardHome: React.FC<{
       </div>
 
       {(eventReminders.length > 0 || eventPaymentsDue.length > 0 || membershipExpiring.length > 0) && (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+        <div className="sarva-animate-rise rounded-xl border border-amber-500/20 bg-amber-500/5 p-4" style={{ animationDelay: '220ms' }}>
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">Reminders</h3>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <div className="rounded-lg border border-white/10 bg-black/10 p-3">
@@ -427,16 +561,21 @@ const DashboardHome: React.FC<{
       )}
 
       <div className="space-y-4">
-        {Object.entries(groupedModules).map(([category, categoryCards]) => (
-          <div key={category} className="rounded-xl border border-white/10 bg-white/5 p-4">
+        {Object.entries(groupedModules).map(([category, categoryCards], categoryIndex) => (
+          <div
+            key={category}
+            className="sarva-animate-rise rounded-xl border border-white/10 bg-white/5 p-4"
+            style={{ animationDelay: `${280 + categoryIndex * 70}ms` }}
+          >
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">{category}</h3>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {categoryCards.map((card) => (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {categoryCards.map((card, cardIndex) => (
                 <button
                   key={card.path}
                   type="button"
                   onClick={() => navigate(card.path)}
-                  className={`rounded-xl border border-white/10 bg-gradient-to-br ${card.accent} p-4 text-left transition hover:-translate-y-0.5 hover:border-white/20`}
+                  className={`sarva-animate-rise rounded-xl border border-white/10 bg-gradient-to-br ${card.accent} p-4 text-left transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_16px_30px_rgba(2,6,23,0.35)]`}
+                  style={{ animationDelay: `${320 + categoryIndex * 70 + cardIndex * 30}ms` }}
                 >
                   <h4 className="text-lg font-semibold text-white">
                     {card.icon} {card.title}
@@ -449,27 +588,27 @@ const DashboardHome: React.FC<{
         ))}
       </div>
 
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+      <div className="sarva-animate-rise rounded-xl border border-white/10 bg-white/5 p-4" style={{ animationDelay: '420ms' }}>
         <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-300">Recommended Next Steps</h3>
         <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
           <button
             type="button"
             onClick={() => permissions.sales && navigate('/sales-dashboard')}
-            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition hover:bg-white/10"
+            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition duration-300 hover:-translate-y-0.5 hover:bg-white/10"
           >
             Start billing from <span className="font-semibold text-white">Sales Dashboard</span>.
           </button>
           <button
             type="button"
             onClick={() => permissions.reports && navigate('/reports')}
-            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition hover:bg-white/10"
+            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition duration-300 hover:-translate-y-0.5 hover:bg-white/10"
           >
             Review performance in <span className="font-semibold text-white">Reports</span>.
           </button>
           <button
             type="button"
             onClick={() => permissions.inventory && navigate('/inventory')}
-            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition hover:bg-white/10"
+            className="rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-sm text-gray-200 transition duration-300 hover:-translate-y-0.5 hover:bg-white/10"
           >
             Check stock status in <span className="font-semibold text-white">Inventory</span>.
           </button>
@@ -486,30 +625,274 @@ const AccessDenied: React.FC = () => (
   </div>
 );
 
-function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showRegister, setShowRegister] = useState(false);
-  const [email, setEmail] = useState('test@example.com');
-  const [password, setPassword] = useState('Test123456');
+const CompanyCreateAdminPage: React.FC<{ token: string; requiresAccessKey: boolean }> = ({ token, requiresAccessKey }) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [tenantSlug, setTenantSlug] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [businessName, setBusinessName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [accessKey, setAccessKey] = useState('');
+
+  const inputClass =
+    'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-400';
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await fetchApiJson(apiUrl('/api/auth/company-creation'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          businessName: businessName.trim(),
+          tenantSlug: tenantSlug.trim() || undefined,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          password,
+          accessKey: requiresAccessKey ? accessKey : undefined,
+        }),
+      });
+
+      setSuccess('Company created successfully.');
+      setBusinessName('');
+      setTenantSlug('');
+      setFirstName('');
+      setLastName('');
+      setEmail('');
+      setPassword('');
+      setAccessKey('');
+    } catch (submitError) {
+      setError(String((submitError as Error)?.message || submitError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="rounded-xl border border-white/10 bg-white/5 p-5 sm:p-6">
+        <h1 className="text-2xl font-bold text-white">Create Company</h1>
+        <p className="mt-1 text-sm text-gray-300">
+          Backend-controlled onboarding. Only users with admin settings access can use this screen.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <input
+            className={inputClass}
+            placeholder="Company Name"
+            value={businessName}
+            onChange={(e) => setBusinessName(e.target.value)}
+            required
+          />
+          <input
+            className={inputClass}
+            placeholder="Tenant Slug (optional)"
+            value={tenantSlug}
+            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+          />
+          <input
+            className={inputClass}
+            placeholder="Owner First Name"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            required
+          />
+          <input
+            className={inputClass}
+            placeholder="Owner Last Name"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            required
+          />
+          <input
+            type="email"
+            className={inputClass}
+            placeholder="Owner Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+          <input
+            type="password"
+            className={inputClass}
+            placeholder="Owner Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          {requiresAccessKey && (
+            <input
+              type="password"
+              className={inputClass}
+              placeholder="Company Creation Access Key"
+              value={accessKey}
+              onChange={(e) => setAccessKey(e.target.value)}
+              required
+            />
+          )}
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60"
+            >
+              {loading ? 'Creating...' : 'Create Company'}
+            </button>
+            {success && <span className="text-sm text-emerald-300">{success}</span>}
+            {error && <span className="text-sm text-rose-300">{error}</span>}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const SHORTCUT_PANEL_STORAGE_KEY = 'sarva_shortcuts_panel_open';
+
+const GlobalShortcutsPanel: React.FC = () => {
+  const location = useLocation();
+  const [open, setOpen] = useState<boolean>(() => localStorage.getItem(SHORTCUT_PANEL_STORAGE_KEY) !== '0');
+  const isSalesPage = location.pathname === '/sales';
+
+  useEffect(() => {
+    localStorage.setItem(SHORTCUT_PANEL_STORAGE_KEY, open ? '1' : '0');
+  }, [open]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = String(target?.tagName || '').toLowerCase();
+      const isTypingTarget =
+        tag === 'input' || tag === 'textarea' || tag === 'select' || Boolean(target?.isContentEditable);
+
+      const key = String(event.key || '').toLowerCase();
+      if (!isTypingTarget && (event.key === '?' || (event.ctrlKey && key === '/'))) {
+        event.preventDefault();
+        setOpen((prev) => !prev);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="fixed bottom-3 right-3 z-40 rounded-md border border-white/20 bg-black/60 px-2 py-1 text-[11px] font-semibold text-gray-200 hover:bg-black/80"
+        title="Show keyboard shortcuts"
+      >
+        Shortcuts
+      </button>
+      {open && (
+        <div className="fixed bottom-12 right-3 z-40 w-64 rounded-lg border border-cyan-400/25 bg-slate-950/90 p-3 text-[11px] text-gray-200 shadow-xl backdrop-blur">
+          <p className="mb-2 font-semibold text-cyan-200">Keyboard Shortcuts</p>
+          <div className="space-y-1">
+            <p><span className="text-white">?</span> Toggle shortcuts panel</p>
+            <p><span className="text-white">Esc</span> Close shortcuts panel</p>
+            {isSalesPage ? (
+              <>
+                <p><span className="text-white">Ctrl + K</span> Focus product search</p>
+                <p><span className="text-white">/</span> Focus product search</p>
+                <p><span className="text-white">F2</span> Toggle product views</p>
+                <p><span className="text-white">Ctrl + Enter</span> Create/Save invoice</p>
+                <p><span className="text-white">Ctrl + S / F9</span> Create/Save invoice</p>
+                <p><span className="text-white">Alt + 1/2/3/4</span> Cash/Card/UPI/Bank</p>
+                <p><span className="text-white">Alt + P / Alt + D</span> Post / Draft</p>
+                <p><span className="text-white">Alt + G / Alt + N</span> GST / Non-GST</p>
+              </>
+            ) : (
+              <p className="text-gray-300">Open <span className="text-white">Sales</span> page for billing shortcuts.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberCredentials, setRememberCredentials] = useState(false);
+  const [tenantSlug, setTenantSlug] = useState('');
+  const [companyCreationConfig, setCompanyCreationConfig] = useState<CompanyCreationConfig>({
+    enabled: false,
+    requiresAccessKey: false,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [user, setUser] = useState<Partial<IUser> | null>(null);
   const [token, setToken] = useState('');
   const [todaySales, setTodaySales] = useState<number | null>(null);
+  const loginFormRef = useRef<HTMLFormElement | null>(null);
 
   const permissions = useMemo(
     () => withDefaultPermissions((user?.permissions as PermissionMatrix | undefined) || undefined),
     [user]
   );
+  const hasProductWorkspaceAccess = permissions.products || permissions.sales;
 
   const fallbackPath = useMemo(() => {
     const firstAllowed = orderedPages.find((page) => permissions[page]);
     return firstAllowed ? PAGE_META[firstAllowed].path : '/forbidden';
   }, [permissions]);
+
+  const syncGeneralSettingsFromServer = async (activeToken: string) => {
+    try {
+      await loadGeneralSettingsFromServer(activeToken, { force: true });
+      window.dispatchEvent(new Event('sarva-settings-updated'));
+    } catch {
+      // keep existing local settings if server shared settings are unavailable
+    }
+  };
+
+  const syncUiPreferencesFromServer = async () => {
+    try {
+      const serverPreferences = await loadUiPreferencesFromServer();
+      if (!serverPreferences) return;
+      applyAndPersistUiPreferencesLocal(serverPreferences);
+    } catch {
+      // keep local values if server sync is unavailable
+    }
+  };
+
+  const syncClientSettingsFromServer = async (activeToken: string) => {
+    await Promise.allSettled([
+      syncGeneralSettingsFromServer(activeToken),
+      syncUiPreferencesFromServer(),
+    ]);
+  };
+
+  const finalizeLogin = async (sessionToken: string, sessionUser: Partial<IUser>) => {
+    localStorage.setItem('token', sessionToken);
+    setToken(sessionToken);
+    setUser(sessionUser);
+    await syncClientSettingsFromServer(sessionToken);
+    window.history.replaceState({}, '', '/');
+    setIsLoggedIn(true);
+  };
 
   const reloadMe = async () => {
     const storedToken = localStorage.getItem('token');
@@ -522,28 +905,137 @@ function App() {
     });
     setUser(data.user);
     setToken(storedToken);
+    await syncClientSettingsFromServer(storedToken);
     setIsLoggedIn(true);
   };
 
   useEffect(() => {
     const checkAuth = async () => {
       const storedToken = localStorage.getItem('token');
-      if (!storedToken) return;
+      if (storedToken) {
+        try {
+          await reloadMe();
+          return;
+        } catch (authError) {
+          localStorage.removeItem('token');
+          console.error('Auth check failed:', authError);
+        }
+      }
 
       try {
-        await reloadMe();
-      } catch (authError) {
-        localStorage.removeItem('token');
-        console.error('Auth check failed:', authError);
+        const saved = readSavedCredentials();
+        if (!saved) return;
+        setRememberCredentials(true);
+        setEmail(saved.email);
+        setPassword(saved.password);
+        setTenantSlug(String(saved.tenantSlug || ''));
+
+        const data = await fetchApiJson(apiUrl('/api/auth/login'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: saved.email,
+            password: saved.password,
+            tenantSlug: String(saved.tenantSlug || '').trim() || undefined,
+          }),
+        });
+
+        await finalizeLogin(data.token, data.user);
+        setEmail('');
+        setPassword('');
+        setError('');
+      } catch (savedLoginError) {
+        clearSavedCredentials();
+        setRememberCredentials(false);
+        console.error('Saved credential auto-login failed:', savedLoginError);
       }
     };
-    checkAuth();
+    void checkAuth();
+  }, []);
+
+  useEffect(() => {
+    const loadCompanyCreationConfig = async () => {
+      try {
+        const data = await fetchApiJson(apiUrl('/api/auth/company-creation/config'));
+        setCompanyCreationConfig({
+          enabled: Boolean(data?.enabled),
+          requiresAccessKey: Boolean(data?.requiresAccessKey),
+        });
+      } catch {
+        setCompanyCreationConfig({ enabled: false, requiresAccessKey: false });
+      }
+    };
+    void loadCompanyCreationConfig();
   }, []);
 
   useEffect(() => {
     const cleanup = initializeAutoTooltips();
     return () => cleanup();
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) return;
+    const form = loginFormRef.current;
+    if (!form) return;
+
+    // Defensive: keep login controls interactive even if stale attributes get injected.
+    const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
+    controls.forEach((control) => {
+      control.disabled = false;
+      control.readOnly = false;
+      control.removeAttribute('disabled');
+      control.removeAttribute('readonly');
+      control.style.pointerEvents = 'auto';
+      control.style.opacity = '1';
+    });
+  }, [isLoggedIn, loading]);
+
+  useEffect(() => {
+    if (isLoggedIn) return;
+    // Defensive cleanup for any stale modal backdrops that may block login interaction.
+    const containers = document.querySelectorAll<HTMLElement>('.swal2-container, .modal-backdrop');
+    containers.forEach((container) => {
+      const popup = container.querySelector<HTMLElement>('.swal2-popup');
+      const popupVisible =
+        !!popup && popup.offsetParent !== null && !popup.classList.contains('swal2-hide');
+      if (!popupVisible) {
+        container.remove();
+      }
+    });
+  }, [isLoggedIn, loading]);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    if (!html || !body) return;
+
+    if (!isLoggedIn) {
+      html.classList.add('sarva-login-unlocked');
+      body.classList.add('sarva-login-unlocked');
+      html.style.pointerEvents = 'auto';
+      body.style.pointerEvents = 'auto';
+      html.style.opacity = '1';
+      body.style.opacity = '1';
+      html.style.filter = 'none';
+      body.style.filter = 'none';
+      body.style.removeProperty('inert');
+      body.removeAttribute('inert');
+      body.removeAttribute('aria-hidden');
+      return;
+    }
+
+    html.classList.remove('sarva-login-unlocked');
+    body.classList.remove('sarva-login-unlocked');
+  }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (!loading) return;
+    // Safety reset so the login form does not stay blocked on network hangs.
+    const timer = setTimeout(() => setLoading(false), 15000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   useEffect(() => {
     if (isLoggedIn && token && permissions.sales) {
@@ -572,43 +1064,31 @@ function App() {
     setTodaySales(null);
   }, [isLoggedIn, permissions.sales, token]);
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setSuccess('');
+  useEffect(() => {
+    if (!isLoggedIn || !token) return;
 
-    try {
-      await fetchApiJson(apiUrl('/api/auth/register'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          firstName,
-          lastName,
-          businessName,
-          phoneNumber: '9876543210',
-          gstin: '27AABCC0001R1ZM',
-        }),
-      });
-      setSuccess('Registration successful! You can now login.');
-      setShowRegister(false);
-      setFirstName('');
-      setLastName('');
-      setBusinessName('');
-    } catch (err) {
-      setError(String((err as Error)?.message || err));
-      console.error('Register error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const syncNow = () => {
+      void syncClientSettingsFromServer(token);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') syncNow();
+    };
+
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', onVisibility);
+    const timer = window.setInterval(syncNow, 90_000);
+
+    return () => {
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(timer);
+    };
+  }, [isLoggedIn, token]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError('');
 
@@ -618,14 +1098,21 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          tenantSlug: tenantSlug.trim() || undefined,
+        }),
       });
-      localStorage.setItem('token', data.token);
-      setToken(data.token);
-      setUser(data.user);
-      setIsLoggedIn(true);
+      if (rememberCredentials) {
+        writeSavedCredentials(email, password, tenantSlug);
+      } else {
+        clearSavedCredentials();
+      }
+      await finalizeLogin(data.token, data.user);
       setEmail('');
       setPassword('');
+      setTenantSlug('');
       setError('');
     } catch (err) {
       setError(String((err as Error)?.message || err));
@@ -651,23 +1138,28 @@ function App() {
     }
 
     localStorage.removeItem('token');
+    clearSavedCredentials();
     setIsLoggedIn(false);
     setUser(null);
     setToken('');
-    setEmail('test@example.com');
-    setPassword('Test123456');
+    setEmail('');
+    setPassword('');
+    setTenantSlug('');
+    setShowPassword(false);
+    setRememberCredentials(false);
     setSuccess('');
   };
-
-  if (loading) {
-    return <div className="p-8 text-center text-gray-300">Loading...</div>;
-  }
 
   if (isLoggedIn && user) {
     return (
       <BrowserRouter>
-        <div className="min-h-screen bg-transparent">
-          <Navbar onLogout={handleLogout} user={user} permissions={permissions} />
+        <div className="sarva-shell min-h-screen bg-transparent">
+          <Navbar
+            onLogout={handleLogout}
+            user={user}
+            permissions={permissions}
+            showCompanyCreationMenu={Boolean(companyCreationConfig.enabled && permissions.settings)}
+          />
 
           <Routes>
             <Route
@@ -681,17 +1173,34 @@ function App() {
               }
             />
 
-            <Route path="/sales-dashboard" element={permissions['sales-dashboard'] ? <SalesDashboard /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/sales-dashboard" element={permissions['sales-dashboard'] ? <SalesDashboard permissions={permissions} /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/inventory" element={permissions.inventory ? <Inventory /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/inventory/procurement" element={permissions.inventory ? <Procurement /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/sales" element={permissions.sales ? <Sales /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/sales/quotes" element={permissions.sales ? <Quotations /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/customers" element={permissions.sales ? <Customers /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/orders" element={permissions.orders ? <Orders /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products" element={permissions.products ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/add" element={permissions.products ? <AddProduct /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/edit/:id" element={permissions.products ? <EditProduct /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/products" element={hasProductWorkspaceAccess ? <ProductCenter /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/products/catalog" element={hasProductWorkspaceAccess ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/products/alerts" element={hasProductWorkspaceAccess ? <ProductAlerts /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/products/add" element={<Navigate to="/products/entry" replace />} />
+            <Route path="/products/entry" element={hasProductWorkspaceAccess ? <AddProduct /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/products/edit/:id" element={hasProductWorkspaceAccess ? <EditProduct /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/returns" element={permissions.returns ? <Returns /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/categories" element={permissions.categories ? <Categories /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/settings" element={permissions.settings ? <Settings /> : <Navigate to={fallbackPath} replace />} />
+            <Route
+              path="/admin/company-create"
+              element={
+                permissions.settings && companyCreationConfig.enabled ? (
+                  <CompanyCreateAdminPage token={token} requiresAccessKey={companyCreationConfig.requiresAccessKey} />
+                ) : (
+                  <Navigate to={fallbackPath} replace />
+                )
+              }
+            />
             <Route path="/accounting" element={permissions.accounting ? <Accounting /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/accounting/settlements" element={permissions.accounting ? <SettlementCenter /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/reports" element={permissions.reports ? <Reports /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/employees" element={permissions.employees ? <Employees /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/attendance" element={permissions.attendance ? <Attendance currentUserRole={user.role as string | undefined} /> : <Navigate to={fallbackPath} replace />} />
@@ -701,6 +1210,9 @@ function App() {
             <Route path="/facilities" element={permissions.facilities ? <Facilities /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/facilities/setup" element={permissions.facilities ? <FacilitySetup /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/memberships" element={permissions.memberships ? <Memberships /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/membership-plans/create" element={permissions.memberships ? <Memberships mode="plan" /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/membership-subscriptions/create" element={permissions.memberships ? <Memberships mode="member-create" /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/membership-reports" element={permissions.memberships ? <MembershipReports /> : <Navigate to={fallbackPath} replace />} />
             <Route
               path="/user-management"
               element={permissions['user-management'] ? <UserManagement onReloadMe={reloadMe} /> : <Navigate to={fallbackPath} replace />}
@@ -708,92 +1220,93 @@ function App() {
             <Route path="/forbidden" element={<AccessDenied />} />
             <Route path="*" element={<Navigate to={fallbackPath} replace />} />
           </Routes>
+          <GlobalShortcutsPanel />
         </div>
       </BrowserRouter>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
-        <h1 className="text-2xl font-bold text-white">{showRegister ? 'Register Account' : 'Sarva'}</h1>
-        <p className="mt-1 text-sm text-gray-300">
-          {showRegister ? 'Create your Sarva account' : 'Welcome to Sarva Sports Complex Management'}
-        </p>
+    <div className="fixed inset-0 z-[2147483647] flex items-center justify-center px-4 pointer-events-none">
+      <div className="pointer-events-auto relative z-[2147483647] w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
+        <h1 className="text-2xl font-bold text-white">Sarva</h1>
+        <p className="mt-1 text-sm text-gray-300">Welcome to Sarva Sports Complex Management</p>
 
-        <form onSubmit={showRegister ? handleRegister : handleLogin} className="mt-6 space-y-4">
-          {showRegister && (
-            <>
-              <input
-                type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="First Name"
-                required
-                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-              />
-              <input
-                type="text"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Last Name"
-                required
-                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-              />
-              <input
-                type="text"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="Business Name"
-                required
-                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-              />
-            </>
-          )}
-
+        <form ref={loginFormRef} onSubmit={handleLogin} className="mt-6 space-y-4">
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="user@example.com"
             required
-            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+            disabled={false}
+            readOnly={false}
+            className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+          />
+          <input
+            type="text"
+            value={tenantSlug}
+            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+            placeholder="Company / Tenant (ex: sarva)"
+            className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
           />
 
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            required
-            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-          />
+          <div className="space-y-2">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              required
+              disabled={false}
+              readOnly={false}
+              className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+            />
+            <label className="flex items-center gap-2 text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+                disabled={false}
+                className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
+              />
+              Show password
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={rememberCredentials}
+                onChange={(e) => setRememberCredentials(e.target.checked)}
+                disabled={false}
+                className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
+              />
+              Keep me signed in for 7 days
+            </label>
+          </div>
 
           {error && <div className="rounded-md bg-red-500/10 p-2 text-sm text-red-300">{error}</div>}
           {success && <div className="rounded-md bg-emerald-500/10 p-2 text-sm text-emerald-300">{success}</div>}
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-70"
+            disabled={false}
+            className="pointer-events-auto opacity-100 w-full rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
           >
-            {showRegister ? 'Register' : 'Login'}
+            {loading ? 'Please wait...' : 'Login'}
           </button>
+          {loading && (
+            <button
+              type="button"
+              onClick={() => setLoading(false)}
+              className="w-full rounded-md border border-white/20 bg-transparent px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10"
+            >
+              Reset Login Form
+            </button>
+          )}
         </form>
 
         <p className="mt-4 text-sm text-gray-300">
-          {showRegister ? 'Already have an account?' : 'Demo: test@example.com / Test123456'}{' '}
-          <button
-            type="button"
-            onClick={() => {
-              setShowRegister(!showRegister);
-              setError('');
-              setSuccess('');
-            }}
-            className="text-indigo-300 hover:text-indigo-200"
-          >
-            {showRegister ? 'Login here' : 'Create new account'}
-          </button>
+          Company onboarding is controlled by backend configuration.
         </p>
       </div>
     </div>
