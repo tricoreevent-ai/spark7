@@ -35,12 +35,16 @@ import { authMiddleware } from './middleware/auth.js';
 import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
 
+const distRoot = path.resolve(__dirname, '..');
+const runtimeRoot = path.resolve(distRoot, '..');
+
 const envCandidates = [
   process.env.APP_ENV_PATH,
   path.join(path.dirname(process.execPath), '.env'),
   typeof (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath === 'string'
     ? path.join((process as NodeJS.Process & { resourcesPath?: string }).resourcesPath as string, '.env')
     : undefined,
+  path.join(runtimeRoot, '.env'),
   path.resolve(process.cwd(), '.env'),
 ].filter((value): value is string => Boolean(value));
 
@@ -60,7 +64,7 @@ if (!loadedEnvPath) {
 const app: Express = express();
 const PORT: number = Number(process.env.PORT) || 3000;
 const DB_RETRY_MS: number = Number(process.env.DB_RETRY_MS) || 15000;
-const clientDistPath = path.resolve(process.cwd(), 'dist/client');
+const clientDistPath = path.join(distRoot, 'client');
 
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
   if (typeof value !== 'string') return fallback;
@@ -77,12 +81,32 @@ const parseCsv = (value: string | undefined): string[] => {
 // Use SERVE_CLIENT=false when frontend is deployed separately.
 const serveClient = parseBoolean(process.env.SERVE_CLIENT, true);
 const allowedCorsOrigins = parseCsv(process.env.CORS_ORIGIN || process.env.FRONTEND_URL);
+const clientIndexPath = path.join(clientDistPath, 'index.html');
+
+const logRuntimeSummary = (): void => {
+  console.log(
+    'Runtime env summary:',
+    JSON.stringify({
+      nodeEnv: process.env.NODE_ENV || '',
+      port: PORT,
+      serveClient,
+      frontendUrl: process.env.FRONTEND_URL || '',
+      corsOrigin: process.env.CORS_ORIGIN || '',
+      databaseUrlConfigured: Boolean(String(process.env.DATABASE_URL || '').trim()),
+      smtpConfigured: Boolean(String(process.env.SMTP_HOST || '').trim() && String(process.env.SMTP_USER || '').trim()),
+      runtimeRoot,
+      distRoot,
+      clientIndexExists: fs.existsSync(clientIndexPath),
+    })
+  );
+};
 
 if (loadedEnvPath) {
   console.log(`Loaded environment from ${loadedEnvPath}`);
 } else {
   console.warn('No .env file found in expected runtime locations. Using process environment/defaults.');
 }
+logRuntimeSummary();
 
 // Middleware
 app.use(cors({
@@ -167,10 +191,13 @@ app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
 
 if (serveClient) {
   // Combined mode: API + built frontend served from the same Node process.
+  if (!fs.existsSync(clientIndexPath)) {
+    console.warn(`Client index not found at ${clientIndexPath}. Frontend routes may fail until dist/client is present.`);
+  }
   app.use(express.static(clientDistPath));
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(clientDistPath, 'index.html'));
+    res.sendFile(clientIndexPath);
   });
 } else {
   // Separate mode: backend only, frontend hosted on a different service.
