@@ -1,6 +1,6 @@
 # SPARK AI Hosting And Deployment Guide
 
-This guide prepares SPARK AI for the same style of deployment workflow used in the `tricore` reference project: a clear repo structure, explicit deployment entry scripts, and one generated `production-ready/` output for separate backend and frontend hosting.
+This guide prepares SPARK AI for the same style of deployment workflow used in the `tricore` reference project: a clear repo structure, explicit deployment entry scripts, and one generated deployment output for separate backend and frontend hosting.
 
 ## 1. Deployment Model
 
@@ -23,6 +23,8 @@ The repo now includes these top-level helpers:
   Runs the deployment build and opens the generated output folder.
 - `build-separate-deploy.bat`
   The underlying packaging script used by the wrappers above.
+- `build-hostinger-deploy.bat`
+  Hostinger-specific wrapper that builds using the Spark 7 production domains and copies private deployment env files into the output package when they exist.
 
 ## 3. Repo Structure For Hosting
 
@@ -39,6 +41,8 @@ SPARK AI/
 ├─ build-separate-deploy.bat
 ├─ .env.example
 ├─ .env.client.example
+├─ .env.hostinger
+├─ .env.client.hostinger
 └─ production-ready/
    ├─ server/
    ├─ client/
@@ -67,17 +71,36 @@ The generated output includes:
 - `production-ready/server-deploy.zip`
 - `production-ready/client-deploy.zip`
 
-## 5. Backend Hosting Steps
+## 5. Hostinger Build Command
+
+For the current SPARK AI production domain setup, use:
+
+```bat
+build-hostinger-deploy.bat
+```
+
+This assumes:
+
+- backend API: `https://api.spark7.in`
+- frontend origin: `https://www.spark7.in`
+- frontend alias: `https://spark7.in`
+
+It also copies these private local files into the package when available:
+
+- `.env.hostinger`
+- `.env.client.hostinger`
+
+## 6. Backend Hosting Steps
 
 1. Upload `production-ready/server-deploy.zip` to your backend host.
 2. Extract the package.
-3. Create `.env` from `.env.example`.
+3. If you used `build-hostinger-deploy.bat`, the real `.env` file is already copied into the package. Otherwise create `.env` from `.env.example`.
 4. Set at least:
    - `DATABASE_URL`
    - `JWT_SECRET`
    - `PORT`
    - `SERVE_CLIENT=false`
-   - `CORS_ORIGIN=https://your-frontend-domain.com`
+   - `CORS_ORIGIN=https://www.spark7.in,https://spark7.in`
 5. Run:
 
 ```bash
@@ -92,12 +115,12 @@ The backend package contains:
 - a minimal `package.json`
 - a `server.js` entry point
 
-## 6. Frontend Hosting Steps
+## 7. Frontend Hosting Steps
 
 1. Upload `production-ready/client-deploy.zip` to your static host.
 2. Extract the package.
-3. Create `.env.client` from `.env.client.example` if your host supports runtime env injection before build.
-4. Ensure `VITE_API_BASE_URL` points to the deployed backend.
+3. If you used `build-hostinger-deploy.bat`, the client is already built against `https://api.spark7.in`.
+4. Ensure the public domain points to the uploaded frontend files.
 5. Configure your host to rewrite unknown routes to `/index.html`.
 
 If you want to serve the generated client folder locally for testing:
@@ -112,9 +135,18 @@ Or from inside the generated client package:
 start-client.bat 5173
 ```
 
-## 7. Environment Templates
+## 8. Environment Files
 
-### Server template
+### Private Hostinger env files
+
+Use these local files for the real deployment values:
+
+- `.env.hostinger`
+- `.env.client.hostinger`
+
+They are ignored by git and are safe for real credentials.
+
+### Tracked templates
 
 Use `.env.example` as the base for backend hosting.
 
@@ -129,19 +161,47 @@ Important keys:
 - `SMTP_*`
 - `RAZORPAY_*`
 
-### Client template
-
 Use `.env.client.example` as the base for frontend builds.
 
-Important keys:
+The tracked example files now contain the real Spark 7 production domains and business metadata, but they intentionally omit private credentials.
 
-- `VITE_API_BASE_URL`
-- `VITE_API_URL`
-- branding and print-related `VITE_*` values
+### Current Hostinger values used by this project
+
+Backend:
+
+- `NODE_ENV=production`
+- `SERVE_CLIENT=false`
+- `FRONTEND_URL=https://www.spark7.in`
+- `CORS_ORIGIN=https://www.spark7.in,https://spark7.in`
+- `PORT=3000`
+
+Frontend:
+
+- `VITE_API_BASE_URL=https://api.spark7.in`
+- `VITE_API_URL=https://api.spark7.in`
+- business email: `contact@spark7.in`
+- business phone: `08197711814`
+- business address: `Monarch Serenity, Thanisandra Main Road, Bangalore, Karnataka - 560077, India`
 
 The deployment packaging step automatically syncs both templates and appends env keys referenced by the source.
 
-## 8. Local Validation Before Hosting
+## 9. Hostinger Notes
+
+Hostinger supports Node.js applications, GitHub-based deployment, custom domains, and for VPS deployments reverse proxy in front of your Node.js service. Official references:
+
+- https://www.hostinger.com/support/how-to-deploy-a-nodejs-website-in-hostinger/
+- https://www.hostinger.com/support/how-to-migrate-a-node-js-application-to-hostinger/
+- https://www.hostinger.com/support/how-to-connect-a-custom-domain-to-a-node-js-application/
+- https://www.hostinger.com/tutorials/how-to-point-domain-to-hostinger
+- https://www.hostinger.com/tutorials/how-to-set-up-nginx-reverse-proxy
+
+Recommended mapping for this project:
+
+1. Point `www.spark7.in` and `spark7.in` to the frontend hosting target.
+2. Point `api.spark7.in` to the backend Hostinger Node.js app or VPS.
+3. Install SSL for all three hostnames in Hostinger.
+
+## 10. Local Validation Before Hosting
 
 Run these checks before creating a deployment package:
 
@@ -159,7 +219,7 @@ Recommended smoke checks after deployment:
 5. sales invoice creation
 6. report screen load
 
-## 9. Operational Notes
+## 11. Operational Notes
 
 - `production-ready/` is generated and not committed to git.
 - `dist/`, logs, backups, and installer output are also local-only.

@@ -142,6 +142,10 @@ if (Test-Path -LiteralPath $clientTemplate) {
 
 $serverLines = Get-Lines -Path $ServerEnvPath
 $clientLines = Get-Lines -Path $ClientEnvPath
+$primaryFrontendOrigin = ($FrontendOrigin -split ',')[0].Trim()
+if ([string]::IsNullOrWhiteSpace($primaryFrontendOrigin)) {
+  $primaryFrontendOrigin = $FrontendOrigin
+}
 
 $serverEnvKeysFromCode = Extract-UniqueMatches -RootPath (Join-Path $ProjectRoot 'src\server') -Pattern 'process\.env\.([A-Z0-9_]+)'
 $clientEnvKeysFromCode = Extract-UniqueMatches -RootPath (Join-Path $ProjectRoot 'src\client') -Pattern '\b(VITE_[A-Z0-9_]+)\b'
@@ -157,7 +161,7 @@ foreach ($key in $clientEnvKeysFromCode) {
 $serverLines = Set-Or-AppendEnvKey -Lines $serverLines -Key 'NODE_ENV' -Value 'production'
 $serverLines = Set-Or-AppendEnvKey -Lines $serverLines -Key 'SERVE_CLIENT' -Value 'false'
 $serverLines = Set-Or-AppendEnvKey -Lines $serverLines -Key 'CORS_ORIGIN' -Value $FrontendOrigin
-$serverLines = Set-Or-AppendEnvKey -Lines $serverLines -Key 'FRONTEND_URL' -Value $FrontendOrigin
+$serverLines = Set-Or-AppendEnvKey -Lines $serverLines -Key 'FRONTEND_URL' -Value $primaryFrontendOrigin
 
 $clientLines = Set-Or-AppendEnvKey -Lines $clientLines -Key 'VITE_API_BASE_URL' -Value $BackendApiBaseUrl
 if (($clientEnvKeysFromCode -contains 'VITE_API_URL') -or (($clientLines | Where-Object { $_ -match '^\s*VITE_API_URL\s*=' }).Count -gt 0)) {

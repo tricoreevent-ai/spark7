@@ -139,6 +139,12 @@ Or with explicit backend and frontend URLs:
 build-deploy.bat production-ready https://api.yourdomain.com https://app.yourdomain.com
 ```
 
+For the Hostinger production setup used by SPARK AI:
+
+```bat
+build-hostinger-deploy.bat
+```
+
 ### Deploy packages
 
 ```bat
@@ -192,6 +198,19 @@ Frontend deployment summary:
 
 Full instructions are in [docs/HOSTING_DEPLOYMENT.md](./docs/HOSTING_DEPLOYMENT.md).
 
+## Hostinger Defaults
+
+The Hostinger deployment flow now assumes:
+- frontend: `https://www.spark7.in`
+- frontend alias: `https://spark7.in`
+- backend API: `https://api.spark7.in`
+
+Private deployment env files for this setup live locally in:
+- `.env.hostinger`
+- `.env.client.hostinger`
+
+These files are intentionally ignored by git so real credentials do not end up in the public repository.
+
 ## Environment Templates
 
 Server settings live in:
@@ -210,6 +229,7 @@ npm run dev:client
 npm run build:server
 npm run build:client
 npm run build:production
+npm run build:hostinger
 ```
 
 ## Notes

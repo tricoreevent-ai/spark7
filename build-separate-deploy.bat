@@ -4,9 +4,9 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "OUTPUT_ROOT=%~1"
 if "%OUTPUT_ROOT%"=="" set "OUTPUT_ROOT=production-ready"
 set "BACKEND_API_BASE_URL=%~2"
-if "%BACKEND_API_BASE_URL%"=="" set "BACKEND_API_BASE_URL=https://api.example.com"
+if "%BACKEND_API_BASE_URL%"=="" set "BACKEND_API_BASE_URL=https://api.spark7.in"
 set "FRONTEND_ORIGIN=%~3"
-if "%FRONTEND_ORIGIN%"=="" set "FRONTEND_ORIGIN=https://app.example.com"
+if "%FRONTEND_ORIGIN%"=="" set "FRONTEND_ORIGIN=https://www.spark7.in,https://spark7.in"
 
 set "ROOT=%~dp0"
 set "DIST_DIR=%ROOT%dist"
@@ -66,11 +66,15 @@ if exist "%DIST_DIR%\client" (
 )
 
 echo Building client...
+set "VITE_API_BASE_URL=%BACKEND_API_BASE_URL%"
+set "VITE_API_URL=%BACKEND_API_BASE_URL%"
 call npm run build:client
 if errorlevel 1 (
   echo Client build failed.
   exit /b 1
 )
+set "VITE_API_BASE_URL="
+set "VITE_API_URL="
 
 if not exist "%DIST_DIR%\server" (
   echo Missing "%DIST_DIR%\server".
