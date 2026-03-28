@@ -4,6 +4,9 @@
   "description": "POS + Inventory + SaaS Application",
   "main": "dist/server/app.js",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev:server": "tsx src/server/app.ts",
     "dev:client": "vite --mode client",
@@ -21,8 +24,9 @@
     "deploy": "deploy-app.bat",
     "deploy:hostinger": "build-hostinger-deploy.bat",
     "preview": "vite preview --mode client",
-    "start": "node dist/server/app.js",
+    "start": "node dist/app.js",
     "start:server": "node dist/server/start.js",
+    "start:hostinger": "node dist/app.js",
     "start:prod": "npm run prepare:runtime && node dist/server/start.js",
     "test": "echo \"No test specified\" && exit 0"
   },

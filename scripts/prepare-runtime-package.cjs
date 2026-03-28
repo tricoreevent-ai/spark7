@@ -1,14 +1,54 @@
 const fs = require('fs');
 const path = require('path');
 
-const runtimePackagePaths = [
-  path.join(process.cwd(), 'dist', 'package.json'),
-  path.join(process.cwd(), 'dist', 'desktop', 'package.json'),
-  path.join(process.cwd(), 'dist', 'server', 'package.json'),
+const distRoot = path.join(process.cwd(), 'dist');
+const runtimePackages = [
+  {
+    filePath: path.join(distRoot, 'package.json'),
+    payload: {
+      name: 'sarva-runtime',
+      private: true,
+      type: 'commonjs',
+      main: 'app.js',
+      scripts: {
+        start: 'node app.js',
+      },
+      engines: {
+        node: '22.x',
+      },
+    },
+  },
+  {
+    filePath: path.join(distRoot, 'desktop', 'package.json'),
+    payload: {
+      type: 'commonjs',
+    },
+  },
+  {
+    filePath: path.join(distRoot, 'server', 'package.json'),
+    payload: {
+      private: true,
+      type: 'commonjs',
+      main: 'app.js',
+      scripts: {
+        start: 'node app.js',
+      },
+      engines: {
+        node: '22.x',
+      },
+    },
+  },
 ];
 
-for (const filePath of runtimePackagePaths) {
+const runtimeBootstrapPath = path.join(distRoot, 'app.js');
+const runtimeBootstrap = `'use strict';\nrequire('./server/app.js');\n`;
+
+for (const { filePath, payload } of runtimePackages) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify({ type: 'commonjs' }));
+  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
   console.log(`Prepared ${path.relative(process.cwd(), filePath)}`);
 }
+
+fs.mkdirSync(path.dirname(runtimeBootstrapPath), { recursive: true });
+fs.writeFileSync(runtimeBootstrapPath, runtimeBootstrap);
+console.log(`Prepared ${path.relative(process.cwd(), runtimeBootstrapPath)}`);
