@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useProducts, Product } from '../hooks/useProducts';
 import { formatCurrency } from '../config';
+import { apiUrl } from './utils/api';
 
 interface CartItem extends Product {
   cartQuantity: number;
@@ -64,7 +65,7 @@ export const Sales: React.FC = () => {
         quantity: item.cartQuantity
       }));
 
-      const response = await fetch('http://localhost:3000/api/orders', {
+      const response = await fetch(apiUrl('/api/orders'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

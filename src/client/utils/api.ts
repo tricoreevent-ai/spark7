@@ -7,11 +7,31 @@ export interface ApiJson {
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 const LOCAL_API_BASE_URL = 'http://127.0.0.1:3000';
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+const isLocalHost = (value: string): boolean => LOCAL_HOSTS.has(String(value || '').trim().toLowerCase());
+
+const shouldUseConfiguredBase = (configured: string): boolean => {
+  if (typeof window === 'undefined') return true;
+  if (window.location.protocol === 'file:') return true;
+
+  try {
+    const parsed = new URL(configured, window.location.origin);
+    const configuredIsLocal = isLocalHost(parsed.hostname);
+    const browserIsLocal = isLocalHost(window.location.hostname);
+    if (configuredIsLocal && !browserIsLocal) {
+      return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+};
 
 export const getApiBaseUrl = (): string => {
   const env = (import.meta as any)?.env || {};
   const configured = env.VITE_API_BASE_URL || env.VITE_API_URL;
-  if (typeof configured === 'string' && configured.trim()) {
+  if (typeof configured === 'string' && configured.trim() && shouldUseConfiguredBase(configured.trim())) {
     return trimTrailingSlash(configured.trim());
   }
 
@@ -19,16 +39,13 @@ export const getApiBaseUrl = (): string => {
     return LOCAL_API_BASE_URL;
   }
 
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  if (isLocalHost(window.location.hostname)) {
     // Force IPv4 locally because the API server may bind only to 0.0.0.0 on Windows.
     return LOCAL_API_BASE_URL;
   }
 
-  // For network access from other machines, use current hostname with port 3000
-  // This allows accessing app via http://192.168.x.x:3000 from other machines
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:3000`;
+  // Hosted web deployments should default to same-origin /api requests.
+  return '';
 };
 
 export const apiUrl = (path: string): string => {
