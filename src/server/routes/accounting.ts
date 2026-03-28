@@ -1185,7 +1185,11 @@ router.post('/books/bank/reconcile', authMiddleware, async (req: AuthenticatedRe
   try {
     const { entryIds } = req.body;
     if (!Array.isArray(entryIds) || entryIds.length === 0) {
-      return res.status(400).json({ success: false, error: 'entryIds array is required' });
+      return res.json({
+        success: true,
+        data: { matched: 0, modified: 0 },
+        message: 'Select at least one bank entry to reconcile',
+      });
     }
 
     const result = await AccountLedgerEntry.updateMany(

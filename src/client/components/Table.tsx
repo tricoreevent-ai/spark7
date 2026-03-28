@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
+import { PaginationControls } from './PaginationControls';
 
 export interface Column<T> {
   header: string;
@@ -16,6 +18,8 @@ interface TableProps<T> {
   keyField?: keyof T;
   emptyMessage?: string;
   sortable?: boolean;
+  itemLabel?: string;
+  initialPageSize?: number;
 }
 
 export const Table = <T extends Record<string, any>>({ 
@@ -24,6 +28,8 @@ export const Table = <T extends Record<string, any>>({
   keyField = '_id', 
   emptyMessage = 'No data found',
   sortable = true,
+  itemLabel = 'rows',
+  initialPageSize = 10,
 }: TableProps<T>) => {
   const [sortState, setSortState] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
 
@@ -57,6 +63,21 @@ export const Table = <T extends Record<string, any>>({
       return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * directionMultiplier;
     });
   }, [columns, data, sortState, sortable]);
+
+  const {
+    currentPage,
+    endIndex,
+    pageSize,
+    paginatedRows,
+    setCurrentPage,
+    setPageSize,
+    startIndex,
+    totalPages,
+    totalRows,
+  } = usePaginatedRows(sortedData, {
+    initialPageSize,
+    resetDeps: [sortedData.length],
+  });
 
   const toggleSort = (index: number) => {
     if (!sortable) return;
@@ -104,8 +125,8 @@ export const Table = <T extends Record<string, any>>({
           </tr>
         </thead>
         <tbody className="divide-y divide-white/5 bg-transparent">
-          {sortedData.length > 0 ? (
-            sortedData.map((item, rowIndex) => (
+          {paginatedRows.length > 0 ? (
+            paginatedRows.map((item, rowIndex) => (
               <tr key={item[keyField] || rowIndex}>
                 {columns.map((col, colIndex) => (
                   <td 
@@ -126,6 +147,19 @@ export const Table = <T extends Record<string, any>>({
           )}
         </tbody>
       </table>
+      <div className="px-4 py-1 sm:px-6">
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalRows={totalRows}
+          pageSize={pageSize}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          itemLabel={itemLabel}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
     </div>
   );
 };

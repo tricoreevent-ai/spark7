@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -58,6 +60,7 @@ export const Employees: React.FC = () => {
     const token = localStorage.getItem('token');
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   }, []);
+  const employeesPagination = usePaginatedRows(employees, { initialPageSize: 10 });
 
   const loadEmployees = async () => {
     try {
@@ -221,7 +224,7 @@ export const Employees: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {employees.map((emp) => (
+                {employeesPagination.paginatedRows.map((emp) => (
                   <tr key={emp._id}>
                     <td className="px-3 py-2 text-sm text-white">{emp.employeeCode}</td>
                     <td className="px-3 py-2 text-sm text-white">{emp.name}</td>
@@ -255,12 +258,23 @@ export const Employees: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-                {employees.length === 0 && (
+                {employeesPagination.paginatedRows.length === 0 && (
                   <tr><td colSpan={7} className="px-3 py-3 text-sm text-center text-gray-400">No employees yet.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={employeesPagination.currentPage}
+            totalPages={employeesPagination.totalPages}
+            totalRows={employeesPagination.totalRows}
+            pageSize={employeesPagination.pageSize}
+            startIndex={employeesPagination.startIndex}
+            endIndex={employeesPagination.endIndex}
+            itemLabel="employees"
+            onPageChange={employeesPagination.setCurrentPage}
+            onPageSizeChange={employeesPagination.setPageSize}
+          />
         </div>
       </div>
 

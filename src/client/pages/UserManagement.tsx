@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { EMPTY_PERMISSIONS, PAGE_KEYS, PageKey, PermissionMatrix } from '@shared/rbac';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
 interface ManagedUser {
@@ -52,6 +54,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
     const token = localStorage.getItem('token');
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   }, []);
+  const usersPagination = usePaginatedRows(users, { initialPageSize: 10 });
 
   const clearBanner = () => {
     setError('');
@@ -314,7 +317,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {users.map((user) => (
+                {usersPagination.paginatedRows.map((user) => (
                   <tr key={user._id}>
                     <td className="px-3 py-2 text-sm text-white">{user.firstName} {user.lastName}</td>
                     <td className="px-3 py-2 text-sm text-gray-300">{user.email}</td>
@@ -344,7 +347,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && (
+                {usersPagination.paginatedRows.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-3 py-3 text-center text-sm text-gray-400">
                       No users found.
@@ -354,6 +357,17 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={usersPagination.currentPage}
+            totalPages={usersPagination.totalPages}
+            totalRows={usersPagination.totalRows}
+            pageSize={usersPagination.pageSize}
+            startIndex={usersPagination.startIndex}
+            endIndex={usersPagination.endIndex}
+            itemLabel="users"
+            onPageChange={usersPagination.setCurrentPage}
+            onPageSizeChange={usersPagination.setPageSize}
+          />
         </div>
       </div>
 

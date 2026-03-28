@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
 
 const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
@@ -185,6 +187,22 @@ export const Accounting: React.FC = () => {
     subType: 'general',
   });
 
+  const cashEntries = cashBook?.entries || [];
+  const bankEntries = bankBook?.entries || [];
+  const reconciliationPending = bankBook?.reconciliationPending || [];
+  const trialBalanceRows = trialBalance?.rows || [];
+
+  const daybookPagination = usePaginatedRows(daybookRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
+  const voucherPagination = usePaginatedRows(voucherRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
+  const cashBookPagination = usePaginatedRows<any>(cashEntries, { initialPageSize: 10, resetDeps: [startDate, endDate] });
+  const bankBookPagination = usePaginatedRows<any>(bankEntries, { initialPageSize: 10, resetDeps: [startDate, endDate] });
+  const reconciliationPagination = usePaginatedRows<any>(reconciliationPending, {
+    initialPageSize: 10,
+    resetDeps: [startDate, endDate],
+  });
+  const ledgerPagination = usePaginatedRows<any>(ledgerRows, { initialPageSize: 10, resetDeps: [startDate, endDate, selectedAccountId] });
+  const trialBalancePagination = usePaginatedRows<any>(trialBalanceRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
+
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');
     return {
@@ -324,8 +342,15 @@ export const Accounting: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    setSelectedReconcileIds([]);
+  }, [startDate, endDate, bankBook?.reconciliationPending?.length]);
+
   const handleRefreshCurrentTab = () => {
     withLoading(async () => {
+      if (startDate > endDate) {
+        throw new Error('Start date must be before end date');
+      }
       if (activeTab === 'payments' || activeTab === 'expenses') {
         await refreshEmployeeMaster();
         await refreshPayments();
@@ -486,6 +511,20 @@ export const Accounting: React.FC = () => {
     await refreshVouchers();
   };
 
+  const renderTablePagination = (pagination: any, itemLabel: string) => (
+    <PaginationControls
+      currentPage={pagination.currentPage}
+      totalPages={pagination.totalPages}
+      totalRows={pagination.totalRows}
+      pageSize={pagination.pageSize}
+      startIndex={pagination.startIndex}
+      endIndex={pagination.endIndex}
+      itemLabel={itemLabel}
+      onPageChange={pagination.setCurrentPage}
+      onPageSizeChange={pagination.setPageSize}
+    />
+  );
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -624,7 +663,7 @@ export const Accounting: React.FC = () => {
             <table className="min-w-full text-sm">
               <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Date</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Category</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
               <tbody>
-                {daybookRows.map((row) => (
+                {daybookPagination.paginatedRows.map((row) => (
                   <tr key={row._id} className="border-t border-white/10">
                     <td className="px-2 py-1">{new Date(row.entryDate).toLocaleDateString('en-IN')}</td>
                     <td className="px-2 py-1 uppercase">{row.entryType}</td>
@@ -633,8 +672,16 @@ export const Accounting: React.FC = () => {
                     <td className="px-2 py-1 space-x-2"><button className="text-indigo-300" onClick={() => editDaybook(row)}>Edit</button><button className="text-red-300" onClick={() => deleteDaybook(row)}>Delete</button></td>
                   </tr>
                 ))}
+                {daybookPagination.paginatedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-3 text-center text-gray-400">
+                      No entries found for the selected range.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+            {renderTablePagination(daybookPagination, 'entries')}
           </div>
         </div>
       )}
@@ -730,7 +777,7 @@ export const Accounting: React.FC = () => {
             <table className="min-w-full text-sm">
               <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">No</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Date</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
               <tbody>
-                {voucherRows.map((row) => (
+                {voucherPagination.paginatedRows.map((row) => (
                   <tr key={row._id} className="border-t border-white/10">
                     <td className="px-2 py-1">{row.voucherNumber}</td>
                     <td className="px-2 py-1 uppercase">{row.voucherType}</td>
@@ -739,8 +786,16 @@ export const Accounting: React.FC = () => {
                     <td className="px-2 py-1"><button className="text-indigo-300" onClick={() => printVoucher(row)}>Print</button></td>
                   </tr>
                 ))}
+                {voucherPagination.paginatedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-3 text-center text-gray-400">
+                      No vouchers found for the selected range.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+            {renderTablePagination(voucherPagination, 'vouchers')}
           </div>
         </div>
       )}
@@ -763,28 +818,152 @@ export const Accounting: React.FC = () => {
               <p className="text-sm text-white">Closing: {formatCurrency(bankBook?.closingBalance || 0)}</p>
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <h3 className="text-white font-semibold">Bank Reconciliation Pending</h3>
-            <div className="space-y-1">
-              {(bankBook?.reconciliationPending || []).map((row: any) => (
-                <label key={row._id} className="flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={selectedReconcileIds.includes(row._id)}
-                    onChange={(e) => {
-                      setSelectedReconcileIds((prev) =>
-                        e.target.checked ? [...prev, row._id] : prev.filter((id) => id !== row._id)
-                      );
-                    }}
-                  />
-                  {new Date(row.entryDate).toLocaleDateString('en-IN')} - {row.voucherNumber || row.referenceNo || row._id}
-                </label>
-              ))}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-semibold">Cash Book Entries</h3>
+                  <p className="text-xs text-gray-400">Filtered by the selected date range above.</p>
+                </div>
+              </div>
+              <table className="mt-3 min-w-full text-sm">
+                <thead>
+                  <tr className="text-gray-300">
+                    <th className="px-2 py-1 text-left">Date</th>
+                    <th className="px-2 py-1 text-left">Source</th>
+                    <th className="px-2 py-1 text-left">Type</th>
+                    <th className="px-2 py-1 text-left">Narration</th>
+                    <th className="px-2 py-1 text-left">Reference</th>
+                    <th className="px-2 py-1 text-left">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashBookPagination.paginatedRows.map((row: any, index: number) => (
+                    <tr key={`${row.reference}-${index}`} className="border-t border-white/10">
+                      <td className="px-2 py-1">{new Date(row.time).toLocaleDateString('en-IN')}</td>
+                      <td className="px-2 py-1 capitalize">{row.source}</td>
+                      <td className={`px-2 py-1 font-medium ${row.type === 'inflow' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {row.type}
+                      </td>
+                      <td className="px-2 py-1 text-gray-300">{row.narration}</td>
+                      <td className="px-2 py-1 text-gray-400">{row.reference || '-'}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.amount || 0)}</td>
+                    </tr>
+                  ))}
+                  {cashBookPagination.paginatedRows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-2 py-3 text-center text-gray-400">
+                        No cash book entries found for the selected range.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {renderTablePagination(cashBookPagination, 'cash entries')}
             </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-semibold">Bank Book Entries</h3>
+                  <p className="text-xs text-gray-400">Review inflow and outflow before reconciliation.</p>
+                </div>
+              </div>
+              <table className="mt-3 min-w-full text-sm">
+                <thead>
+                  <tr className="text-gray-300">
+                    <th className="px-2 py-1 text-left">Date</th>
+                    <th className="px-2 py-1 text-left">Source</th>
+                    <th className="px-2 py-1 text-left">Type</th>
+                    <th className="px-2 py-1 text-left">Narration</th>
+                    <th className="px-2 py-1 text-left">Reference</th>
+                    <th className="px-2 py-1 text-left">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bankBookPagination.paginatedRows.map((row: any, index: number) => (
+                    <tr key={`${row.reference}-${index}`} className="border-t border-white/10">
+                      <td className="px-2 py-1">{new Date(row.time).toLocaleDateString('en-IN')}</td>
+                      <td className="px-2 py-1 capitalize">{row.source}</td>
+                      <td className={`px-2 py-1 font-medium ${row.type === 'inflow' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {row.type}
+                      </td>
+                      <td className="px-2 py-1 text-gray-300">{row.narration}</td>
+                      <td className="px-2 py-1 text-gray-400">{row.reference || '-'}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.amount || 0)}</td>
+                    </tr>
+                  ))}
+                  {bankBookPagination.paginatedRows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-2 py-3 text-center text-gray-400">
+                        No bank book entries found for the selected range.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {renderTablePagination(bankBookPagination, 'bank entries')}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-white font-semibold">Bank Reconciliation Pending</h3>
+                <p className="text-xs text-gray-400">Select bank ledger rows to mark them as reconciled.</p>
+              </div>
+              <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-gray-300">
+                Selected: <span className="font-semibold text-white">{selectedReconcileIds.length}</span>
+              </div>
+            </div>
+            <table className="mt-3 min-w-full text-sm">
+              <thead>
+                <tr className="text-gray-300">
+                  <th className="px-2 py-1 text-left">Pick</th>
+                  <th className="px-2 py-1 text-left">Date</th>
+                  <th className="px-2 py-1 text-left">Voucher</th>
+                  <th className="px-2 py-1 text-left">Narration</th>
+                  <th className="px-2 py-1 text-left">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reconciliationPagination.paginatedRows.map((row: any) => (
+                  <tr key={row._id} className="border-t border-white/10">
+                    <td className="px-2 py-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedReconcileIds.includes(row._id)}
+                        onChange={(e) => {
+                          setSelectedReconcileIds((prev) =>
+                            e.target.checked ? [...prev, row._id] : prev.filter((id) => id !== row._id)
+                          );
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-1">{new Date(row.entryDate).toLocaleDateString('en-IN')}</td>
+                    <td className="px-2 py-1">{row.voucherNumber || row.referenceNo || row._id}</td>
+                    <td className="px-2 py-1 text-gray-300">{row.narration || row.voucherType || '-'}</td>
+                    <td className="px-2 py-1">{formatCurrency(Math.max(Number(row.debit || 0), Number(row.credit || 0)))}</td>
+                  </tr>
+                ))}
+                {reconciliationPagination.paginatedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-3 text-center text-gray-400">
+                      No bank entries pending reconciliation for the selected range.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {renderTablePagination(reconciliationPagination, 'pending rows')}
             <button
               className={`${buttonClass} mt-2`}
+              disabled={selectedReconcileIds.length === 0}
               onClick={() =>
                 withLoading(async () => {
+                  if (selectedReconcileIds.length === 0) {
+                    setMessage('Select at least one bank entry to reconcile.');
+                    return;
+                  }
                   await apiJson('/api/accounting/books/bank/reconcile', {
                     method: 'POST',
                     body: JSON.stringify({ entryIds: selectedReconcileIds }),
@@ -835,7 +1014,7 @@ export const Accounting: React.FC = () => {
             <table className="min-w-full text-sm mt-2">
               <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Date</th><th className="px-2 py-1 text-left">Voucher</th><th className="px-2 py-1 text-left">Debit</th><th className="px-2 py-1 text-left">Credit</th><th className="px-2 py-1 text-left">Balance</th></tr></thead>
               <tbody>
-                {ledgerRows.map((row) => (
+                {ledgerPagination.paginatedRows.map((row) => (
                   <tr key={row._id} className="border-t border-white/10">
                     <td className="px-2 py-1">{new Date(row.entryDate).toLocaleDateString('en-IN')}</td>
                     <td className="px-2 py-1">{row.voucherNumber || row.voucherType}</td>
@@ -844,8 +1023,16 @@ export const Accounting: React.FC = () => {
                     <td className="px-2 py-1">{formatCurrency(row.runningBalance || 0)}</td>
                   </tr>
                 ))}
+                {ledgerPagination.paginatedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-3 text-center text-gray-400">
+                      Select an account to load ledger entries for the chosen range.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+            {renderTablePagination(ledgerPagination, 'ledger rows')}
           </div>
         </div>
       )}
@@ -862,8 +1049,24 @@ export const Accounting: React.FC = () => {
               <h3 className="text-white font-semibold mb-2">Trial Balance</h3>
               <table className="min-w-full text-sm">
                 <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Account</th><th className="px-2 py-1 text-left">Debit</th><th className="px-2 py-1 text-left">Credit</th></tr></thead>
-                <tbody>{(trialBalance?.rows || []).slice(0, 20).map((row: any) => <tr key={row.accountId} className="border-t border-white/10"><td className="px-2 py-1">{row.accountCode} - {row.accountName}</td><td className="px-2 py-1">{formatCurrency(row.debitBalance || 0)}</td><td className="px-2 py-1">{formatCurrency(row.creditBalance || 0)}</td></tr>)}</tbody>
+                <tbody>
+                  {trialBalancePagination.paginatedRows.map((row: any) => (
+                    <tr key={row.accountId} className="border-t border-white/10">
+                      <td className="px-2 py-1">{row.accountCode} - {row.accountName}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.debitBalance || 0)}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.creditBalance || 0)}</td>
+                    </tr>
+                  ))}
+                  {trialBalancePagination.paginatedRows.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-2 py-3 text-center text-gray-400">
+                        No trial balance rows found for the selected range.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
               </table>
+              {renderTablePagination(trialBalancePagination, 'trial balance rows')}
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
               <h3 className="text-white font-semibold mb-2">Balance Sheet</h3>

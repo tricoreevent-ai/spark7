@@ -22,7 +22,7 @@ interface NavbarProps {
   showCompanyCreationMenu?: boolean;
 }
 
-type MenuCategory = 'Home' | 'Sales' | 'Catalog' | 'People' | 'Operations' | 'Admin';
+type MenuCategory = 'Home' | 'Sales' | 'Catalog' | 'People' | 'Operations' | 'Accounts' | 'Admin';
 
 const menuItems = [
   { key: 'dashboard' as PageKey, name: 'Dashboard', path: '/', category: 'Home' as MenuCategory, icon: '🏠' },
@@ -52,9 +52,9 @@ const menuItems = [
   { key: 'memberships' as PageKey, name: 'Create Subscription', path: '/membership-subscriptions/create', category: 'Operations' as MenuCategory, icon: '📝' },
   { key: 'memberships' as PageKey, name: 'Memberships', path: '/memberships', category: 'Operations' as MenuCategory, icon: '🎫' },
   { key: 'memberships' as PageKey, name: 'Membership Reports', path: '/membership-reports', category: 'Operations' as MenuCategory, icon: '📊' },
+  { key: 'accounting' as PageKey, name: 'Accounting', path: '/accounting', category: 'Accounts' as MenuCategory, icon: '📚' },
+  { key: 'accounting' as PageKey, name: 'Settlements', path: '/accounting/settlements', category: 'Accounts' as MenuCategory, icon: '💳' },
   { key: 'settings' as PageKey, name: 'Settings', path: '/settings', category: 'Admin' as MenuCategory, icon: '⚙️' },
-  { key: 'accounting' as PageKey, name: 'Accounting', path: '/accounting', category: 'Admin' as MenuCategory, icon: '📚' },
-  { key: 'accounting' as PageKey, name: 'Settlements', path: '/accounting/settlements', category: 'Admin' as MenuCategory, icon: '💳' },
   { key: 'user-management' as PageKey, name: 'Users', path: '/user-management', category: 'Admin' as MenuCategory, icon: '🛡️' },
 ];
 
@@ -178,13 +178,14 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
     setAndSyncUiPreferences(next);
   };
 
-  const categoryOrder: MenuCategory[] = ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Admin'];
+  const categoryOrder: MenuCategory[] = ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Accounts', 'Admin'];
   const categoryIcons: Record<MenuCategory, string> = {
     Home: '🏠',
     Sales: '💰',
     Catalog: '📦',
     People: '👥',
     Operations: '🏟️',
+    Accounts: '📚',
     Admin: '⚙️',
   };
   const categoryStyles: Record<MenuCategory, { button: string; panel: string; label: string }> = {
@@ -212,6 +213,11 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
       button: 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20',
       panel: 'from-fuchsia-500/20 to-fuchsia-400/5',
       label: 'text-fuchsia-200',
+    },
+    Accounts: {
+      button: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20',
+      panel: 'from-cyan-500/20 to-cyan-400/5',
+      label: 'text-cyan-200',
     },
     Admin: {
       button: 'border-rose-500/30 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20',

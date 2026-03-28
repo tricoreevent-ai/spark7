@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
 interface AttendanceProps {
@@ -52,6 +54,7 @@ export const Attendance: React.FC<AttendanceProps> = ({ currentUserRole }) => {
   const [loadingRegister, setLoadingRegister] = useState(false);
   const loadRequestIdRef = useRef(0);
   const isAdmin = useMemo(() => isAdminRole(currentUserRole), [currentUserRole]);
+  const rowsPagination = usePaginatedRows(rows, { initialPageSize: 10, resetDeps: [date] });
 
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');
@@ -150,7 +153,7 @@ export const Attendance: React.FC<AttendanceProps> = ({ currentUserRole }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {rows.map((row) => {
+            {rowsPagination.paginatedRows.map((row) => {
               const state = {
                 status: row.attendance?.status || 'present',
                 checkIn: row.attendance?.checkIn || '',
@@ -173,11 +176,22 @@ export const Attendance: React.FC<AttendanceProps> = ({ currentUserRole }) => {
                 />
               );
             })}
-            {rows.length === 0 && (
+            {rowsPagination.paginatedRows.length === 0 && (
               <tr><td colSpan={9} className="px-2 py-3 text-sm text-center text-gray-400">No active employees found.</td></tr>
             )}
           </tbody>
         </table>
+        <PaginationControls
+          currentPage={rowsPagination.currentPage}
+          totalPages={rowsPagination.totalPages}
+          totalRows={rowsPagination.totalRows}
+          pageSize={rowsPagination.pageSize}
+          startIndex={rowsPagination.startIndex}
+          endIndex={rowsPagination.endIndex}
+          itemLabel="attendance rows"
+          onPageChange={rowsPagination.setCurrentPage}
+          onPageSizeChange={rowsPagination.setPageSize}
+        />
       </div>
     </div>
   );

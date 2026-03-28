@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import {
   DEFAULT_GENERAL_SETTINGS,
   GeneralSettings,
@@ -49,6 +51,7 @@ export const Settings: React.FC = () => {
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sectionCard = 'rounded-xl border border-white/10 bg-white/5 p-5';
+  const backupHistoryPagination = usePaginatedRows(backupRestoreHistory, { initialPageSize: 10 });
 
   useEffect(() => {
     const loadCurrentUserRole = async () => {
@@ -802,14 +805,14 @@ export const Settings: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {backupRestoreHistory.length === 0 && !backupRestoreHistoryLoading ? (
+                {backupHistoryPagination.paginatedRows.length === 0 && !backupRestoreHistoryLoading ? (
                   <tr>
                     <td colSpan={5} className="px-2 py-3 text-center text-gray-500">
                       No backup/restore history found.
                     </td>
                   </tr>
                 ) : (
-                  backupRestoreHistory.map((row) => (
+                  backupHistoryPagination.paginatedRows.map((row) => (
                     <tr key={row.id} className="border-t border-white/10">
                       <td className="px-2 py-2">{formatHistoryTime(row.createdAt)}</td>
                       <td className="px-2 py-2">{formatBackupAction(row.action)}</td>
@@ -824,6 +827,17 @@ export const Settings: React.FC = () => {
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={backupHistoryPagination.currentPage}
+            totalPages={backupHistoryPagination.totalPages}
+            totalRows={backupHistoryPagination.totalRows}
+            pageSize={backupHistoryPagination.pageSize}
+            startIndex={backupHistoryPagination.startIndex}
+            endIndex={backupHistoryPagination.endIndex}
+            itemLabel="history rows"
+            onPageChange={backupHistoryPagination.setCurrentPage}
+            onPageSizeChange={backupHistoryPagination.setPageSize}
+          />
         </div>
       </section>
     </div>

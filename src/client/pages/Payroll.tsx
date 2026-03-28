@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
+import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { jsPDF } from 'jspdf';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -32,6 +34,7 @@ export const Payroll: React.FC = () => {
     const token = localStorage.getItem('token');
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   }, []);
+  const rowsPagination = usePaginatedRows(rows, { initialPageSize: 10, resetDeps: [month] });
 
   const generate = async () => {
     setError('');
@@ -163,7 +166,7 @@ export const Payroll: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {rows.map((row) => (
+            {rowsPagination.paginatedRows.map((row) => (
               <tr key={row.employeeId}>
                 <td className="px-2 py-2 text-sm text-white">{row.employeeCode}</td>
                 <td className="px-2 py-2 text-sm text-white">{row.name}</td>
@@ -180,11 +183,22 @@ export const Payroll: React.FC = () => {
                 <td className="px-2 py-2 text-sm font-semibold text-emerald-300">{formatCurrency(row.totalPayable)}</td>
               </tr>
             ))}
-            {!rows.length && (
+            {!rowsPagination.paginatedRows.length && (
               <tr><td colSpan={13} className="px-2 py-3 text-center text-sm text-gray-400">No payroll data generated yet.</td></tr>
             )}
           </tbody>
         </table>
+        <PaginationControls
+          currentPage={rowsPagination.currentPage}
+          totalPages={rowsPagination.totalPages}
+          totalRows={rowsPagination.totalRows}
+          pageSize={rowsPagination.pageSize}
+          startIndex={rowsPagination.startIndex}
+          endIndex={rowsPagination.endIndex}
+          itemLabel="payroll rows"
+          onPageChange={rowsPagination.setCurrentPage}
+          onPageSizeChange={rowsPagination.setPageSize}
+        />
       </div>
     </div>
   );
