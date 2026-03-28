@@ -2,7 +2,7 @@
   "name": "sarva",
   "version": "1.1.0",
   "description": "POS + Inventory + SaaS Application",
-  "main": "dist/desktop/main/main.js",
+  "main": "dist/server/app.js",
   "type": "module",
   "scripts": {
     "dev:server": "tsx src/server/app.ts",
@@ -71,6 +71,9 @@
   "build": {
     "appId": "com.sparkai.app",
     "productName": "SPARK AI",
+    "extraMetadata": {
+      "main": "dist/desktop/main/main.js"
+    },
     "directories": {
       "output": "installer"
     },
