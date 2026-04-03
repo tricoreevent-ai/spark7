@@ -1,447 +1,402 @@
 # SPARK AI User Manual
 
-SPARK AI is a business operations platform for sports arenas, retail counters, memberships, facilities, and finance teams. This manual explains the day-to-day workflows used by operators, supervisors, and administrators.
+Last updated: April 3, 2026
 
-## 1. What SPARK AI Covers
+## Introduction
 
-SPARK AI combines the following business areas:
+SPARK AI is a business operations application used to manage daily work in one place. Depending on your role, you may use it for sales, products, customers, bookings, memberships, staff records, accounting, reports, or administration.
 
-- sales and billing
-- quotations and customer follow-up
-- products, categories, and stock
-- suppliers and procurement
-- returns and credit adjustments
-- employees, attendance, shifts, and payroll
-- facilities and event bookings
-- membership plans and subscriptions
-- accounting, settlements, and reports
-- settings, users, and permissions
+This manual is written for everyday users of the application. It explains how to move around the system, complete common tasks, and get help when something does not work as expected.
 
-## 2. Accessing The Application
+Important notes:
 
-### Browser deployment
+- The screens you see may be different from another user because access depends on your role.
+- Some options may be available only to managers or administrators.
+- Use the public `/user-manual` page from the login screen or the in-app `User Manual` button whenever you need this guide.
 
-1. Open the SPARK AI URL provided by your administrator.
-2. Enter your email and password.
-3. If your company uses tenant-based login, enter the company slug when prompted.
+## Getting Started
 
-### Windows desktop build
+### Accessing the Application
 
-1. Install the Windows package provided by your administrator.
-2. Open `SPARK AI` from the desktop or Start menu.
-3. Wait until the login screen is available.
+To open SPARK AI:
 
-## 3. Login And Session Basics
+- Open a supported browser such as Google Chrome or Microsoft Edge.
+- Go to the web address shared by your organization.
+- Wait for the login page to load completely before entering details.
 
-The login screen typically supports:
+### Logging In
 
-- email
-- password
-- optional company or tenant slug
-- show password
-- remember session or keep signed in
+To sign in:
 
-If login fails:
+- Enter your email address.
+- Enter your company or tenant name if your organization uses it.
+- Enter your password.
+- Click `Login`.
 
-1. Confirm the email address.
-2. Confirm the password.
-3. Confirm the company slug if your deployment uses one.
-4. Ask an administrator to verify that the user account is active.
+Helpful reminders:
 
-## 4. Roles And Menu Visibility
+- Use the exact email address given to you by your administrator.
+- Passwords are case-sensitive.
+- If the login screen shows a network or fetch error, refresh the page and try again.
 
-SPARK AI uses role-based access. Users only see the modules granted to their role.
+### Setting Up a User Account
 
-Common role examples:
+In most cases, end-user accounts are created by an administrator.
 
-- admin
-- manager
-- sales
-- accountant
-- operations
+If you need an account:
 
-Main menu groups:
+- Contact your administrator or manager.
+- Ask for your login email, password, and company or tenant name if required.
+- Confirm which modules you should have access to.
 
-- Home
-- Sales
-- Operations
-- Admin
+If your organization uses company onboarding:
 
-If a menu is missing, first check the user role and page permissions.
+- Follow the instructions shared by your administrator.
+- Complete only the fields requested for your role.
+- Ask for approval before entering live business information.
 
-## 5. Home Dashboard
+## Dashboard Overview
 
-The Home dashboard is the main overview screen after login. It is used to monitor:
+After login, the dashboard is your main starting point.
 
-- sales activity
-- stock or product shortcuts
-- operational reminders
-- booking activity
-- membership activity
-- accounting or reports shortcuts
+You will usually see:
 
-Use this screen to move into the right module quickly rather than as a data-entry screen.
+- Main menu categories such as `Home`, `Sales`, `Catalog`, `People`, `Operations`, `Accounts`, and `Admin`
+- Quick links to the modules you are allowed to use
+- Summary cards or reminders for current activity
+- Top navigation controls for font size, theme, help, and logout
 
-## 6. Sales Module
+### Main Navigation
 
-### POS and billing
-
-Use the Sales screen to create invoices and collect payments.
-
-Typical workflow:
-
-1. Search and add products.
-2. Select an existing customer or continue as walk-in.
-3. Choose payment mode.
-4. Save or post the invoice.
-5. Print the invoice if needed.
-
-### Orders and sales history
-
-Use Orders to review previous invoices and posted sales.
-
-Common actions:
-
-- search by invoice number
-- filter by customer
-- review line items
-- reopen or print invoices
-- convert draft records where allowed
-
-### Quotations
-
-Use Quotations to prepare customer offers before billing.
-
-Common actions:
-
-- create a quote
-- add products and quantities
-- select pricing type
-- set tax mode
-- track quote status
-- review version history
-- approve and convert to draft invoice
-
-### Customers
-
-Use Customers to maintain reusable customer profiles.
-
-Typical data stored:
-
-- customer name
-- phone and email
-- billing contact
-- price tier
-- credit limit
-- credit days
-- account status
-
-### Returns
-
-Use Returns to process item reversals and sales corrections.
-
-Common actions:
-
-- search original invoice
-- record returned items
-- calculate refund or adjustment
-- update stock reversal where applicable
-
-## 7. Product And Inventory Module
-
-### Product entry
-
-Use Product Entry to create new items.
-
-Common fields:
-
-- product name
-- category
-- barcode or SKU
-- unit
-- product type
-- sales price
-- purchase price
-- tax behavior
-- opening stock
-- reorder level
-
-### Product catalog
-
-Use Product Catalog to search and maintain the full product list.
-
-Common actions:
-
-- search products
-- edit product details
-- review stock-linked information
-- move to stock alerts or product entry
-
-### Categories
-
-Use Categories to group products for search and reporting.
-
-### Inventory and stock alerts
-
-Use Inventory and Stock Alerts to monitor:
-
-- current stock
-- low-stock items
-- out-of-stock items
-- stock adjustments
-
-Review these screens regularly to prevent overselling and stock mismatch.
-
-### Procurement
-
-Use Procurement for supplier-linked purchase workflows.
-
-Common actions:
-
-- maintain suppliers
-- create purchase orders
-- receive stock
-- record purchase returns
-
-## 8. Operations Module
-
-### Employees
-
-Use Employees to maintain the employee master.
-
-Common actions:
-
-- add employee
-- edit employee details
-- assign employment type
-- activate or deactivate employees
-
-### Attendance
-
-Use Attendance to record daily presence and working hours.
-
-Typical data:
-
-- date
-- attendance status
-- check-in
-- check-out
-- overtime
-- notes
-
-### Shifts
-
-Use Shifts to plan or assign daily work schedules.
-
-### Payroll
-
-Use Payroll to generate salary output based on employee and attendance records.
-
-### Facilities and bookings
-
-Use Facilities to maintain courts, halls, grounds, or other bookable spaces.
-
-Use booking screens to:
-
-- create reservations
-- update booking status
-- collect or verify payment
-- reschedule or cancel
-
-### Events
-
-Use Event Booking for organizer-driven or scheduled events that need booking status and payment tracking.
-
-## 9. Membership Module
-
-SPARK AI supports memberships through plans, subscriptions, and reports.
-
-### Membership plans
-
-Use plan management to:
-
-- create plans
-- edit plan pricing
-- activate or deactivate plans
-- control validity and renewal settings
-
-### Subscriptions
-
-Use subscriptions to:
-
-- enroll a member
-- assign a plan
-- start or renew a subscription
-- review validity dates
-- update member status
-
-### Membership reports
-
-Use reports to review:
-
-- active subscriptions
-- expiring subscriptions
-- renewal opportunities
-- membership summaries
-
-## 10. Accounting And Settlement
-
-Use Accounting for finance operations and ledger-related workflows.
+Use the top navigation bar to move between work areas.
 
 Common areas include:
 
-- opening balances
-- expenses and income
-- vouchers
-- chart of accounts
-- salary and contract entries
-- cash and bank views
+- `Home`: Main dashboard and quick overview
+- `Sales`: Billing, orders, quotations, customers, and sales reports
+- `Catalog`: Product entry, product catalog, categories, stock alerts, and procurement
+- `People`: Employees, attendance, shifts, and payroll
+- `Operations`: Facility booking, event booking, memberships, and membership reports
+- `Accounts`: Accounting and settlements
+- `Admin`: Settings and user management
 
-Use Settlement Center for:
+### Key Buttons and Controls
 
-- receipt vouchers
-- credit notes
-- settlement review
-- day-end closure support
+You may see these common controls on many screens:
 
-Finance access should be restricted to authorized users only.
+- `Create`, `Add`, or `New`: Start a new record
+- `Save` or `Submit`: Store the information you entered
+- `Edit`: Update an existing record
+- `Refresh`: Reload the latest data
+- `Search`: Find a record quickly
+- `Filter`: Narrow the data shown on screen
+- `Export` or `Print`: Download or print information
+- `?`: Open the in-app Help page
 
-## 11. Reports
+## Key Features
 
-Use Reports for operational and financial analysis.
+The exact features available to you depend on your role. The sections below explain the main workflows in plain language.
 
-Common report types include:
+### 1. Sales and Billing
 
-- daily sales summary
-- item-wise sales
-- customer-wise sales
-- sales returns
-- gross profit
-- outstanding receivables
-- attendance summaries
-- cash vs credit sales
-- user-wise sales
+Use the Sales area to create invoices and process day-to-day billing.
 
-Most reports support filters, search, and export-friendly review.
+To create a sale:
 
-## 12. Settings And Administration
+- Open `Sales Dashboard`.
+- Select `New Sale (POS)` or open the billing screen.
+- Search for products by name, code, or barcode.
+- Add the product to the bill.
+- Enter customer details if needed.
+- Review quantity, rate, discounts, and tax.
+- Choose the payment method.
+- Save, post, or print the invoice.
 
-### Settings
+To review past sales:
 
-Use Settings to configure:
+- Open `Orders` or `Sales History`.
+- Use search, status filters, and date filters if available.
+- Open a row to review the full transaction.
 
-- business information
-- branding
-- invoice details
-- print settings
-- email settings
-- backup and restore support
+### 2. Quotations
 
-### User management
+Use quotations to prepare an estimate before billing the customer.
 
-Use Users and role controls to:
+To create a quotation:
 
-- create users
-- edit users
-- activate or deactivate users
-- assign roles
-- manage page permissions
+- Open `Sales` > `Quotations`.
+- Enter customer details.
+- Add quote items.
+- Check pricing, tax setting, and notes.
+- Save the quotation.
 
-### Company creation
+To revise or approve a quotation:
 
-Some deployments allow company creation from the login area. If enabled, administrators can create a new tenant or company using the configured onboarding flow.
+- Open the quotation register.
+- Select the quotation you want to work on.
+- Edit details if changes are needed.
+- Save a new version or mark it approved.
 
-## 13. Keyboard Shortcuts
+To convert a quotation:
 
-The shortcut panel can usually be opened with `?` and closed with `Esc`.
+- Open an approved quotation.
+- Use the convert option to create a draft invoice or order if your role allows it.
 
-Typical sales shortcuts include:
+### 3. Customers
 
-- `Ctrl + S` or `F9` to save invoice
-- `Alt + 1` cash
-- `Alt + 2` card
-- `Alt + 3` UPI
-- `Alt + 4` bank
-- `Alt + P` post invoice
-- `Alt + D` save draft
+Use the customer screen to store and review customer information.
 
-Shortcut behavior is mainly intended for the Sales screen.
+To add or update a customer:
 
-## 14. Backups, Printing, And Exports
+- Open `Customers`.
+- Click `Add` or select an existing customer.
+- Enter the required contact details.
+- Save the record.
 
-Common output and recovery features:
+To find a customer later:
 
-- invoice print
-- receipt print
-- report exports
-- payroll exports
-- database backup
-- database restore
+- Use search by name, phone, email, or code.
+- Open the record to view profile details, pricing, activities, or credit information.
 
-Best practice:
+### 4. Product Entry and Product Catalog
 
-1. Take regular backups.
-2. Take a fresh backup before restore.
-3. Test print formats after printer or paper changes.
+Use the Catalog area to add and maintain items used in billing or stock control.
 
-## 15. Troubleshooting
+To add a product:
 
-### Data is missing
+- Open `Catalog` > `Product Entry`.
+- Enter the product name and code if needed.
+- Choose the product type or category.
+- Enter price, stock, tax, and status details.
+- Save the product.
 
-Check:
+To review products:
 
-1. the correct tenant or company login
-2. user permissions
-3. date filters
-4. search filters
-5. that the backend is connected to the intended database
+- Open `Catalog` > `Product Catalog`.
+- Use search and filters to narrow the list.
+- Open `Edit` when you need to update a product.
 
-### Product or customer lists are blank
+To monitor stock:
 
-Check:
+- Open `Stock Alerts`.
+- Review low stock, inactive products, or other flagged items.
 
-1. that the backend API is running
-2. that the browser is calling the correct API base URL
-3. that the logged-in user has the needed module access
+### 5. Categories and Procurement
 
-### Email is not sending
+Use categories to organize products and procurement to manage purchases.
 
-Check:
+To manage categories:
 
-1. SMTP settings
-2. sender credentials
-3. whether test email succeeds from Settings
+- Open `Categories`.
+- Create a new category or update an existing one.
+- Save changes so products can be grouped correctly.
 
-### Desktop build is not opening correctly
+To manage procurement:
 
-Check:
+- Open `Procurement`.
+- Add or review suppliers.
+- Create a purchase order when new stock is needed.
+- Record goods received and verify item quantities.
 
-1. that the installed build is current
-2. that backend env settings are correct
-3. local logs if your deployment captures them
+### 6. Employees, Attendance, Shifts, and Payroll
 
-## 16. First-Time Administrator Checklist
+Use the People area to manage staff records and attendance-related work.
 
-After a fresh deployment:
+To add an employee:
 
-1. confirm database connectivity
-2. log in as admin
-3. complete business settings
-4. configure email settings
-5. create roles and users
-6. add categories and products
-7. verify inventory and pricing
-8. configure customers, suppliers, and procurement if needed
-9. configure employees, facilities, and membership plans if needed
-10. test sales, quotations, reports, and permissions
+- Open `Employees`.
+- Click the add option.
+- Enter staff details and save.
 
-## 17. Support Information To Share
+To mark attendance:
 
-When reporting an issue, provide:
+- Open `Attendance`.
+- Select the work date.
+- Mark each employee's status.
+- Save the attendance register.
 
-- user email
-- tenant or company slug
-- screen name
-- exact error message
-- time of issue
-- whether it happened in browser or desktop mode
+To manage shifts:
+
+- Open `Shifts`.
+- Create or update shift timing and weekly off settings.
+- Save the changes.
+
+To process payroll:
+
+- Open `Payroll`.
+- Select the payroll month.
+- Review attendance-based calculations.
+- Save or export the payroll information as needed.
+
+### 7. Facility and Event Bookings
+
+Use Operations to manage venue and event reservations.
+
+To create a facility booking:
+
+- Open `Facility Booking`.
+- Select the date, time, and facility.
+- Enter customer information.
+- Confirm booking charges.
+- Save the booking.
+
+To create an event booking:
+
+- Open `Event Booking`.
+- Enter organizer or customer details.
+- Select the required facilities and event dates.
+- Review payment or advance details.
+- Save the booking.
+
+### 8. Memberships
+
+Use the membership area to manage plans and subscriber records.
+
+To create a plan:
+
+- Open `Create Plan`.
+- Enter the plan name, amount, validity, and rules.
+- Save the plan.
+
+To create a membership:
+
+- Open `Create Subscription`.
+- Select the member and plan.
+- Enter the start date and payment details.
+- Save the subscription.
+
+To review membership performance:
+
+- Open `Membership Reports`.
+- Use the available report cards and filters to check renewals, revenue, and activity.
+
+### 9. Accounting and Settlements
+
+Use the Accounts area to monitor financial records and complete closing tasks.
+
+To use Accounting:
+
+- Open `Accounts` > `Accounting`.
+- Choose the tab you need, such as expenses, vouchers, cash book, bank book, ledger, or reports.
+- Use the date range fields at the top to filter records.
+- Click `Refresh` to reload the figures for the selected period.
+
+To use Settlements:
+
+- Open `Accounts` > `Settlements`.
+- Record receipts, credit notes, or other settlement actions.
+- Review the confirmation message after saving.
+
+### 10. Reports
+
+Use reports to review business performance and activity.
+
+To generate a report:
+
+- Open `Reports`.
+- Choose the report area you want.
+- Set the date range or filters.
+- Click `Refresh` or the available action button.
+- Review the results on screen.
+- Export or print if required.
+
+### 11. Settings and User Management
+
+These sections are usually available only to administrators or managers.
+
+Common tasks include:
+
+- Updating business profile details
+- Managing logos and print settings
+- Reviewing backups
+- Creating or updating user access
+- Controlling which pages a user can open
+
+## Tips and Best Practices
+
+Use these tips to work faster and avoid mistakes:
+
+- Check the selected date or date range before reviewing reports or books.
+- Use search and filters instead of scrolling through long lists.
+- Save records only after reviewing key fields like amount, date, customer, and status.
+- Refresh the page data after major actions if you do not see the latest result immediately.
+- Use clear notes or narration fields so future users can understand the entry.
+- Keep customer, product, and employee names consistent to avoid duplicate records.
+- Log out when you finish using a shared device.
+- If a menu or button is missing, it may be related to your user permissions.
+
+## Troubleshooting Common Issues
+
+### I forgot my password
+
+- Contact your administrator or manager.
+- Ask for a password reset or a temporary password.
+- Try again after the reset has been confirmed.
+
+### I cannot log in
+
+Check the following:
+
+- Confirm that your email and password are correct.
+- Make sure Caps Lock is not on.
+- Enter the company or tenant name if your organization requires it.
+- Refresh the page and try again.
+- If the problem continues, contact your administrator.
+
+### The page is loading but data is missing
+
+Try these steps:
+
+- Click `Refresh` on the current screen.
+- Check the selected date or filters.
+- Clear the search field if one is applied.
+- Sign out and sign in again.
+- If the data still does not appear, report the page name and date range to support.
+
+### The application says "Failed to fetch" or shows a network error
+
+- Check your internet connection.
+- Refresh the browser tab.
+- Close other tabs if the browser is running slowly.
+- Try again in Chrome or Edge.
+- If the problem continues, contact support with a screenshot.
+
+### A table or report is too long to review
+
+- Use pagination at the bottom of the table to move between pages.
+- Change the page size if available.
+- Use date range filters to narrow the results.
+- Use search to find a specific record quickly.
+
+### Printing, export, or downloads are not working
+
+- Make sure pop-ups are not blocked by the browser.
+- Check that a printer is installed if you are printing.
+- Retry the action after refreshing the page.
+- If the file still does not download, try another supported browser.
+
+### Browser compatibility
+
+For the best experience:
+
+- Use the latest version of Google Chrome or Microsoft Edge.
+- Avoid very old browsers.
+- Keep your browser updated for security and performance.
+
+## Support and Contact
+
+If you need help:
+
+- Contact your administrator for password resets, permissions, and account access.
+- Contact your internal support team for business data corrections or process questions.
+- Use the in-app `User Manual` button for a quick guide while working.
+
+When reporting an issue, include:
+
+- Your name and role
+- The page where the issue happened
+- The date and time of the issue
+- What you were trying to do
+- A screenshot of the error if possible
+
+If your organization has a dedicated support contact, use the support details shared by your administrator or help desk.

@@ -15,6 +15,7 @@ import { Employees } from './pages/Employees';
 import { EventManagement } from './pages/EventManagement';
 import { Facilities } from './pages/Facilities';
 import { FacilitySetup } from './pages/FacilitySetup';
+import { HelpCenter } from './pages/HelpCenter';
 import { Memberships } from './pages/Memberships';
 import { MembershipReports } from './pages/MembershipReports';
 import { Orders } from './pages/Orders';
@@ -1150,9 +1151,9 @@ function App() {
     setSuccess('');
   };
 
-  if (isLoggedIn && user) {
-    return (
-      <BrowserRouter>
+  return (
+    <BrowserRouter>
+      {isLoggedIn && user ? (
         <div className="sarva-shell min-h-screen bg-transparent">
           <Navbar
             onLogout={handleLogout}
@@ -1202,6 +1203,8 @@ function App() {
             <Route path="/accounting" element={permissions.accounting ? <Accounting /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/accounting/settlements" element={permissions.accounting ? <SettlementCenter /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/reports" element={permissions.reports ? <Reports /> : <Navigate to={fallbackPath} replace />} />
+            <Route path="/help" element={<Navigate to="/user-manual" replace />} />
+            <Route path="/user-manual" element={<HelpCenter />} />
             <Route path="/employees" element={permissions.employees ? <Employees /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/attendance" element={permissions.attendance ? <Attendance currentUserRole={user.role as string | undefined} /> : <Navigate to={fallbackPath} replace />} />
             <Route path="/shifts" element={permissions.shifts ? <Shifts /> : <Navigate to={fallbackPath} replace />} />
@@ -1222,94 +1225,109 @@ function App() {
           </Routes>
           <GlobalShortcutsPanel />
         </div>
-      </BrowserRouter>
-    );
-  }
+      ) : (
+        <Routes>
+          <Route path="/help" element={<Navigate to="/user-manual" replace />} />
+          <Route path="/user-manual" element={<HelpCenter isPublic />} />
+          <Route
+            path="*"
+            element={
+              <div className="fixed inset-0 z-[2147483647] flex items-center justify-center px-4 pointer-events-none">
+                <div className="pointer-events-auto relative z-[2147483647] w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
+                  <h1 className="text-2xl font-bold text-white">Sarva</h1>
+                  <p className="mt-1 text-sm text-gray-300">Welcome to Sarva Sports Complex Management</p>
 
-  return (
-    <div className="fixed inset-0 z-[2147483647] flex items-center justify-center px-4 pointer-events-none">
-      <div className="pointer-events-auto relative z-[2147483647] w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
-        <h1 className="text-2xl font-bold text-white">Sarva</h1>
-        <p className="mt-1 text-sm text-gray-300">Welcome to Sarva Sports Complex Management</p>
+                  <form ref={loginFormRef} onSubmit={handleLogin} className="mt-6 space-y-4">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      required
+                      disabled={false}
+                      readOnly={false}
+                      className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={tenantSlug}
+                      onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+                      placeholder="Company / Tenant (ex: sarva)"
+                      className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+                    />
 
-        <form ref={loginFormRef} onSubmit={handleLogin} className="mt-6 space-y-4">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="user@example.com"
-            required
-            disabled={false}
-            readOnly={false}
-            className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+                    <div className="space-y-2">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Enter password"
+                        required
+                        disabled={false}
+                        readOnly={false}
+                        className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
+                      />
+                      <label className="flex items-center gap-2 text-xs text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={showPassword}
+                          onChange={(e) => setShowPassword(e.target.checked)}
+                          disabled={false}
+                          className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
+                        />
+                        Show password
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={rememberCredentials}
+                          onChange={(e) => setRememberCredentials(e.target.checked)}
+                          disabled={false}
+                          className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
+                        />
+                        Keep me signed in for 7 days
+                      </label>
+                    </div>
+
+                    {error && <div className="rounded-md bg-red-500/10 p-2 text-sm text-red-300">{error}</div>}
+                    {success && <div className="rounded-md bg-emerald-500/10 p-2 text-sm text-emerald-300">{success}</div>}
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="submit"
+                        disabled={false}
+                        className="pointer-events-auto opacity-100 w-full rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+                      >
+                        {loading ? 'Please wait...' : 'Login'}
+                      </button>
+                      <a
+                        href="/user-manual"
+                        className="pointer-events-auto flex w-full items-center justify-center rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
+                      >
+                        Open User Manual
+                      </a>
+                    </div>
+                    {loading && (
+                      <button
+                        type="button"
+                        onClick={() => setLoading(false)}
+                        className="w-full rounded-md border border-white/20 bg-transparent px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10"
+                      >
+                        Reset Login Form
+                      </button>
+                    )}
+                  </form>
+
+                  <p className="mt-4 text-sm text-gray-300">
+                    Company onboarding is controlled by backend configuration.
+                  </p>
+                </div>
+              </div>
+            }
           />
-          <input
-            type="text"
-            value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
-            placeholder="Company / Tenant (ex: sarva)"
-            className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-          />
-
-          <div className="space-y-2">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              required
-              disabled={false}
-              readOnly={false}
-              className="pointer-events-auto opacity-100 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 focus:border-indigo-400 focus:outline-none"
-            />
-            <label className="flex items-center gap-2 text-xs text-gray-300">
-              <input
-                type="checkbox"
-                checked={showPassword}
-                onChange={(e) => setShowPassword(e.target.checked)}
-                disabled={false}
-                className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
-              />
-              Show password
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-300">
-              <input
-                type="checkbox"
-                checked={rememberCredentials}
-                onChange={(e) => setRememberCredentials(e.target.checked)}
-                disabled={false}
-                className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
-              />
-              Keep me signed in for 7 days
-            </label>
-          </div>
-
-          {error && <div className="rounded-md bg-red-500/10 p-2 text-sm text-red-300">{error}</div>}
-          {success && <div className="rounded-md bg-emerald-500/10 p-2 text-sm text-emerald-300">{success}</div>}
-
-          <button
-            type="submit"
-            disabled={false}
-            className="pointer-events-auto opacity-100 w-full rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
-          >
-            {loading ? 'Please wait...' : 'Login'}
-          </button>
-          {loading && (
-            <button
-              type="button"
-              onClick={() => setLoading(false)}
-              className="w-full rounded-md border border-white/20 bg-transparent px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10"
-            >
-              Reset Login Form
-            </button>
-          )}
-        </form>
-
-        <p className="mt-4 text-sm text-gray-300">
-          Company onboarding is controlled by backend configuration.
-        </p>
-      </div>
-    </div>
+        </Routes>
+      )}
+    </BrowserRouter>
   );
 }
 
