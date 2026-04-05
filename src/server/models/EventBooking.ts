@@ -2,6 +2,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IEventBooking extends Document {
   eventNumber?: string;
+  seriesId?: string;
+  seriesTotalDates?: number;
   eventName: string;
   organizerName: string;
   organizationName?: string;
@@ -10,12 +12,28 @@ export interface IEventBooking extends Document {
   facilityIds: mongoose.Types.ObjectId[];
   startTime: Date;
   endTime: Date;
+  occurrences?: Array<{
+    occurrenceDate: Date;
+    startTime: Date;
+    endTime: Date;
+  }>;
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
   paymentStatus: 'pending' | 'partial' | 'paid' | 'refunded';
   totalAmount: number;
   advanceAmount: number;
   paidAmount: number;
   balanceAmount: number;
+  payments?: Array<{
+    receiptNumber: string;
+    amount: number;
+    paymentMethod?: string;
+    paidAt: Date;
+    remarks?: string;
+    confirmationEmail?: string;
+    emailedAt?: Date;
+    emailedTo?: string;
+    receivedBy?: string;
+  }>;
   cancellationCharge: number;
   refundAmount: number;
   cancellationReason?: string;
@@ -40,6 +58,8 @@ export interface IEventBooking extends Document {
 const EventBookingSchema = new Schema<IEventBooking>(
   {
     eventNumber: { type: String, trim: true, index: true },
+    seriesId: { type: String, trim: true, index: true },
+    seriesTotalDates: { type: Number, min: 1, default: 1 },
     eventName: { type: String, required: true, trim: true },
     organizerName: { type: String, required: true, trim: true },
     organizationName: { type: String, trim: true },
@@ -55,6 +75,13 @@ const EventBookingSchema = new Schema<IEventBooking>(
     ],
     startTime: { type: Date, required: true, index: true },
     endTime: { type: Date, required: true, index: true },
+    occurrences: [
+      {
+        occurrenceDate: { type: Date, required: true, index: true },
+        startTime: { type: Date, required: true },
+        endTime: { type: Date, required: true },
+      },
+    ],
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'completed', 'cancelled'],
@@ -71,6 +98,19 @@ const EventBookingSchema = new Schema<IEventBooking>(
     advanceAmount: { type: Number, min: 0, default: 0 },
     paidAmount: { type: Number, min: 0, default: 0 },
     balanceAmount: { type: Number, min: 0, default: 0 },
+    payments: [
+      {
+        receiptNumber: { type: String, trim: true, required: true },
+        amount: { type: Number, required: true, min: 0 },
+        paymentMethod: { type: String, trim: true, default: 'cash' },
+        paidAt: { type: Date, required: true, default: () => new Date() },
+        remarks: { type: String, trim: true },
+        confirmationEmail: { type: String, trim: true, lowercase: true },
+        emailedAt: { type: Date },
+        emailedTo: { type: String, trim: true, lowercase: true },
+        receivedBy: { type: String, trim: true },
+      },
+    ],
     cancellationCharge: { type: Number, min: 0, default: 0 },
     refundAmount: { type: Number, min: 0, default: 0 },
     cancellationReason: { type: String, trim: true },
@@ -96,6 +136,7 @@ const EventBookingSchema = new Schema<IEventBooking>(
 
 EventBookingSchema.index({ startTime: 1, endTime: 1, status: 1 });
 EventBookingSchema.index({ eventNumber: 1, createdAt: -1 });
+EventBookingSchema.index({ seriesId: 1, createdAt: -1 });
+EventBookingSchema.index({ 'occurrences.occurrenceDate': 1, status: 1 });
 
 export const EventBooking = mongoose.model<IEventBooking>('EventBooking', EventBookingSchema);
-

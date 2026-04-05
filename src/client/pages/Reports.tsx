@@ -975,7 +975,8 @@ export const Reports: React.FC = () => {
         goToNextPage();
       }
 
-      doc.setFillColor(...(rowIndex % 2 === 0 ? palette.rowOdd : palette.rowEven));
+      const rowFill = rowIndex % 2 === 0 ? palette.rowOdd : palette.rowEven;
+      doc.setFillColor(rowFill[0], rowFill[1], rowFill[2]);
       doc.setDrawColor(...palette.rowBorder);
       doc.rect(margin, y, tableWidth, rowHeight, 'FD');
 
@@ -987,7 +988,8 @@ export const Reports: React.FC = () => {
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
-        doc.setTextColor(...(isNumeric ? palette.textBody : palette.textMuted));
+        const textColor = isNumeric ? palette.textBody : palette.textMuted;
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
 
         lines.forEach((line, lineIndex) => {
           const yLine = y + rowPaddingY + lineHeight + lineIndex * lineHeight - 0.8;

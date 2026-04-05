@@ -985,7 +985,9 @@ function App() {
     const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
     controls.forEach((control) => {
       control.disabled = false;
-      control.readOnly = false;
+      if (control instanceof HTMLInputElement) {
+        control.readOnly = false;
+      }
       control.removeAttribute('disabled');
       control.removeAttribute('readonly');
       control.style.pointerEvents = 'auto';

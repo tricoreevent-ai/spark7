@@ -37,6 +37,7 @@ const REQUIRED_SEQUENCE_KEYS = [
   'customer_code',
   'event_booking_number',
   'corporate_event_booking_number',
+  'event_payment_receipt_number',
   'sale_number',
   'invoice_number',
   'return_number',

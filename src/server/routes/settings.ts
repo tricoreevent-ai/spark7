@@ -102,6 +102,49 @@ router.get('/database-backup', async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
+router.get('/database-stats', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await requireSuperAdmin(req, res);
+    if (!user) return;
+
+    const db = mongoose.connection.db;
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database connection not ready' });
+    }
+
+    const [dbStats, collections] = await Promise.all([
+      db.command({ dbStats: 1, scale: 1 }),
+      db.listCollections({}, { nameOnly: true }).toArray(),
+    ]);
+
+    const names = collections
+      .map((entry) => String(entry.name || ''))
+      .filter((name) => Boolean(name) && !name.startsWith(RESERVED_COLLECTION_PREFIX))
+      .sort((a, b) => a.localeCompare(b));
+
+    res.json({
+      success: true,
+      data: {
+        dbName: db.databaseName,
+        collections: Number(dbStats.collections || names.length || 0),
+        objects: Number(dbStats.objects || 0),
+        avgObjSize: Number(dbStats.avgObjSize || 0),
+        dataSize: Number(dbStats.dataSize || 0),
+        storageSize: Number(dbStats.storageSize || 0),
+        indexSize: Number(dbStats.indexSize || 0),
+        totalSize: Number((dbStats.dataSize || 0) + (dbStats.indexSize || 0)),
+        fsUsedSize: Number(dbStats.fsUsedSize || 0),
+        fsTotalSize: Number(dbStats.fsTotalSize || 0),
+        collectionNames: names,
+        checkedAt: new Date(),
+        connectionState: mongoose.connection.readyState,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to load database stats' });
+  }
+});
+
 router.post('/database-restore', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = await requireSuperAdmin(req, res);

@@ -32,6 +32,22 @@ interface BackupRestoreHistoryItem {
   metadata?: Record<string, any>;
 }
 
+interface DatabaseStats {
+  dbName: string;
+  collections: number;
+  objects: number;
+  avgObjSize: number;
+  dataSize: number;
+  storageSize: number;
+  indexSize: number;
+  totalSize: number;
+  fsUsedSize: number;
+  fsTotalSize: number;
+  collectionNames: string[];
+  checkedAt?: string;
+  connectionState?: number;
+}
+
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<GeneralSettings>(() => getGeneralSettings());
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
@@ -48,6 +64,10 @@ export const Settings: React.FC = () => {
   const [backupRestoreHistoryError, setBackupRestoreHistoryError] = useState('');
   const [mailTestSending, setMailTestSending] = useState(false);
   const [mailTestMessage, setMailTestMessage] = useState('');
+  const [mailTestRecipient, setMailTestRecipient] = useState('');
+  const [databaseStats, setDatabaseStats] = useState<DatabaseStats | null>(null);
+  const [databaseStatsLoading, setDatabaseStatsLoading] = useState(false);
+  const [databaseStatsError, setDatabaseStatsError] = useState('');
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sectionCard = 'rounded-xl border border-white/10 bg-white/5 p-5';
@@ -194,7 +214,10 @@ export const Settings: React.FC = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ settings: mergeGeneralSettings(settings) }),
+        body: JSON.stringify({
+          settings: mergeGeneralSettings(settings),
+          recipientEmail: mailTestRecipient.trim(),
+        }),
       });
 
       setMailTestMessage(String(response?.message || 'Test email sent successfully.'));
@@ -206,6 +229,47 @@ export const Settings: React.FC = () => {
   };
 
   const isSuperAdmin = currentUserRole === 'super_admin';
+
+  const formatBytes = (value?: number) => {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = amount;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const loadDatabaseStats = async () => {
+    if (!isSuperAdmin) {
+      setDatabaseStats(null);
+      setDatabaseStatsError('');
+      return;
+    }
+
+    try {
+      setDatabaseStatsLoading(true);
+      setDatabaseStatsError('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setDatabaseStats(null);
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/settings/database-stats'), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setDatabaseStats((response?.data as DatabaseStats) || null);
+    } catch (error: any) {
+      setDatabaseStats(null);
+      setDatabaseStatsError(error?.message || 'Failed to load database stats');
+    } finally {
+      setDatabaseStatsLoading(false);
+    }
+  };
 
   const loadBackupRestoreHistory = async () => {
     if (!isSuperAdmin) {
@@ -240,6 +304,10 @@ export const Settings: React.FC = () => {
 
   useEffect(() => {
     void loadBackupRestoreHistory();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    void loadDatabaseStats();
   }, [isSuperAdmin]);
 
   const downloadDatabaseBackup = async () => {
@@ -633,7 +701,8 @@ export const Settings: React.FC = () => {
           <input className={inputClass} placeholder="SMTP User" value={settings.mail.smtpUser} onChange={(e) => updateMail('smtpUser', e.target.value)} />
           <input className={inputClass} type="password" placeholder="SMTP App Password" value={settings.mail.smtpPass} onChange={(e) => updateMail('smtpPass', e.target.value)} />
           <input className={inputClass} placeholder="From Email" value={settings.mail.smtpFromEmail} onChange={(e) => updateMail('smtpFromEmail', e.target.value)} />
-          <input className={inputClass} placeholder="Recipients (comma separated)" value={settings.mail.smtpToRecipients} onChange={(e) => updateMail('smtpToRecipients', e.target.value)} />
+          <input className={inputClass} placeholder="Default Recipients (comma separated)" value={settings.mail.smtpToRecipients} onChange={(e) => updateMail('smtpToRecipients', e.target.value)} />
+          <input className={inputClass} type="email" placeholder="Test Recipient Email" value={mailTestRecipient} onChange={(e) => setMailTestRecipient(e.target.value)} />
           <label className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200">
             <input
               type="checkbox"
@@ -644,7 +713,7 @@ export const Settings: React.FC = () => {
           </label>
         </div>
 
-        <p className="mt-3 text-xs text-gray-400">For Gmail use `smtp.gmail.com`, port `587`, and a Google App Password from the `Tricore` app.</p>
+        <p className="mt-3 text-xs text-gray-400">For Gmail use `smtp.gmail.com`, port `587`, and a Google App Password. If Test Recipient Email is blank, the system uses the default recipients field above.</p>
         {mailTestMessage && (
           <div className="mt-3 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
             {mailTestMessage}
@@ -736,6 +805,61 @@ export const Settings: React.FC = () => {
             {backupRestoreMessage}
           </div>
         )}
+
+        <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Database Utility Check</h3>
+              <p className="mt-1 text-xs text-gray-400">Check database health and current size from the admin menu.</p>
+            </div>
+            <button
+              type="button"
+              onClick={loadDatabaseStats}
+              disabled={!isSuperAdmin || databaseStatsLoading}
+              className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {databaseStatsLoading ? 'Checking...' : 'Run Check'}
+            </button>
+          </div>
+
+          {databaseStatsError && (
+            <div className="mt-3 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+              {databaseStatsError}
+            </div>
+          )}
+
+          {databaseStats && (
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-gray-400">Database</p>
+                <p className="mt-1 text-sm font-semibold text-white">{databaseStats.dbName || '-'}</p>
+                <p className="mt-1 text-[11px] text-gray-500">Checked {formatHistoryTime(databaseStats.checkedAt)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-gray-400">Total Size</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-300">{formatBytes(databaseStats.totalSize || databaseStats.storageSize)}</p>
+                <p className="mt-1 text-[11px] text-gray-500">Data {formatBytes(databaseStats.dataSize)} • Index {formatBytes(databaseStats.indexSize)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-gray-400">Collections / Records</p>
+                <p className="mt-1 text-sm font-semibold text-white">{databaseStats.collections} / {databaseStats.objects}</p>
+                <p className="mt-1 text-[11px] text-gray-500">Average object {formatBytes(databaseStats.avgObjSize)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-gray-400">Disk Usage</p>
+                <p className="mt-1 text-sm font-semibold text-cyan-200">{formatBytes(databaseStats.fsUsedSize)}</p>
+                <p className="mt-1 text-[11px] text-gray-500">Capacity {formatBytes(databaseStats.fsTotalSize)}</p>
+              </div>
+            </div>
+          )}
+
+          {databaseStats?.collectionNames?.length ? (
+            <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-400">Collections</p>
+              <p className="mt-2 text-sm text-gray-200">{databaseStats.collectionNames.join(', ')}</p>
+            </div>
+          ) : null}
+        </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
