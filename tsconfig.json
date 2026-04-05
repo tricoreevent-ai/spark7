@@ -32,5 +32,12 @@
     "transpileOnly": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/client/orders.ts",
+    "src/client/Sales.tsx",
+    "src/server/models/AddProduct.tsx",
+    "src/server/models/Categories.tsx"
+  ]
 }

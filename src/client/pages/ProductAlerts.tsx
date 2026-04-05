@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { Table, Column } from '../components/Table';
 import { Product, useProducts } from '../hooks/useProducts';
 
 const isInventoryItem = (product: Product): boolean => (product.itemType || 'inventory') === 'inventory';
@@ -12,6 +13,57 @@ const sortByStockGap = (a: Product, b: Product): number => {
 
 export const ProductAlerts: React.FC = () => {
   const { products, loading, error } = useProducts();
+
+  const columns: Column<Product>[] = useMemo(
+    () => [
+      {
+        header: 'Product',
+        sortValue: (product) => product.name || '',
+        render: (product) => (
+          <div>
+            <p className="font-semibold text-white">{product.name}</p>
+            <p className="text-xs text-gray-400">{product.sku || 'No SKU'} {product.barcode ? `• ${product.barcode}` : ''}</p>
+          </div>
+        ),
+      },
+      {
+        header: 'Type',
+        sortValue: (product) => product.itemType || 'inventory',
+        render: (product) => String(product.itemType || 'inventory').replace('_', ' '),
+      },
+      {
+        header: 'Category',
+        accessor: 'category',
+        render: (product) => product.category || '-',
+      },
+      {
+        header: 'Stock',
+        sortValue: (product) => Number(product.stock || 0),
+        render: (product) => Number(product.stock || 0),
+      },
+      {
+        header: 'Min',
+        sortValue: (product) => Number(product.minStock || 0),
+        render: (product) => Number(product.minStock || 0),
+      },
+      {
+        header: 'Reorder Qty',
+        sortValue: (product) => Number(product.reorderQuantity || 0),
+        render: (product) => Number(product.reorderQuantity || 0),
+      },
+      {
+        header: 'Action',
+        className: 'text-right',
+        sortable: false,
+        render: (product) => (
+          <Link to={`/products/edit/${product._id}`} className="text-sm font-semibold text-indigo-300 hover:text-indigo-200">
+            Edit Product
+          </Link>
+        ),
+      },
+    ],
+    []
+  );
 
   const data = useMemo(() => {
     const inventoryItems = products.filter(isInventoryItem);
@@ -139,43 +191,13 @@ export const ProductAlerts: React.FC = () => {
                 {section.empty}
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
-                <table className="min-w-full divide-y divide-white/10">
-                  <thead className="bg-white/5">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Product</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Type</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Category</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Stock</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Min</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-white">Reorder Qty</th>
-                      <th className="px-4 py-3 text-right text-sm font-semibold text-white">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/10">
-                    {section.rows.map((product) => (
-                      <tr key={product._id}>
-                        <td className="px-4 py-3 text-sm text-white">
-                          <div>
-                            <p className="font-semibold">{product.name}</p>
-                            <p className="text-xs text-gray-400">{product.sku || 'No SKU'} {product.barcode ? `• ${product.barcode}` : ''}</p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-300">{String(product.itemType || 'inventory').replace('_', ' ')}</td>
-                        <td className="px-4 py-3 text-sm text-gray-300">{product.category || '-'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-200">{Number(product.stock || 0)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-200">{Number(product.minStock || 0)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-200">{Number(product.reorderQuantity || 0)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Link to={`/products/edit/${product._id}`} className="text-sm font-semibold text-indigo-300 hover:text-indigo-200">
-                            Edit Product
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                data={section.rows}
+                columns={columns}
+                emptyMessage={section.empty}
+                itemLabel="products"
+                initialPageSize={10}
+              />
             )}
           </section>
         ))}
