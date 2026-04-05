@@ -367,10 +367,11 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
             <button
               type="button"
               title="User Manual"
+              aria-label="Open user manual"
               onClick={() => navigate('/user-manual')}
-              className="cursor-pointer rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
+              className="cursor-pointer flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-base font-semibold text-gray-100 hover:bg-white/10"
             >
-              Manual
+              ?
             </button>
             <span className="max-w-32 truncate text-sm text-gray-300">{user?.firstName}</span>
             <button
@@ -469,13 +470,14 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
               <button
                 type="button"
                 title="User Manual"
+                aria-label="Open user manual"
                 onClick={() => {
                   navigate('/user-manual');
                   setIsOpen(false);
                 }}
                 className="cursor-pointer rounded-md border border-white/15 px-3 py-1.5 text-sm font-semibold text-gray-100 hover:bg-white/10"
               >
-                User Manual
+                ? Help
               </button>
             </div>
             <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">

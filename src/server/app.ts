@@ -35,8 +35,27 @@ import { authMiddleware } from './middleware/auth.js';
 import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
 
-const distRoot = path.resolve(__dirname, '..');
-const runtimeRoot = path.resolve(distRoot, '..');
+const entryDir = process.argv[1]
+  ? path.dirname(path.resolve(process.argv[1]))
+  : path.resolve(process.cwd(), 'src', 'server');
+
+const runtimeRootCandidates = [
+  path.resolve(process.cwd()),
+  path.resolve(entryDir, '..', '..'),
+  path.resolve(entryDir, '..'),
+];
+
+const runtimeRoot =
+  runtimeRootCandidates.find((candidate, index) => {
+    const packageJsonPath = path.join(candidate, 'package.json');
+    const distDirPath = path.join(candidate, 'dist');
+    const srcDirPath = path.join(candidate, 'src');
+    if (fs.existsSync(packageJsonPath)) return true;
+    if (index === 0) return true;
+    return fs.existsSync(distDirPath) || fs.existsSync(srcDirPath);
+  }) || path.resolve(process.cwd());
+
+const distRoot = path.join(runtimeRoot, 'dist');
 
 const envCandidates = [
   process.env.APP_ENV_PATH,

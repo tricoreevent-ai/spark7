@@ -1306,7 +1306,7 @@ function App() {
                         href="/user-manual"
                         className="pointer-events-auto flex w-full items-center justify-center rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
                       >
-                        Open User Manual
+                        ? User Manual
                       </a>
                     </div>
                     {loading && (
@@ -1320,9 +1320,6 @@ function App() {
                     )}
                   </form>
 
-                  <p className="mt-4 text-sm text-gray-300">
-                    Company onboarding is controlled by backend configuration.
-                  </p>
                 </div>
               </div>
             }
