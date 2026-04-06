@@ -519,7 +519,6 @@ router.put('/bookings/:id/status', authMiddleware, async (req: AuthenticatedRequ
 router.post('/bookings/:id/payments', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const amount = Number(req.body?.amount || 0);
-    const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
     if (amount <= 0) return res.status(400).json({ success: false, error: 'amount must be greater than zero' });
 
     const booking = await EventBooking.findById(req.params.id).populate('facilityIds', 'name location hourlyRate');
