@@ -12,9 +12,12 @@ export interface IFacilityBooking extends Document {
   endTime: Date;
   status: 'pending' | 'confirmed' | 'booked' | 'completed' | 'cancelled';
   paymentStatus: 'pending' | 'partial' | 'paid' | 'refunded';
+  paymentMethod?: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque' | 'online';
   bookedUnits: number;
   amount: number; // backward compatibility alias to totalAmount
   totalAmount: number;
+  gstAmount?: number;
+  gstTreatment?: 'none' | 'intrastate' | 'interstate';
   advanceAmount: number;
   paidAmount: number;
   balanceAmount: number;
@@ -76,9 +79,20 @@ const FacilityBookingSchema = new Schema<IFacilityBooking>(
       default: 'pending',
       index: true,
     },
+    paymentMethod: {
+      type: String,
+      enum: ['cash', 'card', 'upi', 'bank_transfer', 'cheque', 'online'],
+      default: 'cash',
+    },
     bookedUnits: { type: Number, min: 1, default: 1 },
     amount: { type: Number, required: true, min: 0, default: 0 },
     totalAmount: { type: Number, required: true, min: 0, default: 0 },
+    gstAmount: { type: Number, min: 0, default: 0 },
+    gstTreatment: {
+      type: String,
+      enum: ['none', 'intrastate', 'interstate'],
+      default: 'none',
+    },
     advanceAmount: { type: Number, min: 0, default: 0 },
     paidAmount: { type: Number, min: 0, default: 0 },
     balanceAmount: { type: Number, min: 0, default: 0 },

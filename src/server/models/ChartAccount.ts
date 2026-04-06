@@ -9,6 +9,8 @@ export interface IChartAccount extends Document {
   accountName: string;
   accountType: AccountType;
   subType: AccountSubType;
+  parentAccountId?: mongoose.Types.ObjectId;
+  systemKey?: string;
   openingBalance: number;
   openingSide: BalanceSide;
   isSystem: boolean;
@@ -34,6 +36,18 @@ const ChartAccountSchema = new Schema<IChartAccount>(
       default: 'general',
       index: true,
     },
+    parentAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChartAccount',
+      index: true,
+    },
+    systemKey: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      sparse: true,
+      index: true,
+    },
     openingBalance: { type: Number, default: 0, min: 0 },
     openingSide: {
       type: String,
@@ -49,6 +63,7 @@ const ChartAccountSchema = new Schema<IChartAccount>(
 
 // accountCode must be unique only within a tenant, not globally.
 ChartAccountSchema.index({ tenantId: 1, accountCode: 1 }, { unique: true });
+ChartAccountSchema.index({ tenantId: 1, systemKey: 1 }, { unique: true, partialFilterExpression: { systemKey: { $gt: '' } } });
 ChartAccountSchema.index({ accountType: 1, subType: 1, isActive: 1 });
 
 export const ChartAccount = mongoose.model<IChartAccount>('ChartAccount', ChartAccountSchema);

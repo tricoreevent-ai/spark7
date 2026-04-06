@@ -5,7 +5,7 @@ import { formatCurrency } from '../config';
 
 const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
 
-type TabKey = 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'ledger' | 'reports';
+type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'ledger' | 'reports';
 
 interface SalaryPayment {
   _id: string;
@@ -66,6 +66,9 @@ interface EmployeeMasterRow {
 }
 
 const tabs: Array<{ key: TabKey; label: string }> = [
+  { key: 'dashboard', label: 'MIS Dashboard' },
+  { key: 'invoices', label: 'Invoices & Payments' },
+  { key: 'masters', label: 'Vendors / Assets / Periods' },
   { key: 'payments', label: 'Salary & Contract' },
   { key: 'opening', label: 'Opening Balances' },
   { key: 'expenses', label: 'Expenses & Income' },
@@ -79,7 +82,7 @@ const paymentModes = ['cash', 'bank', 'upi', 'card', 'cheque', 'online', 'bank_t
 const salaryPaymentModes = ['cash', 'bank', 'upi', 'card', 'cheque'];
 
 export const Accounting: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabKey>('payments');
+  const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -103,6 +106,16 @@ export const Accounting: React.FC = () => {
   const [trialBalance, setTrialBalance] = useState<any>(null);
   const [profitLoss, setProfitLoss] = useState<any>(null);
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
+  const [dashboardSummary, setDashboardSummary] = useState<any>(null);
+  const [coreInvoices, setCoreInvoices] = useState<any[]>([]);
+  const [corePayments, setCorePayments] = useState<any[]>([]);
+  const [coreJournals, setCoreJournals] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<any[]>([]);
+  const [periods, setPeriods] = useState<any[]>([]);
+  const [fixedAssets, setFixedAssets] = useState<any[]>([]);
+  const [bankCsvText, setBankCsvText] = useState('');
+  const [bankImportResult, setBankImportResult] = useState<any>(null);
+  const [periodYear, setPeriodYear] = useState(new Date().getFullYear());
 
   const [dayBookDate, setDayBookDate] = useState(new Date().toISOString().slice(0, 10));
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
@@ -185,6 +198,41 @@ export const Accounting: React.FC = () => {
     accountName: '',
     accountType: 'asset',
     subType: 'general',
+  });
+  const [invoiceForm, setInvoiceForm] = useState({
+    invoiceDate: new Date().toISOString().slice(0, 10),
+    customerName: '',
+    description: '',
+    baseAmount: '',
+    gstAmount: '',
+    gstTreatment: 'none',
+    paymentAmount: '',
+    paymentMode: 'cash',
+    revenueAccountKey: 'booking_revenue',
+  });
+  const [vendorForm, setVendorForm] = useState({
+    name: '',
+    contact: '',
+    phone: '',
+    email: '',
+    address: '',
+  });
+  const [assetForm, setAssetForm] = useState({
+    assetName: '',
+    description: '',
+    cost: '',
+    lifeYears: '5',
+    purchaseDate: new Date().toISOString().slice(0, 10),
+  });
+  const [expenseCoreForm, setExpenseCoreForm] = useState({
+    expenseDate: new Date().toISOString().slice(0, 10),
+    description: '',
+    amount: '',
+    paidAmount: '',
+    paymentMode: 'cash',
+    expenseAccountName: 'Electricity Expense',
+    vendorId: '',
+    vendorName: '',
   });
 
   const cashEntries = cashBook?.entries || [];
@@ -310,6 +358,30 @@ export const Accounting: React.FC = () => {
     setBalanceSheet(bsData.data || null);
   };
 
+  const refreshDashboard = async () => {
+    const [dashboardData, invoiceData, paymentData, journalData] = await Promise.all([
+      apiJson('/api/accounting/core/dashboard'),
+      apiJson(`/api/accounting/core/invoices?limit=20&startDate=${startDate}&endDate=${endDate}`),
+      apiJson(`/api/accounting/core/payments?limit=20&startDate=${startDate}&endDate=${endDate}`),
+      apiJson(`/api/accounting/core/journal-entries?limit=20&startDate=${startDate}&endDate=${endDate}`),
+    ]);
+    setDashboardSummary(dashboardData.data || null);
+    setCoreInvoices(invoiceData.data || []);
+    setCorePayments(paymentData.data || []);
+    setCoreJournals(journalData.data || []);
+  };
+
+  const refreshMasters = async () => {
+    const [vendorData, periodData, assetData] = await Promise.all([
+      apiJson('/api/accounting/core/vendors'),
+      apiJson(`/api/accounting/core/periods?year=${periodYear}`),
+      apiJson('/api/accounting/core/fixed-assets'),
+    ]);
+    setVendors(vendorData.data || []);
+    setPeriods(periodData.data || []);
+    setFixedAssets(assetData.data || []);
+  };
+
   const refreshLedger = async (accountId: string) => {
     if (!accountId) return;
     const data = await apiJson(`/api/accounting/chart-accounts/${accountId}/ledger?startDate=${startDate}&endDate=${endDate}`);
@@ -332,6 +404,8 @@ export const Accounting: React.FC = () => {
 
   useEffect(() => {
     withLoading(async () => {
+      await refreshDashboard();
+      await refreshMasters();
       await refreshEmployeeMaster();
       await refreshPayments();
       await refreshOpening();
@@ -346,10 +420,23 @@ export const Accounting: React.FC = () => {
     setSelectedReconcileIds([]);
   }, [startDate, endDate, bankBook?.reconciliationPending?.length]);
 
+  useEffect(() => {
+    if (activeTab !== 'masters') return;
+    withLoading(async () => {
+      await refreshMasters();
+    });
+  }, [periodYear]);
+
   const handleRefreshCurrentTab = () => {
     withLoading(async () => {
       if (startDate > endDate) {
         throw new Error('Start date must be before end date');
+      }
+      if (activeTab === 'dashboard' || activeTab === 'invoices') {
+        await refreshDashboard();
+      }
+      if (activeTab === 'masters') {
+        await refreshMasters();
       }
       if (activeTab === 'payments' || activeTab === 'expenses') {
         await refreshEmployeeMaster();
@@ -465,6 +552,155 @@ export const Accounting: React.FC = () => {
     });
   };
 
+  const downloadExport = async (reportType: string, params: Record<string, string> = {}) => {
+    const token = localStorage.getItem('token');
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE}/api/accounting/core/exports/${reportType}${query ? `?${query}` : ''}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to export report');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${reportType}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const submitInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      await apiJson('/api/accounting/core/invoices', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...invoiceForm,
+          baseAmount: Number(invoiceForm.baseAmount || 0),
+          gstAmount: Number(invoiceForm.gstAmount || 0),
+          paymentAmount: Number(invoiceForm.paymentAmount || 0),
+        }),
+      });
+      setMessage('Accounting invoice created');
+      setInvoiceForm((prev) => ({ ...prev, customerName: '', description: '', baseAmount: '', gstAmount: '', paymentAmount: '' }));
+      await refreshDashboard();
+      await refreshReports();
+    });
+  };
+
+  const addInvoicePayment = async (invoiceId: string) => {
+    const amount = window.prompt('Payment amount');
+    if (!amount) return;
+    await withLoading(async () => {
+      await apiJson(`/api/accounting/core/invoices/${invoiceId}/payments`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: Number(amount), mode: invoiceForm.paymentMode }),
+      });
+      setMessage('Payment posted against invoice');
+      await refreshDashboard();
+      await refreshReports();
+    });
+  };
+
+  const cancelCoreInvoice = async (invoiceId: string) => {
+    const reason = window.prompt('Cancellation reason', 'Cancelled by user');
+    if (!reason) return;
+    await withLoading(async () => {
+      await apiJson(`/api/accounting/core/invoices/${invoiceId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      setMessage('Invoice cancelled');
+      await refreshDashboard();
+      await refreshReports();
+    });
+  };
+
+  const submitCoreExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      await apiJson('/api/accounting/core/expenses', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...expenseCoreForm,
+          amount: Number(expenseCoreForm.amount || 0),
+          paidAmount: Number(expenseCoreForm.paidAmount || expenseCoreForm.amount || 0),
+          vendorId: expenseCoreForm.vendorId || undefined,
+          vendorName: expenseCoreForm.vendorId ? undefined : expenseCoreForm.vendorName,
+        }),
+      });
+      setMessage('Expense recorded in accounting core');
+      setExpenseCoreForm((prev) => ({ ...prev, description: '', amount: '', paidAmount: '', vendorName: '' }));
+      await refreshDashboard();
+      await refreshMasters();
+      await refreshReports();
+    });
+  };
+
+  const submitVendor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      await apiJson('/api/accounting/core/vendors', { method: 'POST', body: JSON.stringify(vendorForm) });
+      setMessage('Vendor created');
+      setVendorForm({ name: '', contact: '', phone: '', email: '', address: '' });
+      await refreshMasters();
+    });
+  };
+
+  const submitAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      await apiJson('/api/accounting/core/fixed-assets', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...assetForm,
+          cost: Number(assetForm.cost || 0),
+          lifeYears: Number(assetForm.lifeYears || 0),
+        }),
+      });
+      setMessage('Fixed asset created');
+      setAssetForm((prev) => ({ ...prev, assetName: '', description: '', cost: '' }));
+      await refreshMasters();
+    });
+  };
+
+  const postDepreciation = async (assetId: string) => {
+    await withLoading(async () => {
+      await apiJson(`/api/accounting/core/fixed-assets/${assetId}/depreciate`, { method: 'POST', body: JSON.stringify({}) });
+      setMessage('Depreciation posted');
+      await refreshMasters();
+      await refreshDashboard();
+      await refreshReports();
+    });
+  };
+
+  const togglePeriodLock = async (month: number, year: number, isLocked: boolean) => {
+    await withLoading(async () => {
+      await apiJson('/api/accounting/core/periods', {
+        method: 'POST',
+        body: JSON.stringify({ month, year, isLocked }),
+      });
+      setMessage(`Period ${year}-${String(month).padStart(2, '0')} ${isLocked ? 'locked' : 'unlocked'}`);
+      await refreshMasters();
+    });
+  };
+
+  const importBankCsv = async (markMatched = false) => {
+    await withLoading(async () => {
+      const data = await apiJson('/api/accounting/core/reconciliation/import', {
+        method: 'POST',
+        body: JSON.stringify({ csvText: bankCsvText, markMatched }),
+      });
+      setBankImportResult(data.data || null);
+      setMessage(data.message || 'Bank CSV processed');
+      await refreshBooks();
+    });
+  };
+
   const editDaybook = async (row: DayBookEntry) => {
     const amount = window.prompt('Amount', String(row.amount));
     if (!amount) return;
@@ -480,10 +716,10 @@ export const Accounting: React.FC = () => {
   };
 
   const deleteDaybook = async (row: DayBookEntry) => {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!window.confirm('Cancel this entry?')) return;
     await withLoading(async () => {
       await apiJson(`/api/accounting/day-book/entry/${row._id}`, { method: 'DELETE' });
-      setMessage('Entry deleted');
+      setMessage('Entry cancelled');
       await refreshPayments();
     });
   };
@@ -550,6 +786,230 @@ export const Accounting: React.FC = () => {
 
       {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
       {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
+
+      {activeTab === 'dashboard' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs text-gray-400">Today Revenue</p><p className="text-xl font-semibold text-emerald-300">{formatCurrency(dashboardSummary?.todayRevenue || 0)}</p></div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs text-gray-400">Monthly Revenue</p><p className="text-xl font-semibold text-white">{formatCurrency(dashboardSummary?.monthlyRevenue || 0)}</p></div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs text-gray-400">Expenses</p><p className="text-xl font-semibold text-red-300">{formatCurrency(dashboardSummary?.expenses || 0)}</p></div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs text-gray-400">Profit</p><p className="text-xl font-semibold text-sky-300">{formatCurrency(dashboardSummary?.profit || 0)}</p></div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs text-gray-400">GST Payable</p><p className="text-xl font-semibold text-amber-300">{formatCurrency(dashboardSummary?.gstPayable || 0)}</p></div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+              <h3 className="mb-2 text-white font-semibold">Recent Invoices</h3>
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Invoice</th><th className="px-2 py-1 text-left">Customer</th><th className="px-2 py-1 text-left">Total</th><th className="px-2 py-1 text-left">Status</th></tr></thead>
+                <tbody>
+                  {coreInvoices.slice(0, 8).map((row) => (
+                    <tr key={row._id} className="border-t border-white/10">
+                      <td className="px-2 py-1">{row.invoiceNumber}</td>
+                      <td className="px-2 py-1">{row.customerName}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.totalAmount || 0)}</td>
+                      <td className="px-2 py-1 uppercase text-gray-300">{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+              <h3 className="mb-2 text-white font-semibold">Recent Payments</h3>
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Payment</th><th className="px-2 py-1 text-left">Customer</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Mode</th></tr></thead>
+                <tbody>
+                  {corePayments.slice(0, 8).map((row) => (
+                    <tr key={row._id} className="border-t border-white/10">
+                      <td className="px-2 py-1">{row.paymentNumber}</td>
+                      <td className="px-2 py-1">{row.customerName || '-'}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.amount || 0)}</td>
+                      <td className="px-2 py-1 uppercase text-gray-300">{row.mode}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
+              <h3 className="mb-2 text-white font-semibold">Recent Journals</h3>
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Entry</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Status</th></tr></thead>
+                <tbody>
+                  {coreJournals.slice(0, 8).map((row) => (
+                    <tr key={row._id} className="border-t border-white/10">
+                      <td className="px-2 py-1">{row.entryNumber}</td>
+                      <td className="px-2 py-1 uppercase text-gray-300">{row.referenceType}</td>
+                      <td className="px-2 py-1">{formatCurrency(row.totalDebit || 0)}</td>
+                      <td className="px-2 py-1 uppercase text-gray-300">{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'invoices' && (
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <form onSubmit={submitInvoice} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <h2 className="text-lg font-semibold text-white">Create Accounting Invoice</h2>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <input className={inputClass} type="date" value={invoiceForm.invoiceDate} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoiceDate: e.target.value }))} />
+              <input className={inputClass} placeholder="Customer / Party Name" required value={invoiceForm.customerName} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customerName: e.target.value }))} />
+            </div>
+            <input className={inputClass} placeholder="Description" value={invoiceForm.description} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, description: e.target.value }))} />
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Base Amount" required value={invoiceForm.baseAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, baseAmount: e.target.value }))} />
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="GST Amount" value={invoiceForm.gstAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, gstAmount: e.target.value }))} />
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Initial Payment" value={invoiceForm.paymentAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, paymentAmount: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <select className={inputClass} value={invoiceForm.gstTreatment} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, gstTreatment: e.target.value }))}>
+                <option value="none">No GST</option>
+                <option value="intrastate">CGST + SGST</option>
+                <option value="interstate">IGST</option>
+              </select>
+              <select className={inputClass} value={invoiceForm.paymentMode} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, paymentMode: e.target.value }))}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
+              <select className={inputClass} value={invoiceForm.revenueAccountKey} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, revenueAccountKey: e.target.value }))}>
+                <option value="booking_revenue">Booking Revenue</option>
+                <option value="event_revenue">Event Revenue</option>
+                <option value="sales_revenue">Sales Revenue</option>
+                <option value="other_income">Other Income</option>
+              </select>
+            </div>
+            <button className={buttonClass}>Create Invoice</button>
+          </form>
+
+          <form onSubmit={submitCoreExpense} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <h2 className="text-lg font-semibold text-white">Record Expense / Vendor Bill</h2>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <input className={inputClass} type="date" value={expenseCoreForm.expenseDate} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, expenseDate: e.target.value }))} />
+              <input className={inputClass} placeholder="Description" required value={expenseCoreForm.description} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, description: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" required value={expenseCoreForm.amount} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, amount: e.target.value }))} />
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Paid Amount" value={expenseCoreForm.paidAmount} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, paidAmount: e.target.value }))} />
+              <select className={inputClass} value={expenseCoreForm.paymentMode} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, paymentMode: e.target.value }))}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <input className={inputClass} placeholder="Expense Account Name" value={expenseCoreForm.expenseAccountName} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, expenseAccountName: e.target.value }))} />
+              <select className={inputClass} value={expenseCoreForm.vendorId} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, vendorId: e.target.value }))}>
+                <option value="">Select vendor (optional)</option>
+                {vendors.map((row) => <option key={row._id} value={row._id}>{row.name}</option>)}
+              </select>
+            </div>
+            {!expenseCoreForm.vendorId && (
+              <input className={inputClass} placeholder="New Vendor Name (optional)" value={expenseCoreForm.vendorName} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, vendorName: e.target.value }))} />
+            )}
+            <button className={buttonClass}>Record Expense</button>
+          </form>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 xl:col-span-2 overflow-x-auto">
+            <h3 className="mb-2 text-white font-semibold">Invoices</h3>
+            <table className="min-w-full text-sm">
+              <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Invoice</th><th className="px-2 py-1 text-left">Customer</th><th className="px-2 py-1 text-left">Total</th><th className="px-2 py-1 text-left">Paid</th><th className="px-2 py-1 text-left">Balance</th><th className="px-2 py-1 text-left">Status</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
+              <tbody>
+                {coreInvoices.map((row) => (
+                  <tr key={row._id} className="border-t border-white/10">
+                    <td className="px-2 py-1">{row.invoiceNumber}</td>
+                    <td className="px-2 py-1">{row.customerName}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.totalAmount || 0)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.paidAmount || 0)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.balanceAmount || 0)}</td>
+                    <td className="px-2 py-1 uppercase text-gray-300">{row.status}</td>
+                    <td className="px-2 py-1 space-x-2">
+                      {row.status !== 'cancelled' && Number(row.balanceAmount || 0) > 0 && <button className="text-indigo-300" onClick={() => addInvoicePayment(row._id)}>Add Payment</button>}
+                      {row.status !== 'cancelled' && <button className="text-red-300" onClick={() => cancelCoreInvoice(row._id)}>Cancel</button>}
+                    </td>
+                  </tr>
+                ))}
+                {!coreInvoices.length && <tr><td colSpan={7} className="px-2 py-3 text-center text-gray-400">No accounting invoices in this date range.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'masters' && (
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+          <form onSubmit={submitVendor} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <h2 className="text-lg font-semibold text-white">Vendor Master</h2>
+            <input className={inputClass} placeholder="Vendor Name" required value={vendorForm.name} onChange={(e) => setVendorForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <input className={inputClass} placeholder="Contact Person" value={vendorForm.contact} onChange={(e) => setVendorForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            <input className={inputClass} placeholder="Phone" value={vendorForm.phone} onChange={(e) => setVendorForm((prev) => ({ ...prev, phone: e.target.value }))} />
+            <input className={inputClass} placeholder="Email" value={vendorForm.email} onChange={(e) => setVendorForm((prev) => ({ ...prev, email: e.target.value }))} />
+            <button className={buttonClass}>Create Vendor</button>
+          </form>
+
+          <form onSubmit={submitAsset} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <h2 className="text-lg font-semibold text-white">Fixed Asset</h2>
+            <input className={inputClass} placeholder="Asset Name" required value={assetForm.assetName} onChange={(e) => setAssetForm((prev) => ({ ...prev, assetName: e.target.value }))} />
+            <input className={inputClass} placeholder="Description" value={assetForm.description} onChange={(e) => setAssetForm((prev) => ({ ...prev, description: e.target.value }))} />
+            <div className="grid grid-cols-3 gap-2">
+              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Cost" required value={assetForm.cost} onChange={(e) => setAssetForm((prev) => ({ ...prev, cost: e.target.value }))} />
+              <input className={inputClass} type="number" min="1" placeholder="Life Years" required value={assetForm.lifeYears} onChange={(e) => setAssetForm((prev) => ({ ...prev, lifeYears: e.target.value }))} />
+              <input className={inputClass} type="date" value={assetForm.purchaseDate} onChange={(e) => setAssetForm((prev) => ({ ...prev, purchaseDate: e.target.value }))} />
+            </div>
+            <button className={buttonClass}>Create Asset</button>
+          </form>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <h2 className="text-lg font-semibold text-white">Financial Periods</h2>
+            <input className={inputClass} type="number" value={periodYear} onChange={(e) => setPeriodYear(Number(e.target.value || new Date().getFullYear()))} />
+            <div className="space-y-2">
+              {periods.map((row) => (
+                <div key={row._id} className="flex items-center justify-between rounded border border-white/10 px-3 py-2 text-sm">
+                  <span className="text-gray-200">{row.periodKey}</span>
+                  <button className={buttonClass} type="button" onClick={() => togglePeriodLock(row.month, row.year, !row.isLocked)}>
+                    {row.isLocked ? 'Unlock' : 'Lock'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 xl:col-span-2 overflow-x-auto">
+            <h3 className="mb-2 text-white font-semibold">Vendor Balances</h3>
+            <table className="min-w-full text-sm">
+              <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Vendor</th><th className="px-2 py-1 text-left">Contact</th><th className="px-2 py-1 text-left">Total Payable</th><th className="px-2 py-1 text-left">Paid</th><th className="px-2 py-1 text-left">Balance</th></tr></thead>
+              <tbody>
+                {vendors.map((row) => (
+                  <tr key={row._id} className="border-t border-white/10">
+                    <td className="px-2 py-1">{row.name}</td>
+                    <td className="px-2 py-1">{row.contact || row.phone || '-'}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.totalPayable || 0)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.paid || 0)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.balance || 0)}</td>
+                  </tr>
+                ))}
+                {!vendors.length && <tr><td colSpan={5} className="px-2 py-3 text-center text-gray-400">No vendors available yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 xl:col-span-3 overflow-x-auto">
+            <h3 className="mb-2 text-white font-semibold">Fixed Assets</h3>
+            <table className="min-w-full text-sm">
+              <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Asset</th><th className="px-2 py-1 text-left">Cost</th><th className="px-2 py-1 text-left">Life</th><th className="px-2 py-1 text-left">Depreciation Posted</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
+              <tbody>
+                {fixedAssets.map((row) => (
+                  <tr key={row._id} className="border-t border-white/10">
+                    <td className="px-2 py-1">{row.assetName}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.cost || 0)}</td>
+                    <td className="px-2 py-1">{row.lifeYears} years</td>
+                    <td className="px-2 py-1">{formatCurrency(row.totalDepreciationPosted || 0)}</td>
+                    <td className="px-2 py-1"><button className="text-indigo-300" onClick={() => postDepreciation(row._id)}>Post Monthly Depreciation</button></td>
+                  </tr>
+                ))}
+                {!fixedAssets.length && <tr><td colSpan={5} className="px-2 py-3 text-center text-gray-400">No fixed assets configured.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'payments' && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -659,7 +1119,7 @@ export const Accounting: React.FC = () => {
           </form>
 
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
-            <h3 className="mb-2 text-white font-semibold">Entries (Edit/Delete with permission)</h3>
+            <h3 className="mb-2 text-white font-semibold">Entries (Edit/Cancel with permission)</h3>
             <table className="min-w-full text-sm">
               <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Date</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Category</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
               <tbody>
@@ -669,7 +1129,7 @@ export const Accounting: React.FC = () => {
                     <td className="px-2 py-1 uppercase">{row.entryType}</td>
                     <td className="px-2 py-1">{row.category}</td>
                     <td className="px-2 py-1">{formatCurrency(row.amount)}</td>
-                    <td className="px-2 py-1 space-x-2"><button className="text-indigo-300" onClick={() => editDaybook(row)}>Edit</button><button className="text-red-300" onClick={() => deleteDaybook(row)}>Delete</button></td>
+                    <td className="px-2 py-1 space-x-2"><button className="text-indigo-300" onClick={() => editDaybook(row)}>Edit</button><button className="text-red-300" onClick={() => deleteDaybook(row)}>Cancel</button></td>
                   </tr>
                 ))}
                 {daybookPagination.paginatedRows.length === 0 && (
@@ -977,6 +1437,25 @@ export const Accounting: React.FC = () => {
               Reconcile Selected
             </button>
           </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+            <div>
+              <h3 className="text-white font-semibold">CSV Bank Reconciliation</h3>
+              <p className="text-xs text-gray-400">Paste a bank statement CSV with at least `Date` and `Amount` columns, then compare it against unreconciled bank ledger rows.</p>
+            </div>
+            <textarea className={inputClass} rows={6} placeholder="Date,Amount,Description&#10;2026-04-01,2000,UPI receipt" value={bankCsvText} onChange={(e) => setBankCsvText(e.target.value)} />
+            <div className="flex flex-wrap gap-2">
+              <button className={buttonClass} onClick={() => importBankCsv(false)} disabled={!bankCsvText.trim()}>Compare CSV</button>
+              <button className={buttonClass} onClick={() => importBankCsv(true)} disabled={!bankCsvText.trim()}>Compare And Mark Matched</button>
+            </div>
+            {bankImportResult && (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="rounded border border-white/10 bg-black/20 p-3 text-sm text-gray-200">Matched: {bankImportResult.matched?.length || 0}</div>
+                <div className="rounded border border-white/10 bg-black/20 p-3 text-sm text-gray-200">Unmatched Statement Rows: {bankImportResult.unmatchedStatementRows?.length || 0}</div>
+                <div className="rounded border border-white/10 bg-black/20 p-3 text-sm text-gray-200">Unmatched Ledger Rows: {bankImportResult.unmatchedLedgerRows?.length || 0}</div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1039,6 +1518,12 @@ export const Accounting: React.FC = () => {
 
       {activeTab === 'reports' && (
         <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <button className={buttonClass} onClick={() => withLoading(async () => downloadExport('invoices', { startDate, endDate }))}>Export Invoices CSV</button>
+            <button className={buttonClass} onClick={() => withLoading(async () => downloadExport('trial-balance', { startDate, endDate }))}>Export Trial Balance CSV</button>
+            <button className={buttonClass} onClick={() => withLoading(async () => downloadExport('profit-loss', { startDate, endDate }))}>Export P&L CSV</button>
+            <button className={buttonClass} onClick={() => withLoading(async () => downloadExport('vendors'))}>Export Vendor Ledger CSV</button>
+          </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-sm text-gray-300">Total Income</p><p className="text-xl font-semibold text-emerald-300">{formatCurrency(incomeReport?.totalIncome || 0)}</p></div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-sm text-gray-300">Total Expense</p><p className="text-xl font-semibold text-red-300">{formatCurrency(expenseReport?.totalExpense || 0)}</p></div>

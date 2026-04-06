@@ -13,8 +13,11 @@ import { AccountingVoucher, VoucherType } from '../models/AccountingVoucher.js';
 import { OpeningBalanceSetup } from '../models/OpeningBalanceSetup.js';
 import { generateNumber } from '../services/numbering.js';
 import { Employee } from '../models/Employee.js';
+import accountingCoreRoutes from './accountingCore.js';
 
 const router = Router();
+
+router.use('/core', accountingCoreRoutes);
 
 type PaymentMode = 'cash' | 'bank' | 'card' | 'upi' | 'cheque' | 'online' | 'bank_transfer' | 'adjustment';
 type DayBookPaymentMode = 'cash' | 'card' | 'upi' | 'bank' | 'cheque' | 'online';
@@ -566,7 +569,7 @@ router.post('/day-book/entry', authMiddleware, async (req: AuthenticatedRequest,
 router.get('/day-book/entries', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { entryType, startDate, endDate, category, paymentMethod, limit = 100, skip = 0 } = req.query;
-    const filter: Record<string, any> = {};
+    const filter: Record<string, any> = { status: 'active' };
     if (entryType) filter.entryType = String(entryType);
     if (category) filter.category = String(category);
     if (paymentMethod) filter.paymentMethod = String(paymentMethod);
@@ -614,7 +617,7 @@ router.get('/day-book/entries', authMiddleware, async (req: AuthenticatedRequest
 
 router.put('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const existing = await DayBookEntry.findById(req.params.id);
+    const existing = await DayBookEntry.findOne({ _id: req.params.id, status: 'active' });
     if (!existing) return res.status(404).json({ success: false, error: 'Day-book entry not found' });
 
     if (!isPrivileged(req) && String(existing.createdBy || '') !== String(req.userId || '')) {
@@ -634,7 +637,7 @@ router.put('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedReque
     }
     if (req.body.entryDate !== undefined) updates.entryDate = new Date(req.body.entryDate);
 
-    const updated = await DayBookEntry.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const updated = await DayBookEntry.findOneAndUpdate({ _id: req.params.id, status: 'active' }, updates, { new: true, runValidators: true });
     res.json({ success: true, data: updated, message: 'Day-book entry updated' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to update day-book entry' });
@@ -643,15 +646,19 @@ router.put('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedReque
 
 router.delete('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const existing = await DayBookEntry.findById(req.params.id);
+    const existing = await DayBookEntry.findOne({ _id: req.params.id, status: 'active' });
     if (!existing) return res.status(404).json({ success: false, error: 'Day-book entry not found' });
 
     if (!isPrivileged(req) && String(existing.createdBy || '') !== String(req.userId || '')) {
       return res.status(403).json({ success: false, error: 'You do not have permission to delete this entry' });
     }
 
-    await DayBookEntry.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Day-book entry deleted' });
+    existing.status = 'cancelled';
+    existing.cancelledAt = new Date();
+    existing.cancelledBy = req.userId;
+    existing.cancellationReason = 'Cancelled from accounting console';
+    await existing.save();
+    res.json({ success: true, message: 'Day-book entry cancelled' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to delete day-book entry' });
   }
@@ -1226,8 +1233,8 @@ const computeNetUntil = async (end: Date) => {
   const contracts = await aggregateSum(ContractPayment, 'amount', 'paymentDate', fromStart, end, {
     status: { $in: ['paid', 'partial'] },
   });
-  const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'income' });
-  const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'expense' });
+  const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'income', status: 'active' });
+  const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'expense', status: 'active' });
 
   const income = sales + manualIncome;
   const expense = returns + (creditRefunds[0]?.total || 0) + salaries + contracts + manualExpense;
@@ -1245,7 +1252,7 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
     Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: 1 }),
     SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: 1 }),
     ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: 1 }),
-    DayBookEntry.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
+    DayBookEntry.find({ entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: 1 }),
     ReceiptVoucher.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
     AccountLedgerEntry.find({
       voucherType: 'transfer',
@@ -1388,7 +1395,7 @@ router.get('/day-book', authMiddleware, async (req: AuthenticatedRequest, res: R
       Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: 1 }),
       SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: 1 }),
       ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: 1 }),
-      DayBookEntry.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
+      DayBookEntry.find({ entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: 1 }),
       CreditNote.find({ 'entries.createdAt': { $gte: start, $lte: end } }),
     ]);
 
@@ -1483,7 +1490,7 @@ router.get('/reports/expense', authMiddleware, async (req: AuthenticatedRequest,
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
 
     const [manualExpenses, salaries, contracts, returns] = await Promise.all([
-      DayBookEntry.find({ entryType: 'expense', entryDate: { $gte: start, $lte: end } }).sort({ entryDate: -1 }),
+      DayBookEntry.find({ entryType: 'expense', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
       SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: -1 }),
       ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: -1 }),
       Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: -1 }),
@@ -1566,7 +1573,7 @@ router.get('/reports/income', authMiddleware, async (req: AuthenticatedRequest, 
 
     const [salesRows, incomeRows] = await Promise.all([
       Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: -1 }),
-      DayBookEntry.find({ entryType: 'income', entryDate: { $gte: start, $lte: end } }).sort({ entryDate: -1 }),
+      DayBookEntry.find({ entryType: 'income', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
     ]);
 
     const rows: Array<Record<string, any>> = [
@@ -1665,11 +1672,11 @@ router.get('/reports/profit-loss', authMiddleware, async (req: AuthenticatedRequ
     const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, {
       ...postedSaleMatch,
     });
-    const nonSalesIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income' });
+    const nonSalesIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income', status: 'active' });
     const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
     const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, { status: { $in: ['paid', 'partial'] } });
     const returnExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
-    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense' });
+    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense', status: 'active' });
 
     const totalIncome = round2(salesIncome + nonSalesIncome);
     const totalExpense = round2(salaryExpense + contractExpense + returnExpense + manualExpense);
@@ -1768,14 +1775,14 @@ router.get('/reports/summary', authMiddleware, async (req: AuthenticatedRequest,
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
 
     const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, postedSaleMatch);
-    const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income' });
+    const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income', status: 'active' });
 
     const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
     const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, {
       status: { $in: ['paid', 'partial'] },
     });
     const returnsExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
-    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense' });
+    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense', status: 'active' });
     const [creditIssuedRows, creditBalanceRows, creditAdjustRows, creditRefundRows] = await Promise.all([
       CreditNote.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -1803,7 +1810,7 @@ router.get('/reports/summary', authMiddleware, async (req: AuthenticatedRequest,
     const [salaryCount, contractCount, dayBookCount] = await Promise.all([
       SalaryPayment.countDocuments({ payDate: { $gte: start, $lte: end } }),
       ContractPayment.countDocuments({ paymentDate: { $gte: start, $lte: end } }),
-      DayBookEntry.countDocuments({ entryDate: { $gte: start, $lte: end } }),
+      DayBookEntry.countDocuments({ entryDate: { $gte: start, $lte: end }, status: 'active' }),
     ]);
 
     res.json({

@@ -5,16 +5,28 @@ import { FacilityBooking } from '../models/FacilityBooking.js';
 import { Customer } from '../models/Customer.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { MembershipPlan } from '../models/MembershipPlan.js';
+import { AccountingInvoice } from '../models/AccountingInvoice.js';
 import { generateNumber } from '../services/numbering.js';
+import { cancelJournalEntry, createInvoice, createJournalEntry, recordPayment } from '../services/accountingEngine.js';
 
 const router = Router();
 const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'booked'] as const;
 type BookingStatus = 'pending' | 'confirmed' | 'booked' | 'completed' | 'cancelled';
 type PaymentStatus = 'pending' | 'partial' | 'paid' | 'refunded';
+type BookingPaymentMethod = 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque' | 'online';
 
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const normalizePaymentMethod = (value: any): BookingPaymentMethod => {
+  const method = String(value || 'cash').trim().toLowerCase();
+  if (method === 'card') return 'card';
+  if (method === 'upi') return 'upi';
+  if (method === 'bank_transfer') return 'bank_transfer';
+  if (method === 'cheque') return 'cheque';
+  if (method === 'online') return 'online';
+  return 'cash';
+};
 
 const normalizeStatus = (status: any): BookingStatus => {
   const value = String(status || '').trim().toLowerCase();
@@ -331,8 +343,12 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
       endTime,
       amount,
       totalAmount,
+      gstAmount,
+      gstRate,
+      gstTreatment,
       advanceAmount,
       paidAmount,
+      paymentMethod,
       paymentStatus,
       status,
       notes,
@@ -428,6 +444,7 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
     const finalAdvance = round2(Math.max(0, Number(advanceAmount || 0)));
     const finalPaid = round2(Math.max(finalAdvance, Number(paidAmount ?? finalAdvance)));
     const cappedPaid = Math.min(finalPaid, finalTotalAmount);
+    const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const balance = round2(Math.max(0, finalTotalAmount - cappedPaid));
     const statusValue = normalizeStatus(status);
     const payment = paymentStatus
@@ -451,16 +468,45 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
       endTime: end,
       amount: finalTotalAmount,
       totalAmount: finalTotalAmount,
+      gstAmount: round2(Number(gstAmount || 0)),
+      gstTreatment: String(gstTreatment || 'none').toLowerCase() === 'interstate'
+        ? 'interstate'
+        : String(gstTreatment || 'none').toLowerCase() === 'intrastate'
+          ? 'intrastate'
+          : 'none',
       advanceAmount: finalAdvance,
       paidAmount: cappedPaid,
       balanceAmount: balance,
       paymentStatus: payment,
+      paymentMethod: normalizedPaymentMethod,
       notes,
       remarks,
       reminderAt: reminderAt ? new Date(reminderAt) : new Date(start.getTime() - 24 * 60 * 60 * 1000),
       status: statusValue,
       bookedUnits: requestedUnits,
       createdBy: req.userId,
+    });
+
+    await createInvoice({
+      invoiceDate: new Date(),
+      customerId: linkedCustomer?._id?.toString(),
+      customerName: resolvedCustomerName,
+      referenceType: 'facility_booking',
+      referenceId: booking._id.toString(),
+      description: `Facility booking ${booking.bookingNumber}`,
+      baseAmount: round2(Math.max(0, finalTotalAmount - Number(gstAmount || 0))),
+      gstAmount: round2(Number(gstAmount || 0)),
+      gstRate: Number(gstRate || 0),
+      gstTreatment: booking.gstTreatment || 'none',
+      paymentAmount: cappedPaid,
+      paymentMode: normalizedPaymentMethod,
+      revenueAccountKey: 'booking_revenue',
+      createdBy: req.userId,
+      metadata: {
+        bookingNumber: booking.bookingNumber,
+        facilityId: facility._id.toString(),
+        facilityName: facility.name,
+      },
     });
 
     res.status(201).json({ success: true, data: booking, message: 'Booking created' });
@@ -482,9 +528,10 @@ router.put('/bookings/:id/status', authMiddleware, async (req: AuthenticatedRequ
       }
     }
     if (paidAmount !== undefined) {
-      const normalizedPaid = Math.max(0, Number(paidAmount || 0));
-      booking.paidAmount = round2(Math.min(Number(booking.totalAmount || 0), normalizedPaid));
-      booking.balanceAmount = round2(Math.max(0, Number(booking.totalAmount || 0) - Number(booking.paidAmount || 0)));
+      return res.status(400).json({
+        success: false,
+        error: 'Direct paidAmount editing is not allowed. Use the booking payment action to post accounting correctly.',
+      });
     }
     if (paymentStatus) booking.paymentStatus = String(paymentStatus).toLowerCase() as any;
     else booking.paymentStatus = derivePaymentStatus(Number(booking.paidAmount || 0), Number(booking.totalAmount || 0));
@@ -504,7 +551,7 @@ router.put('/bookings/:id/status', authMiddleware, async (req: AuthenticatedRequ
 
 router.post('/bookings/:id/payments', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { amount, remarks } = req.body;
+    const { amount, remarks, paymentMethod } = req.body;
     const payAmount = Number(amount || 0);
     if (payAmount <= 0) {
       return res.status(400).json({ success: false, error: 'amount must be greater than zero' });
@@ -519,9 +566,11 @@ router.post('/bookings/:id/payments', authMiddleware, async (req: AuthenticatedR
     const totalAmount = Number(booking.totalAmount || booking.amount || 0);
     const currentPaid = Number(booking.paidAmount || 0);
     const nextPaid = round2(Math.min(totalAmount, currentPaid + payAmount));
+    const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod || booking.paymentMethod || 'cash');
     booking.paidAmount = nextPaid;
     booking.balanceAmount = round2(Math.max(0, totalAmount - nextPaid));
     booking.paymentStatus = derivePaymentStatus(nextPaid, totalAmount);
+    booking.paymentMethod = normalizedPaymentMethod;
     if (String(booking.status) === 'pending' && booking.paidAmount > 0) {
       booking.status = 'confirmed' as any;
     }
@@ -530,6 +579,21 @@ router.post('/bookings/:id/payments', authMiddleware, async (req: AuthenticatedR
       booking.remarks = existing ? `${existing}\n${String(remarks).trim()}` : String(remarks).trim();
     }
     await booking.save();
+
+    const accountingInvoice = await AccountingInvoice.findOne({
+      referenceType: 'facility_booking',
+      referenceId: booking._id.toString(),
+      status: { $ne: 'cancelled' },
+    }).sort({ createdAt: -1 });
+    if (accountingInvoice) {
+      await recordPayment({
+        invoiceId: accountingInvoice._id.toString(),
+        amount: payAmount,
+        mode: normalizedPaymentMethod,
+        description: `Payment for booking ${booking.bookingNumber}`,
+        createdBy: req.userId,
+      });
+    }
 
     res.json({
       success: true,
@@ -569,6 +633,69 @@ router.put('/bookings/:id/cancel', authMiddleware, async (req: AuthenticatedRequ
       booking.remarks = next ? (existing ? `${existing}\n${next}` : next) : existing;
     }
     await booking.save();
+
+    const accountingInvoice = await AccountingInvoice.findOne({
+      referenceType: 'facility_booking',
+      referenceId: booking._id.toString(),
+      status: { $ne: 'cancelled' },
+    }).sort({ createdAt: -1 });
+
+    if (accountingInvoice?.journalEntryId) {
+      const postingMode = String((accountingInvoice.metadata as Record<string, any> | undefined)?.postingMode || '');
+      const settlementAccountKey = normalizePaymentMethod(booking.paymentMethod || 'cash') === 'cash'
+        ? 'cash_in_hand'
+        : 'bank_account';
+      const retainedAmount = round2(Math.max(0, Number(booking.paidAmount || 0) - Number(rules.refundAmount || 0)));
+
+      await cancelJournalEntry({
+        journalEntryId: accountingInvoice.journalEntryId.toString(),
+        reason: `Cancelled booking ${booking.bookingNumber}`,
+        createdBy: req.userId,
+      });
+
+      if (postingMode !== 'cash_sale' && Number(rules.refundAmount || 0) > 0) {
+        await createJournalEntry({
+          entryDate: new Date(),
+          referenceType: 'refund',
+          referenceId: booking._id.toString(),
+          referenceNo: booking.bookingNumber,
+          description: `Refund for cancelled booking ${booking.bookingNumber}`,
+          paymentMode: normalizePaymentMethod(booking.paymentMethod || 'cash'),
+          createdBy: req.userId,
+          lines: [
+            { accountKey: 'accounts_receivable', debit: round2(Number(rules.refundAmount || 0)), credit: 0, description: 'Reverse received payment' },
+            { accountKey: settlementAccountKey, debit: 0, credit: round2(Number(rules.refundAmount || 0)), description: 'Refund cash/bank' },
+          ],
+        });
+      }
+
+      if (retainedAmount > 0) {
+        await createJournalEntry({
+          entryDate: new Date(),
+          referenceType: 'invoice',
+          referenceId: booking._id.toString(),
+          referenceNo: booking.bookingNumber,
+          description: `Cancellation charge retained for booking ${booking.bookingNumber}`,
+          paymentMode: normalizePaymentMethod(booking.paymentMethod || 'cash'),
+          createdBy: req.userId,
+          lines: postingMode === 'cash_sale'
+            ? [
+                { accountKey: settlementAccountKey, debit: retainedAmount, credit: 0, description: 'Cash retained as cancellation charge' },
+                { accountKey: 'booking_revenue', debit: 0, credit: retainedAmount, description: 'Cancellation charge income' },
+              ]
+            : [
+                { accountKey: 'accounts_receivable', debit: retainedAmount, credit: 0, description: 'Cancellation charge receivable adjustment' },
+                { accountKey: 'booking_revenue', debit: 0, credit: retainedAmount, description: 'Cancellation charge income' },
+              ],
+        });
+      }
+
+      accountingInvoice.status = 'cancelled';
+      accountingInvoice.cancelledAt = new Date();
+      accountingInvoice.cancelledBy = req.userId;
+      accountingInvoice.cancellationReason = booking.cancellationReason;
+      await accountingInvoice.save();
+    }
 
     res.json({
       success: true,

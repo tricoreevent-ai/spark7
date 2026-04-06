@@ -163,7 +163,7 @@ router.get('/collections/daily', authMiddleware, async (req: AuthenticatedReques
         { $group: { _id: '$createdBy', vouchers: { $sum: 1 }, total: { $sum: '$amount' } } },
       ]),
       DayBookEntry.aggregate([
-        { $match: { entryDate: { $gte: start, $lte: end }, entryType: 'expense', paymentMethod: 'cash' } },
+        { $match: { entryDate: { $gte: start, $lte: end }, entryType: 'expense', paymentMethod: 'cash', status: 'active' } },
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
     ]);
@@ -248,7 +248,7 @@ router.post('/day-end/close', authMiddleware, async (req: AuthenticatedRequest, 
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
       DayBookEntry.aggregate([
-        { $match: { entryDate: { $gte: start, $lte: end }, entryType: 'expense', paymentMethod: 'cash' } },
+        { $match: { entryDate: { $gte: start, $lte: end }, entryType: 'expense', paymentMethod: 'cash', status: 'active' } },
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
     ]);

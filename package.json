@@ -28,7 +28,8 @@
     "start:server": "node dist/server/start.js",
     "start:hostinger": "node dist/app.js",
     "start:prod": "npm run prepare:runtime && node dist/server/start.js",
-    "test": "echo \"No test specified\" && exit 0"
+    "test": "npm run test:accounting",
+    "test:accounting": "node --import tsx --test tests/accounting-rules.test.ts"
   },
   "keywords": [],
   "author": "",

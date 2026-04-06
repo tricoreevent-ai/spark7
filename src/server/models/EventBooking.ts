@@ -19,7 +19,10 @@ export interface IEventBooking extends Document {
   }>;
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
   paymentStatus: 'pending' | 'partial' | 'paid' | 'refunded';
+  paymentMethod?: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque' | 'online';
   totalAmount: number;
+  gstAmount?: number;
+  gstTreatment?: 'none' | 'intrastate' | 'interstate';
   advanceAmount: number;
   paidAmount: number;
   balanceAmount: number;
@@ -94,7 +97,18 @@ const EventBookingSchema = new Schema<IEventBooking>(
       default: 'pending',
       index: true,
     },
+    paymentMethod: {
+      type: String,
+      enum: ['cash', 'card', 'upi', 'bank_transfer', 'cheque', 'online'],
+      default: 'cash',
+    },
     totalAmount: { type: Number, required: true, min: 0, default: 0 },
+    gstAmount: { type: Number, min: 0, default: 0 },
+    gstTreatment: {
+      type: String,
+      enum: ['none', 'intrastate', 'interstate'],
+      default: 'none',
+    },
     advanceAmount: { type: Number, min: 0, default: 0 },
     paidAmount: { type: Number, min: 0, default: 0 },
     balanceAmount: { type: Number, min: 0, default: 0 },
