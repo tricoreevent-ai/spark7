@@ -31,6 +31,7 @@ import reportsRoutes from './routes/reports.js';
 import settlementRoutes from './routes/settlements.js';
 import settingsRoutes from './routes/settings.js';
 import generalSettingsRoutes from './routes/generalSettings.js';
+import publicRoutes from './routes/public.js';
 import { authMiddleware } from './middleware/auth.js';
 import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
@@ -181,6 +182,7 @@ const connectDbWithRetry = async (): Promise<void> => {
 };
 
 // Routes will be added here
+app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/products', authMiddleware, requireAnyPageAccess(['products', 'sales']), productRoutes);
 app.use('/api/orders', authMiddleware, requirePageAccess('orders'), orderRoutes);

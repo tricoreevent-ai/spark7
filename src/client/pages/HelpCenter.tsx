@@ -2,709 +2,718 @@ import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getGeneralSettings } from '../utils/generalSettings';
 
-type GuideField = {
-  name: string;
-  detail: string;
-  required?: boolean;
-};
-
-type GuideFieldGroup = {
-  title: string;
-  fields: GuideField[];
-};
-
 type GuideLink = {
   label: string;
   to: string;
 };
 
-type FormGuide = {
+type OverviewSection = {
+  id: string;
+  title: string;
+  description: string;
+  bullets: string[];
+};
+
+type ModuleSummary = {
   id: string;
   title: string;
   route: string;
-  purpose: string;
   navigation: string;
-  mandatoryCount: string;
-  mandatorySummary: string;
+  purpose: string;
+  description: string;
+  keyUses: string[];
   links: GuideLink[];
-  fieldGroups: GuideFieldGroup[];
-  notes: string[];
 };
 
-type GuideCategory = {
+type PageGuide = {
+  id: string;
+  title: string;
+  route: string;
+  navigation: string;
+  purpose: string;
+  description: string;
+  keyUses: string[];
+  links: GuideLink[];
+};
+
+type MenuSection = {
   id: string;
   title: string;
   summary: string;
   accent: string;
-  forms: FormGuide[];
+  pages: PageGuide[];
 };
 
-type NavigationGuide = {
-  title: string;
-  detail: string;
-  steps: string[];
-};
+const APPLICATION_NAME = 'Sarva';
+const APPLICATION_TITLE = 'Sarva Sports Complex Management Platform';
 
-const navigationGuides: NavigationGuide[] = [
+const overviewSections: OverviewSection[] = [
   {
-    title: 'Before Login',
-    detail: 'The manual itself is public, so new users can learn the system before signing in.',
-    steps: [
-      'Open the app login page and use the ? User Manual button.',
-      'Use the Quick Form Links section in this guide to jump to the screen you want to learn.',
-      'If you open a direct form route while logged out, the app will send you back to login.',
+    id: 'introduction',
+    title: 'Introduction',
+    description:
+      'Sarva is an integrated business and operations management platform designed to handle all activities of a sports complex in one structured system.',
+    bullets: [
+      'It connects sales, inventory, employee management, facility booking, memberships, and accounting in a single application.',
+      'It reduces the need for separate systems and manual work by giving the business one centralized operational solution.',
+      'It is designed for front desk staff, operations teams, sales teams, HR managers, accountants, and administrators.',
     ],
   },
   {
-    title: 'After Login',
-    detail: 'Most pages are reached from the top menu by category first, then by page name.',
-    steps: [
-      'Pick the category from the top menu: Sales, Catalog, People, Operations, Accounts, or Admin.',
-      'Choose the page inside that category panel.',
-      'Use the small route links in this manual when you want the exact page path.',
+    id: 'objective',
+    title: 'Objective of the Application',
+    description:
+      'The main objective of the application is to streamline daily operations and improve efficiency across every department of the sports complex business.',
+    bullets: [
+      'Manage bookings, sales transactions, quotations, returns, and customer follow-up in a traceable way.',
+      'Maintain products, categories, procurement, inventory levels, employees, attendance, and payroll from the same platform.',
+      'Track financial transactions, settlements, permissions, and reports so management can make better operational decisions.',
     ],
   },
   {
-    title: 'When A Page Is Missing',
-    detail: 'Menus are role-based, so two users may not see the same screens.',
-    steps: [
-      'If the page is missing from the menu, your role probably does not have access yet.',
-      'Ask your administrator to enable the page in User Management or the role matrix.',
-      'Refresh the browser after permissions change so the menu reloads cleanly.',
+    id: 'structure',
+    title: 'Application Structure',
+    description:
+      'The application is divided into seven main modules so users can move directly to the work area that matches their role and daily responsibility.',
+    bullets: ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Accounts', 'Admin'],
+  },
+  {
+    id: 'navigation-flow',
+    title: 'User Navigation Flow',
+    description:
+      'A typical operating flow starts with system setup by administrators and then moves through catalog, operations, sales, people, accounts, and reporting.',
+    bullets: [
+      'Admin sets up company profile, users, permissions, and system settings.',
+      'Catalog team adds products and categories, while Operations configures facilities, plans, memberships, and bookings.',
+      'Sales handles customers and transactions, People manages employees and payroll, Accounts tracks finance, and management reviews reports.',
     ],
   },
 ];
 
-const guideCategories: GuideCategory[] = [
+const moduleSummaries: ModuleSummary[] = [
   {
-    id: 'sales-catalog',
-    title: 'Sales and Catalog Forms',
-    summary: 'These forms cover billing, quotations, customer records, item setup, and product grouping.',
-    accent: 'from-emerald-500/20 via-sky-500/10 to-transparent',
-    forms: [
-      {
-        id: 'sales-billing',
-        title: 'Sales Billing / POS',
-        route: '/sales',
-        purpose: 'Create invoices, collect payments, add walk-in or existing customers, and complete product billing.',
-        navigation: 'Top menu > Sales > Sales Dashboard, then open the billing or POS area.',
-        mandatoryCount: '1 required rule to post an invoice',
-        mandatorySummary: 'You must add at least one product line before posting the invoice.',
-        links: [
-          { label: 'Open Billing', to: '/sales' },
-          { label: 'Sales Dashboard', to: '/sales-dashboard' },
-          { label: 'Orders / Invoice History', to: '/orders' },
-        ],
-        fieldGroups: [
-          {
-            title: 'Core billing fields',
-            fields: [
-              { name: 'Product Search / Line Items', detail: 'Search and add the products being sold. This is the required part of the invoice.', required: true },
-              { name: 'Customer Phone', detail: 'Used to search an existing customer quickly before billing.' },
-              { name: 'Customer Name', detail: 'Useful for named billing when the sale is not a walk-in.' },
-              { name: 'Customer Email', detail: 'Optional contact detail for invoice communication or future follow-up.' },
-              { name: 'Invoice Notes', detail: 'Short remarks shown for internal billing context or customer instructions.' },
-            ],
-          },
-          {
-            title: 'Billing controls',
-            fields: [
-              { name: 'Manual Number Toggle', detail: 'Switch between automatic invoice numbering and manual numbering.' },
-              { name: 'Manual Invoice Number', detail: 'Used only when manual numbering is enabled.' },
-              { name: 'Membership Redeem Points', detail: 'Redeem member points against the current cart when allowed.' },
-              { name: 'Paid Amount', detail: 'Entered in the payment modal while finalizing the invoice.' },
-            ],
-          },
-        ],
-        notes: [
-          'Walk-in sales can be posted without customer details, but named sales should capture phone or name.',
-          'Use Save Draft if the cart is not ready to post yet.',
-          'Use Orders / Invoice History when you need to review or edit an already saved invoice.',
-        ],
-      },
-      {
-        id: 'quotations',
-        title: 'Quotations',
-        route: '/sales/quotes',
-        purpose: 'Prepare customer estimates, save revisions, and approve quotes before converting them to a sale.',
-        navigation: 'Top menu > Sales > Quotations.',
-        mandatoryCount: '1 base rule, plus 1 more field for digital approval',
-        mandatorySummary: 'A quote needs at least one line item. Digital approval also requires Approved By Name.',
-        links: [{ label: 'Open Quotations', to: '/sales/quotes' }],
-        fieldGroups: [
-          {
-            title: 'Customer and quote details',
-            fields: [
-              { name: 'Customer Phone', detail: 'Searches an existing customer and fills saved customer details.' },
-              { name: 'Customer Name', detail: 'Visible customer name on the quotation.' },
-              { name: 'Customer Email', detail: 'Optional email for sharing the quote.' },
-              { name: 'Contact Person', detail: 'Person handling the quote on the customer side.' },
-              { name: 'Contact Role', detail: 'Job title or role of the contact person.' },
-              { name: 'Valid Until', detail: 'Expiry date of the quote offer.' },
-              { name: 'Quote Status', detail: 'Tracks draft, pending, approved, or other internal states.' },
-              { name: 'Pricing Mode', detail: 'Controls how pricing is applied inside the quote.' },
-              { name: 'Tax Mode', detail: 'Controls whether line tax is inclusive or exclusive.' },
-              { name: 'GST Bill Toggle', detail: 'Marks whether GST billing rules should be applied.' },
-              { name: 'Notes', detail: 'Special conditions, delivery notes, or approval remarks.' },
-            ],
-          },
-          {
-            title: 'Line item details',
-            fields: [
-              { name: 'Product', detail: 'Product or service being quoted.', required: true },
-              { name: 'Quantity', detail: 'Requested quantity for the line item.', required: true },
-              { name: 'Unit Price', detail: 'Rate used for the quoted item.', required: true },
-              { name: 'GST Rate', detail: 'Tax rate on the line item.' },
-              { name: 'Approved By Name', detail: 'Required only when using the digital approval action.', required: true },
-            ],
-          },
-        ],
-        notes: [
-          'The system will not save an empty quote.',
-          'Use customer phone first when the customer already exists to avoid duplicate customer records.',
-          'Digital approval is stricter than draft save because it asks for approver identity.',
-        ],
-      },
-      {
-        id: 'customers',
-        title: 'Customers',
-        route: '/customers',
-        purpose: 'Create customer master records, maintain credit and pricing settings, and log relationship activity.',
-        navigation: 'Top menu > Sales > Customers.',
-        mandatoryCount: '2 required fields for customer creation, 1 required field for activity logging',
-        mandatorySummary: 'Customer form requires Name and Phone. Activity logging requires Summary.',
-        links: [{ label: 'Open Customers', to: '/customers' }],
-        fieldGroups: [
-          {
-            title: 'Customer master fields',
-            fields: [
-              { name: 'Name', detail: 'Main display name for the customer record.', required: true },
-              { name: 'Phone', detail: 'Primary contact number and duplicate-check field.', required: true },
-              { name: 'Email', detail: 'Optional email for invoices, quotes, and reminders.' },
-              { name: 'Address', detail: 'Billing or delivery address.' },
-              { name: 'Account Type', detail: 'Controls how the customer is grouped for selling and reporting.' },
-              { name: 'Credit Limit', detail: 'Maximum allowed credit for this customer.' },
-              { name: 'Credit Days', detail: 'How long the customer can keep a balance outstanding.' },
-              { name: 'Pricing Tier', detail: 'Default pricing rule applied to the customer.' },
-              { name: 'Notes', detail: 'Extra service notes, preferences, or account remarks.' },
-            ],
-          },
-          {
-            title: 'Contact and activity sections',
-            fields: [
-              { name: 'Contact Name', detail: 'Secondary person under the same customer account.' },
-              { name: 'Contact Role', detail: 'Role of that person within the customer organization.' },
-              { name: 'Contact Phone', detail: 'Direct line for the contact person.' },
-              { name: 'Contact Email', detail: 'Email for the contact person.' },
-              { name: 'Primary / Visible Flags', detail: 'Controls whether the contact is the main visible person.' },
-              { name: 'Activity Summary', detail: 'Short description of the customer interaction.', required: true },
-              { name: 'Activity Type', detail: 'Call, meeting, follow-up, or another activity category.' },
-              { name: 'Details', detail: 'Longer notes for the customer interaction.' },
-              { name: 'Next Follow-up Date', detail: 'Reminder date for the next customer action.' },
-            ],
-          },
-        ],
-        notes: [
-          'Phone is the safest field for checking whether the customer already exists.',
-          'Use the activity log to track calls, reminders, or collection follow-ups.',
-          'Credit settings should match your business policy before saving the account.',
-        ],
-      },
+    id: 'module-home',
+    title: 'Home',
+    route: '/',
+    navigation: 'Top menu > Home',
+    purpose: 'The Home page serves as the central dashboard of the application.',
+    description:
+      'Users can view summaries such as bookings, sales activity, alerts, reminders, and shortcuts without opening each separate module. It gives a quick understanding of the current business status in one place.',
+    keyUses: ['Monitor daily activity', 'View recent transactions', 'Identify pending actions', 'Access quick navigation'],
+    links: [
+      { label: 'Open Dashboard', to: '/' },
+      { label: 'Open User Manual', to: '/user-manual' },
+    ],
+  },
+  {
+    id: 'module-sales',
+    title: 'Sales',
+    route: '/sales-dashboard',
+    navigation: 'Top menu > Sales',
+    purpose: 'The Sales module manages all customer-related transactions and revenue activity in a structured way.',
+    description:
+      'It handles the full sales cycle from quotations and customer handling to orders, returns, and performance review. It ensures that all commercial transactions are recorded and easy to trace later.',
+    keyUses: ['Manage customer orders', 'Provide quotations', 'Track sales', 'Handle returns', 'View sales reports'],
+    links: [
+      { label: 'Sales Dashboard', to: '/sales-dashboard' },
+      { label: 'Sales Orders', to: '/orders' },
+      { label: 'Quotations', to: '/sales/quotes' },
+    ],
+  },
+  {
+    id: 'module-catalog',
+    title: 'Catalog',
+    route: '/products',
+    navigation: 'Top menu > Catalog',
+    purpose: 'The Catalog module manages product and inventory information used across the system.',
+    description:
+      'It stores product details, organizes them into categories, tracks stock levels, and supports replenishment activity. This module supports both sales and procurement work.',
+    keyUses: ['Maintain product data', 'Monitor stock', 'Organize inventory', 'Support sales'],
+    links: [
+      { label: 'Product Center', to: '/products' },
+      { label: 'Product Entry', to: '/products/entry' },
+      { label: 'Product Catalog', to: '/products/catalog' },
+    ],
+  },
+  {
+    id: 'module-people',
+    title: 'People',
+    route: '/employees',
+    navigation: 'Top menu > People',
+    purpose: 'The People module manages employee data and workforce operations.',
+    description:
+      'It centralizes employee information, attendance, shifts, and payroll so the organization can manage staff records and workforce operations with better consistency and accuracy.',
+    keyUses: ['Store employee data', 'Track attendance', 'Manage shifts', 'Process payroll'],
+    links: [
+      { label: 'Employees', to: '/employees' },
+      { label: 'Attendance', to: '/attendance' },
+      { label: 'Payroll', to: '/payroll' },
+    ],
+  },
+  {
+    id: 'module-operations',
+    title: 'Operations',
+    route: '/facilities',
+    navigation: 'Top menu > Operations',
+    purpose: 'The Operations module manages service-related activities of the sports complex.',
+    description:
+      'It includes facility setup, bookings, event management, memberships, subscription plans, and related operational services. It focuses on how customers use the sports complex and its services.',
+    keyUses: ['Manage bookings', 'Organize events', 'Handle memberships', 'Create plans'],
+    links: [
+      { label: 'Facility Booking', to: '/facilities' },
+      { label: 'Event Booking', to: '/events' },
+      { label: 'Memberships', to: '/memberships' },
+    ],
+  },
+  {
+    id: 'module-accounts',
+    title: 'Accounts',
+    route: '/accounting',
+    navigation: 'Top menu > Accounts',
+    purpose: 'The Accounts module manages financial transactions and records.',
+    description:
+      'It helps the business maintain income and expense records, review financial activity, and complete settlement and reconciliation processes in a structured way.',
+    keyUses: ['Track finances', 'Maintain records', 'Perform settlements'],
+    links: [
+      { label: 'Accounting', to: '/accounting' },
+      { label: 'Settlements', to: '/accounting/settlements' },
+      { label: 'Reports', to: '/reports' },
+    ],
+  },
+  {
+    id: 'module-admin',
+    title: 'Admin',
+    route: '/settings',
+    navigation: 'Top menu > Admin',
+    purpose: 'The Admin module controls system configuration and access.',
+    description:
+      'It allows administrators to manage users, permissions, business settings, company setup, mail and print preferences, and other shared system behavior across the organization.',
+    keyUses: ['Manage users', 'Control access', 'Configure system'],
+    links: [
+      { label: 'Settings', to: '/settings' },
+      { label: 'Users', to: '/user-management' },
+      { label: 'Company Create', to: '/admin/company-create' },
+    ],
+  },
+];
+
+const menuSections: MenuSection[] = [
+  {
+    id: 'catalog-menu',
+    title: 'Catalog Menu',
+    summary:
+      'The Catalog menu is used to control the full lifecycle of products and stock, from initial entry to procurement and stock monitoring.',
+    accent: 'from-sky-500/20 via-cyan-500/10 to-transparent',
+    pages: [
       {
         id: 'product-entry',
         title: 'Product Entry',
         route: '/products/entry',
-        purpose: 'Create catalog items with pricing, stock, tax, barcode, reorder, and variant information.',
-        navigation: 'Top menu > Catalog > Product Entry or Top menu > Sales > Product Entry.',
-        mandatoryCount: '7 required fields',
-        mandatorySummary: 'Product Name, SKU, Category, Price, Cost, Initial Stock, and Min Stock Alert are required.',
+        navigation: 'Top menu > Catalog > Product Entry',
+        purpose: 'Used to create and manage product details.',
+        description:
+          'This page allows users to add new products and update core product information so items can be used correctly in sales, inventory, alerts, and reporting. It is the main starting point for creating a new item master in the application.',
+        keyUses: ['Add products', 'Update pricing', 'Maintain data'],
         links: [
           { label: 'Open Product Entry', to: '/products/entry' },
-          { label: 'Product Catalog', to: '/products/catalog' },
-          { label: 'Stock Alerts', to: '/products/alerts' },
+          { label: 'Open Product Catalog', to: '/products/catalog' },
+          { label: 'Open Categories', to: '/categories' },
         ],
-        fieldGroups: [
-          {
-            title: 'Required product setup fields',
-            fields: [
-              { name: 'Product Name', detail: 'Main name shown in catalog and sales search.', required: true },
-              { name: 'SKU', detail: 'Internal item code used for search and control.', required: true },
-              { name: 'Category', detail: 'Primary product grouping.', required: true },
-              { name: 'Price (Selling)', detail: 'Default selling price.', required: true },
-              { name: 'Cost (Buying)', detail: 'Purchase or landed cost for margin tracking.', required: true },
-              { name: 'Initial Stock', detail: 'Opening quantity available at creation time.', required: true },
-              { name: 'Min Stock Alert', detail: 'Threshold for low-stock warning.', required: true },
-            ],
-          },
-          {
-            title: 'Additional product fields',
-            fields: [
-              { name: 'Barcode', detail: 'Barcode value used for scan-based billing.' },
-              { name: 'Subcategory', detail: 'Secondary grouping within the main category.' },
-              { name: 'Item Type', detail: 'Type classification for the item.' },
-              { name: 'Description', detail: 'Longer product description or selling note.' },
-              { name: 'Wholesale Price', detail: 'Separate rate for wholesale selling.' },
-              { name: 'Promotional Price', detail: 'Temporary discounted selling rate.' },
-              { name: 'Promo Start / Promo End', detail: 'Controls the active period of the promotional price.' },
-              { name: 'GST Rate', detail: 'Default tax rate for the item.' },
-              { name: 'Unit', detail: 'Selling unit such as piece, box, kg, or pack.' },
-              { name: 'Auto Reorder / Reorder Quantity', detail: 'Used when you want low stock to trigger reorder guidance.' },
-              { name: 'Image URL', detail: 'Stores the product image reference.' },
-              { name: 'Variant Size / Variant Color', detail: 'Used for basic product variations.' },
-              { name: 'Price Tiers', detail: 'Bulk or slab pricing for different quantity ranges.' },
-              { name: 'Batch / Expiry / Serial / Negative Stock Flags', detail: 'Advanced stock control rules.' },
-            ],
-          },
+      },
+      {
+        id: 'product-catalog',
+        title: 'Product Catalog',
+        route: '/products/catalog',
+        navigation: 'Top menu > Catalog > Product Catalog',
+        purpose: 'Displays all products in the system.',
+        description:
+          'This page gives a full product list with search, filters, and navigation controls. It is useful for checking the current catalog, reviewing product information, and confirming whether an item already exists before adding or editing.',
+        keyUses: ['View products', 'Search items', 'Check availability'],
+        links: [
+          { label: 'Open Product Catalog', to: '/products/catalog' },
+          { label: 'Open Stock Alerts', to: '/products/alerts' },
+          { label: 'Open Product Entry', to: '/products/entry' },
         ],
-        notes: [
-          'Create the category first if the correct category does not exist yet.',
-          'Use Product Catalog for edits and Stock Alerts for follow-up after saving the item.',
-          'SKU should stay unique so billing and stock reports remain clean.',
+      },
+      {
+        id: 'stock-alerts',
+        title: 'Stock Alerts',
+        route: '/products/alerts',
+        navigation: 'Top menu > Catalog > Stock Alerts',
+        purpose: 'Monitors inventory levels.',
+        description:
+          'This page notifies users when stock is low or when other product conditions need attention. It helps the business act early, avoid stock-outs, and plan replenishment before sales are affected.',
+        keyUses: ['Identify low stock', 'Plan restocking'],
+        links: [
+          { label: 'Open Stock Alerts', to: '/products/alerts' },
+          { label: 'Open Procurement', to: '/inventory/procurement' },
+          { label: 'Open Product Catalog', to: '/products/catalog' },
+        ],
+      },
+      {
+        id: 'procurement',
+        title: 'Procurement',
+        route: '/inventory/procurement',
+        navigation: 'Top menu > Catalog > Procurement',
+        purpose: 'Handles purchasing and restocking.',
+        description:
+          'This section manages supplier purchases and inventory replenishment activity. It supports restocking decisions and helps the team follow purchasing activity in a more controlled way.',
+        keyUses: ['Purchase products', 'Track procurement'],
+        links: [
+          { label: 'Open Procurement', to: '/inventory/procurement' },
+          { label: 'Open Stock Alerts', to: '/products/alerts' },
+          { label: 'Open Product Catalog', to: '/products/catalog' },
         ],
       },
       {
         id: 'categories',
         title: 'Categories',
         route: '/categories',
-        purpose: 'Create product group names so catalog filtering, reporting, and entry remain organized.',
-        navigation: 'Top menu > Catalog > Categories.',
-        mandatoryCount: '1 required field',
-        mandatorySummary: 'Name is required. Description is optional.',
-        links: [{ label: 'Open Categories', to: '/categories' }],
-        fieldGroups: [
-          {
-            title: 'Category fields',
-            fields: [
-              { name: 'Name', detail: 'Category name used in product forms and reports.', required: true },
-              { name: 'Description', detail: 'Optional note about when to use this category.' },
-            ],
-          },
-        ],
-        notes: [
-          'Use short, stable names so product entry stays easy for staff.',
-          'Create the category before opening Product Entry if users need it immediately.',
+        navigation: 'Top menu > Catalog > Categories',
+        purpose: 'Organizes products into groups.',
+        description:
+          'This page helps structure product data into logical groups. A good category setup improves product entry, search, analysis, and stock review throughout the application.',
+        keyUses: ['Create groups', 'Improve search'],
+        links: [
+          { label: 'Open Categories', to: '/categories' },
+          { label: 'Open Product Entry', to: '/products/entry' },
+          { label: 'Open Product Catalog', to: '/products/catalog' },
         ],
       },
     ],
   },
   {
-    id: 'people-operations',
-    title: 'People and Operations Forms',
-    summary: 'These forms manage employees, shifts, facilities, bookings, events, plans, and subscriptions.',
-    accent: 'from-amber-500/20 via-fuchsia-500/10 to-transparent',
-    forms: [
+    id: 'people-menu',
+    title: 'People Menu',
+    summary:
+      'The People menu centralizes employee records and workforce management so HR and operations can coordinate staffing accurately.',
+    accent: 'from-amber-500/20 via-orange-500/10 to-transparent',
+    pages: [
       {
         id: 'employees',
         title: 'Employees',
         route: '/employees',
-        purpose: 'Create employee master records and maintain payroll-related identity and rate details.',
-        navigation: 'Top menu > People > Employees.',
-        mandatoryCount: '2 required fields',
-        mandatorySummary: 'Employee Code and Name are required before saving.',
-        links: [{ label: 'Open Employees', to: '/employees' }],
-        fieldGroups: [
-          {
-            title: 'Employee master fields',
-            fields: [
-              { name: 'Employee Code', detail: 'Unique employee identifier used across payroll and attendance.', required: true },
-              { name: 'Name', detail: 'Employee display name.', required: true },
-              { name: 'Designation', detail: 'Role or job title.' },
-              { name: 'Employment Type', detail: 'Full-time, part-time, contract, or another internal type.' },
-              { name: 'Monthly Salary', detail: 'Used for salaried payroll calculations.' },
-              { name: 'Daily Rate', detail: 'Used for daily-wage based calculations.' },
-              { name: 'Overtime Hourly Rate', detail: 'Extra rate for overtime payment.' },
-              { name: 'Paid Leave', detail: 'Leave entitlement or allowed paid leave setting.' },
-              { name: 'Active', detail: 'Controls whether the employee stays available in current operations.' },
-            ],
-          },
-          {
-            title: 'Salary summary tool',
-            fields: [
-              { name: 'Employee', detail: 'Choose the employee whose month summary you want to calculate.', required: true },
-              { name: 'Month', detail: 'Pick the month for the salary view or calculation.', required: true },
-            ],
-          },
+        navigation: 'Top menu > People > Employees',
+        purpose: 'Stores employee details.',
+        description:
+          'This page maintains all staff information in one place. It acts as the base employee master for attendance, shifts, payroll, and general HR administration.',
+        keyUses: ['Store employee data', 'Review staff details', 'Maintain employee records'],
+        links: [
+          { label: 'Open Employees', to: '/employees' },
+          { label: 'Open Attendance', to: '/attendance' },
+          { label: 'Open Payroll', to: '/payroll' },
         ],
-        notes: [
-          'Use a consistent employee code format because it is the easiest identifier to search later.',
-          'Salary-related fields should match the payroll method your company uses.',
+      },
+      {
+        id: 'attendance',
+        title: 'Attendance',
+        route: '/attendance',
+        navigation: 'Top menu > People > Attendance',
+        purpose: 'Tracks employee presence.',
+        description:
+          'This page records daily attendance for monitoring, operational review, and payroll support. It helps the organization maintain reliable employee presence data.',
+        keyUses: ['Track attendance', 'Review daily presence', 'Support payroll'],
+        links: [
+          { label: 'Open Attendance', to: '/attendance' },
+          { label: 'Open Employees', to: '/employees' },
+          { label: 'Open Shifts', to: '/shifts' },
         ],
       },
       {
         id: 'shifts',
         title: 'Shifts',
         route: '/shifts',
-        purpose: 'Maintain working time templates used for attendance planning and staff scheduling.',
-        navigation: 'Top menu > People > Shifts.',
-        mandatoryCount: '0 hard-required fields in the row editor, but the row should be complete before saving',
-        mandatorySummary: 'This page uses inline shift rows rather than one large form.',
-        links: [{ label: 'Open Shifts', to: '/shifts' }],
-        fieldGroups: [
-          {
-            title: 'Shift row fields',
-            fields: [
-              { name: 'Shift', detail: 'Name of the shift such as Morning, Evening, or Full Day.' },
-              { name: 'Start', detail: 'Shift start time.' },
-              { name: 'End', detail: 'Shift end time.' },
-              { name: 'Weekly Off', detail: 'Default weekly holiday pattern for the shift.' },
-              { name: 'Notes', detail: 'Extra scheduling instructions or clarifications.' },
-            ],
-          },
-        ],
-        notes: [
-          'The page is easier to use when shift names are short and consistent.',
-          'Keep start and end times realistic so attendance and payroll calculations remain meaningful.',
+        navigation: 'Top menu > People > Shifts',
+        purpose: 'Manages employee schedules.',
+        description:
+          'This page assigns work timing and shift patterns so the business can plan staff coverage correctly across operating hours. It helps align people availability with facility activity.',
+        keyUses: ['Manage schedules', 'Assign working hours', 'Support proper coverage'],
+        links: [
+          { label: 'Open Shifts', to: '/shifts' },
+          { label: 'Open Attendance', to: '/attendance' },
+          { label: 'Open Payroll', to: '/payroll' },
         ],
       },
+      {
+        id: 'payroll',
+        title: 'Payroll',
+        route: '/payroll',
+        navigation: 'Top menu > People > Payroll',
+        purpose: 'Calculates salaries.',
+        description:
+          'This page processes employee payments based on attendance and shifts. It gives the organization a structured way to calculate salary-related output and review pay records.',
+        keyUses: ['Calculate salaries', 'Review pay information', 'Process payroll'],
+        links: [
+          { label: 'Open Payroll', to: '/payroll' },
+          { label: 'Open Employees', to: '/employees' },
+          { label: 'Open Attendance', to: '/attendance' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'sales-menu',
+    title: 'Sales Menu',
+    summary:
+      'The Sales menu handles customer-facing commercial activity, from pre-sales discussion through confirmed transactions and follow-up reporting.',
+    accent: 'from-emerald-500/20 via-teal-500/10 to-transparent',
+    pages: [
+      {
+        id: 'sales-orders',
+        title: 'Sales Orders',
+        route: '/orders',
+        navigation: 'Top menu > Sales > Orders',
+        purpose: 'Records confirmed sales.',
+        description:
+          'This page tracks completed transactions and allows users to review the history of confirmed sales. It is the main operational record for finalized customer orders.',
+        keyUses: ['Track completed transactions', 'Review order history', 'Support sales follow-up'],
+        links: [
+          { label: 'Open Sales Orders', to: '/orders' },
+          { label: 'Open Sales Dashboard', to: '/sales-dashboard' },
+          { label: 'Open Customers', to: '/customers' },
+        ],
+      },
+      {
+        id: 'quotations',
+        title: 'Quotations',
+        route: '/sales/quotes',
+        navigation: 'Top menu > Sales > Quotations',
+        purpose: 'Provides price estimates.',
+        description:
+          'This page helps customers and sales staff review pricing before purchase confirmation. It supports estimate preparation, internal review, and better customer decision-making.',
+        keyUses: ['Prepare estimates', 'Support customer decisions', 'Track quote activity'],
+        links: [
+          { label: 'Open Quotations', to: '/sales/quotes' },
+          { label: 'Open Sales Orders', to: '/orders' },
+          { label: 'Open Customers', to: '/customers' },
+        ],
+      },
+      {
+        id: 'returns',
+        title: 'Returns',
+        route: '/returns',
+        navigation: 'Top menu > Sales > Returns',
+        purpose: 'Handles returned items.',
+        description:
+          'This page records return activity and helps maintain accurate transaction, customer, and stock records after an item comes back from a customer.',
+        keyUses: ['Handle returned items', 'Maintain accurate records', 'Support refund workflows'],
+        links: [
+          { label: 'Open Returns', to: '/returns' },
+          { label: 'Open Sales Orders', to: '/orders' },
+          { label: 'Open Reports', to: '/reports' },
+        ],
+      },
+      {
+        id: 'reports',
+        title: 'Reports',
+        route: '/reports',
+        navigation: 'Top menu > Sales > Reports',
+        purpose: 'Provides sales insights.',
+        description:
+          'This page analyzes business performance by showing operational and revenue information through filters, tabs, exports, and summaries. It helps users understand what is happening in the business over time.',
+        keyUses: ['Analyze performance', 'Review business data', 'Support decision-making'],
+        links: [
+          { label: 'Open Reports', to: '/reports' },
+          { label: 'Open Sales Orders', to: '/orders' },
+          { label: 'Open Accounting', to: '/accounting' },
+        ],
+      },
+      {
+        id: 'customers',
+        title: 'Customers',
+        route: '/customers',
+        navigation: 'Top menu > Sales > Customers',
+        purpose: 'Stores customer data.',
+        description:
+          'This page keeps customer history, contact details, and interactions in one place. It helps the team manage repeat business, contact follow-up, and better service continuity.',
+        keyUses: ['Store customer data', 'Track customer history', 'Support customer interactions'],
+        links: [
+          { label: 'Open Customers', to: '/customers' },
+          { label: 'Open Quotations', to: '/sales/quotes' },
+          { label: 'Open Sales Orders', to: '/orders' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'operations-menu',
+    title: 'Operations Menu',
+    summary:
+      'The Operations menu is focused on arena usage, services, bookings, events, and membership-based customer engagement.',
+    accent: 'from-fuchsia-500/20 via-purple-500/10 to-transparent',
+    pages: [
       {
         id: 'facility-setup',
         title: 'Facility Setup',
         route: '/facilities/setup',
-        purpose: 'Create and maintain bookable facilities such as courts, halls, rooms, or activity spaces.',
-        navigation: 'Top menu > Operations > Facility Setup.',
-        mandatoryCount: '3 required fields on create, 2 on edit',
-        mandatorySummary: 'Facility Name and Hourly Rate are always required. Facility Image is required on create and optional on edit.',
+        navigation: 'Top menu > Operations > Facility Setup',
+        purpose: 'Defines sports facilities.',
+        description:
+          'This page configures courts, halls, pools, grounds, and other facility types that the arena makes available to customers. It is the basic setup page required before live booking can happen.',
+        keyUses: ['Define facilities', 'Configure rates and rules', 'Prepare booking setup'],
         links: [
           { label: 'Open Facility Setup', to: '/facilities/setup' },
           { label: 'Open Facility Booking', to: '/facilities' },
-        ],
-        fieldGroups: [
-          {
-            title: 'Facility fields',
-            fields: [
-              { name: 'Facility Name', detail: 'Display name of the bookable facility.', required: true },
-              { name: 'Location', detail: 'Branch, floor, or physical area.' },
-              { name: 'Capacity', detail: 'How many simultaneous units or slots can be booked.' },
-              { name: 'Hourly Rate', detail: 'Base booking rate per hour.', required: true },
-              { name: 'Description', detail: 'What the facility is used for or any customer-facing notes.' },
-              { name: 'Facility Image', detail: 'Main image for the facility. Required during new creation.', required: true },
-              { name: 'Active', detail: 'Controls whether the facility can receive new bookings.' },
-            ],
-          },
-        ],
-        notes: [
-          'Complete Facility Setup before attempting customer bookings.',
-          'Capacity matters because multi-unit bookings depend on it.',
+          { label: 'Open Event Booking', to: '/events' },
         ],
       },
       {
         id: 'facility-booking',
         title: 'Facility Booking',
         route: '/facilities',
-        purpose: 'Reserve facilities for customer time slots and capture booking, payment, and customer information.',
-        navigation: 'Top menu > Operations > Facility Booking.',
-        mandatoryCount: '5 required fields for an existing customer, 6 for a new customer',
-        mandatorySummary: 'Facility, Booking Date, Start Time, End Time, and Customer Phone are required. Customer Name becomes required when the customer is new.',
-        links: [{ label: 'Open Facility Booking', to: '/facilities' }],
-        fieldGroups: [
-          {
-            title: 'Booking details',
-            fields: [
-              { name: 'Facility', detail: 'Which court, hall, or unit is being booked.', required: true },
-              { name: 'Booking Date', detail: 'Date of the reservation.', required: true },
-              { name: 'Start Time', detail: 'Booking start time.', required: true },
-              { name: 'End Time', detail: 'Booking end time. It must be later than the start time.', required: true },
-              { name: 'Courts / Booked Units', detail: 'How many units are reserved when the facility supports capacity.' },
-            ],
-          },
-          {
-            title: 'Customer and payment details',
-            fields: [
-              { name: 'Customer Phone', detail: 'Primary search field for an existing customer.', required: true },
-              { name: 'Customer Name', detail: 'Required when the booking is for a new customer.', required: true },
-              { name: 'Customer Email', detail: 'Optional email for confirmations or coordination.' },
-              { name: 'Payment Status', detail: 'Tracks pending, partial, paid, or other payment states.' },
-              { name: 'Custom Amount', detail: 'Use when the booking amount differs from the standard rate.' },
-              { name: 'Notes', detail: 'Special booking instructions or reminders.' },
-            ],
-          },
-        ],
-        notes: [
-          'The form checks availability and capacity before confirming the booking.',
-          'Use customer phone first so repeat customers do not get created again as new records.',
+        navigation: 'Top menu > Operations > Facility Booking',
+        purpose: 'Manages bookings.',
+        description:
+          'This page allows reservation of facilities for customers by date, time, and slot. It helps front desk and operations teams manage customer usage of sports infrastructure efficiently.',
+        keyUses: ['Manage bookings', 'Reserve facilities', 'Track customer usage'],
+        links: [
+          { label: 'Open Facility Booking', to: '/facilities' },
+          { label: 'Open Facility Setup', to: '/facilities/setup' },
+          { label: 'Open Customers', to: '/customers' },
         ],
       },
       {
         id: 'event-booking',
         title: 'Event Booking',
         route: '/events',
-        purpose: 'Manage organizer-led events that can use one or more facilities and track amount, timing, and status.',
-        navigation: 'Top menu > Operations > Event Booking.',
-        mandatoryCount: '3 core required fields plus a valid time range',
-        mandatorySummary: 'Event Name, Organizer Name, and at least one Facility are required. End time must be later than start time.',
-        links: [{ label: 'Open Event Booking', to: '/events' }],
-        fieldGroups: [
-          {
-            title: 'Event identity and contact fields',
-            fields: [
-              { name: 'Event Name', detail: 'Main event title.', required: true },
-              { name: 'Organizer Name', detail: 'Name of the person or party arranging the event.', required: true },
-              { name: 'Organization', detail: 'Company, club, or group name if applicable.' },
-              { name: 'Phone', detail: 'Primary organizer contact number.' },
-              { name: 'Email', detail: 'Primary organizer email.' },
-            ],
-          },
-          {
-            title: 'Event schedule and finance fields',
-            fields: [
-              { name: 'Event Date', detail: 'Date of the event.' },
-              { name: 'Start Time', detail: 'When the event begins.' },
-              { name: 'End Time', detail: 'When the event ends. Must be later than start time.' },
-              { name: 'Facilities', detail: 'One or more facilities linked to the event.', required: true },
-              { name: 'Status', detail: 'Current lifecycle stage of the event.' },
-              { name: 'Total Amount', detail: 'Full charge for the event booking.' },
-              { name: 'Advance Payment', detail: 'Amount already collected.' },
-              { name: 'Remarks', detail: 'Logistics notes, commitments, or internal remarks.' },
-            ],
-          },
-        ],
-        notes: [
-          'Select facilities carefully because at least one facility must be attached before save.',
-          'Use remarks for setup notes that staff may need on the event date.',
+        navigation: 'Top menu > Operations > Event Booking',
+        purpose: 'Handles events.',
+        description:
+          'This page manages event registrations, organizer details, facility allocation, schedule planning, and payment tracking. It supports both single-date and multi-date event workflows with printable confirmations.',
+        keyUses: ['Manage registrations', 'Handle event schedules', 'Track event payments'],
+        links: [
+          { label: 'Open Event Booking', to: '/events' },
+          { label: 'Open Facility Setup', to: '/facilities/setup' },
+          { label: 'Open Settings', to: '/settings' },
         ],
       },
       {
-        id: 'membership-plan',
-        title: 'Membership Plan',
+        id: 'create-plan',
+        title: 'Create Plan',
         route: '/membership-plans/create',
-        purpose: 'Define membership products, pricing, validity, visit rules, benefits, discounts, and renewal behavior.',
-        navigation: 'Top menu > Operations > Create Plan.',
-        mandatoryCount: '1 explicit required field',
-        mandatorySummary: 'Plan Name is required. The rest of the fields control how the plan behaves.',
+        navigation: 'Top menu > Operations > Create Plan',
+        purpose: 'Defines service plans.',
+        description:
+          'This page creates pricing and usage packages that can later be attached to members. It is where service rules, pricing structure, and access limits are defined before subscriptions are issued.',
+        keyUses: ['Create pricing packages', 'Define usage rules', 'Support membership setup'],
         links: [
           { label: 'Open Create Plan', to: '/membership-plans/create' },
-          { label: 'Memberships', to: '/memberships' },
-        ],
-        fieldGroups: [
-          {
-            title: 'Plan identity and scope fields',
-            fields: [
-              { name: 'Plan Name', detail: 'Unique plan name shown to staff and members.', required: true },
-              { name: 'Facility Type', detail: 'Type of facility or service the plan applies to.' },
-              { name: 'Facilities', detail: 'Specific facilities included in the membership.' },
-              { name: 'Validity Days', detail: 'How long the plan stays active after start.' },
-              { name: 'Grace Days', detail: 'Extra days allowed after expiry.' },
-              { name: 'Trial Days', detail: 'Optional trial period before the full plan period.' },
-            ],
-          },
-          {
-            title: 'Pricing and benefit fields',
-            fields: [
-              { name: 'Plan Price', detail: 'Base amount charged for this plan.' },
-              { name: 'Flat Discount', detail: 'Fixed amount discount applied to the plan.' },
-              { name: 'Discount %', detail: 'Percentage discount for the plan.' },
-              { name: 'Points / Currency', detail: 'Defines loyalty point earning for the plan.' },
-              { name: '100 Points = Value', detail: 'Redemption value rule for points.' },
-              { name: 'Minimum Redeem Points', detail: 'Smallest point balance allowed for redemption.' },
-              { name: 'Sessions Limit', detail: 'How many sessions the member can use.' },
-              { name: 'Visit Limit', detail: 'How many visits are included.' },
-              { name: 'Points Multiplier', detail: 'Bonus earning factor for this plan.' },
-              { name: 'Free Services / Items', detail: 'Complimentary benefits bundled into the plan.' },
-              { name: 'Access Restrictions', detail: 'Day, time, or usage restrictions.' },
-              { name: 'Auto Renew', detail: 'Whether the plan should renew automatically.' },
-              { name: 'One-Time Fee Toggle / Amount', detail: 'Extra joining fee configuration.' },
-            ],
-          },
-        ],
-        notes: [
-          'Even though only Plan Name is technically required, plans work better when price, validity, and usage rules are filled properly.',
-          'Use clear plan names so staff can choose the right plan quickly during subscription.',
+          { label: 'Open Memberships', to: '/memberships' },
+          { label: 'Open Membership Reports', to: '/membership-reports' },
         ],
       },
       {
-        id: 'membership-subscription',
-        title: 'Membership Subscription',
+        id: 'create-subscription',
+        title: 'Create Subscription',
         route: '/membership-subscriptions/create',
-        purpose: 'Enroll a member into a plan and capture profile, communication, billing, and renewal preferences.',
-        navigation: 'Top menu > Operations > Create Subscription.',
-        mandatoryCount: '3 required fields',
-        mandatorySummary: 'Membership Plan, Full Name, and Mobile are required.',
+        navigation: 'Top menu > Operations > Create Subscription',
+        purpose: 'Manages recurring services.',
+        description:
+          'This page handles subscription-based access by linking a member to a plan, payment setup, and active period. It is used when a customer joins a recurring service model.',
+        keyUses: ['Create subscriptions', 'Assign members to plans', 'Handle recurring access'],
         links: [
           { label: 'Open Create Subscription', to: '/membership-subscriptions/create' },
-          { label: 'Memberships', to: '/memberships' },
+          { label: 'Open Create Plan', to: '/membership-plans/create' },
+          { label: 'Open Memberships', to: '/memberships' },
         ],
-        fieldGroups: [
-          {
-            title: 'Required subscription fields',
-            fields: [
-              { name: 'Membership Plan', detail: 'Plan being assigned to the member.', required: true },
-              { name: 'Full Name', detail: 'Primary member name.', required: true },
-              { name: 'Mobile', detail: 'Primary mobile number. Must be unique.', required: true },
-            ],
-          },
-          {
-            title: 'Profile and renewal fields',
-            fields: [
-              { name: 'Email', detail: 'Optional email for reminders and communication.' },
-              { name: 'Date of Birth', detail: 'Member date of birth.' },
-              { name: 'Emergency Contact', detail: 'Backup contact information.' },
-              { name: 'Alternate Full Name', detail: 'Additional or alternate identity field.' },
-              { name: 'Gender', detail: 'Member gender field.' },
-              { name: 'Language Preference', detail: 'Preferred communication language.' },
-              { name: 'Theme Preference', detail: 'Display or communication preference.' },
-              { name: 'Address', detail: 'Member address.' },
-              { name: 'Profile Photo URL', detail: 'Image reference for the member profile.' },
-              { name: 'Start Date', detail: 'Date when the subscription begins.' },
-              { name: 'Amount Paid', detail: 'Amount collected at signup.' },
-              { name: 'Discount %', detail: 'Discount granted on this subscription.' },
-              { name: 'Reminder Days', detail: 'How early renewal reminders should start.' },
-              { name: 'Auto Renew', detail: 'Whether this member should renew automatically.' },
-              { name: 'Notes', detail: 'Any special handling or member remarks.' },
-            ],
-          },
+      },
+      {
+        id: 'memberships',
+        title: 'Memberships',
+        route: '/memberships',
+        navigation: 'Top menu > Operations > Memberships',
+        purpose: 'Manages members.',
+        description:
+          'This page tracks membership details, plan status, and active member records. It gives staff a consolidated place to review current member information and ongoing membership activity.',
+        keyUses: ['Track membership details', 'Review member status', 'Support customer service'],
+        links: [
+          { label: 'Open Memberships', to: '/memberships' },
+          { label: 'Open Create Subscription', to: '/membership-subscriptions/create' },
+          { label: 'Open Membership Reports', to: '/membership-reports' },
         ],
-        notes: [
-          'Pick the plan first so staff do not enroll the member into the wrong membership.',
-          'Mobile number is the best field for duplicate prevention and reminder communication.',
+      },
+      {
+        id: 'membership-reports',
+        title: 'Membership Reports',
+        route: '/membership-reports',
+        navigation: 'Top menu > Operations > Membership Reports',
+        purpose: 'Analyzes membership data.',
+        description:
+          'This page provides insights on usage, renewals, and growth so management can evaluate how the membership business is performing and where attention is needed.',
+        keyUses: ['Analyze usage', 'Review renewals', 'Monitor growth'],
+        links: [
+          { label: 'Open Membership Reports', to: '/membership-reports' },
+          { label: 'Open Memberships', to: '/memberships' },
+          { label: 'Open Create Plan', to: '/membership-plans/create' },
         ],
       },
     ],
   },
   {
-    id: 'accounts-admin',
-    title: 'Accounts and Admin Forms',
-    summary: 'These forms cover settlements, day close, user setup, roles, and permission control.',
-    accent: 'from-cyan-500/20 via-rose-500/10 to-transparent',
-    forms: [
+    id: 'accounts-menu',
+    title: 'Accounts Menu',
+    summary:
+      'The Accounts menu gives finance and management teams a controlled way to review financial records and settlement activity.',
+    accent: 'from-cyan-500/20 via-blue-500/10 to-transparent',
+    pages: [
       {
-        id: 'settlements',
-        title: 'Settlement Center',
-        route: '/accounting/settlements',
-        purpose: 'Handle receipts, credit notes, adjustments, refunds, and day-end cash closing from one finance screen.',
-        navigation: 'Top menu > Accounts > Settlements.',
-        mandatoryCount: 'Varies by section on the page',
-        mandatorySummary: 'Receipt Voucher requires Amount > 0. Credit Note requires Total > 0. Day-End Closing depends on business date and cash values.',
-        links: [{ label: 'Open Settlements', to: '/accounting/settlements' }],
-        fieldGroups: [
-          {
-            title: 'Receipt Voucher section',
-            fields: [
-              { name: 'Customer Name', detail: 'Customer linked to the receipt.' },
-              { name: 'Amount', detail: 'Receipt amount. Must be greater than zero.', required: true },
-              { name: 'Payment Mode', detail: 'Cash, card, transfer, or another payment method.' },
-              { name: 'Notes', detail: 'Reason or receipt-specific remarks.' },
-              { name: 'Advance Receipt Toggle', detail: 'Marks the receipt as an advance collection.' },
-              { name: 'Outstanding Allocation Rows', detail: 'Lets you apply the receipt against open balances.' },
-            ],
-          },
-          {
-            title: 'Credit Note and adjustment sections',
-            fields: [
-              { name: 'Customer Name / Phone / Email', detail: 'Customer identity fields tied to the credit note.' },
-              { name: 'Reason', detail: 'Why the credit note is being issued.' },
-              { name: 'Subtotal', detail: 'Base amount before tax.' },
-              { name: 'Tax', detail: 'Tax part of the credit note.' },
-              { name: 'Total', detail: 'Final credit note value. Must be greater than zero.', required: true },
-              { name: 'Source Sale ID', detail: 'Original sale reference for traceability.' },
-              { name: 'Notes', detail: 'Extra explanatory text for the credit note.' },
-              { name: 'Adjustment Amount', detail: 'Value used when adjusting a credit against a sale.' },
-              { name: 'Adjustment Note', detail: 'Reason for the adjustment.' },
-            ],
-          },
-          {
-            title: 'Refund and day-end sections',
-            fields: [
-              { name: 'Refund Amount', detail: 'Amount being returned to the customer.' },
-              { name: 'Refund Note', detail: 'Reason for the refund.' },
-              { name: 'Business Date', detail: 'Date for the day-end closing entry.' },
-              { name: 'Opening Cash', detail: 'Cash in hand at the beginning of the day.' },
-              { name: 'Physical Closing Cash', detail: 'Cash physically counted at close.' },
-              { name: 'Notes', detail: 'Short explanation for exceptions, mismatch, or closing remarks.' },
-            ],
-          },
-        ],
-        notes: [
-          'This page has multiple finance forms, so check which section is active before saving.',
-          'Amounts are the strictest validation points on this screen.',
-          'Use notes generously when the transaction is unusual or needs audit clarity.',
+        id: 'accounting',
+        title: 'Accounting',
+        route: '/accounting',
+        navigation: 'Top menu > Accounts > Accounting',
+        purpose: 'Maintains financial records.',
+        description:
+          'This page tracks income, expenses, and accounting activity. It provides the financial backbone of the system and helps the business maintain organized records for review and control.',
+        keyUses: ['Track income', 'Track expenses', 'Maintain records'],
+        links: [
+          { label: 'Open Accounting', to: '/accounting' },
+          { label: 'Open Settlements', to: '/accounting/settlements' },
+          { label: 'Open Reports', to: '/reports' },
         ],
       },
       {
-        id: 'user-management',
-        title: 'User Management',
-        route: '/user-management',
-        purpose: 'Create users, edit roles, activate or deactivate access, and maintain page-level permissions.',
-        navigation: 'Top menu > Admin > Users.',
-        mandatoryCount: '4 required fields for a new user, 3 required fields when editing an existing user, 1 required field for role creation',
-        mandatorySummary: 'New users need Email, Password, First Name, and Last Name. Editing keeps Password optional. New role creation requires Role Name.',
-        links: [{ label: 'Open Users', to: '/user-management' }],
-        fieldGroups: [
-          {
-            title: 'User account fields',
-            fields: [
-              { name: 'Email', detail: 'User login email.', required: true },
-              { name: 'Password', detail: 'Required for new users. Optional while editing an existing user.', required: true },
-              { name: 'First Name', detail: 'User first name.', required: true },
-              { name: 'Last Name', detail: 'User last name.', required: true },
-              { name: 'Phone Number', detail: 'Optional contact number for the user.' },
-              { name: 'Business Name', detail: 'Business or branch identification if used in your setup.' },
-              { name: 'Role', detail: 'Role template that controls access.' },
-              { name: 'Active', detail: 'Enables or disables sign-in permission for the user.' },
-            ],
-          },
-          {
-            title: 'Role setup fields',
-            fields: [
-              { name: 'Role Name', detail: 'Name of the new role template.', required: true },
-              { name: 'Permission Matrix', detail: 'Checkbox grid that controls which pages the role can open.' },
-            ],
-          },
+        id: 'settlements',
+        title: 'Settlements',
+        route: '/accounting/settlements',
+        navigation: 'Top menu > Accounts > Settlements',
+        purpose: 'Handles payment reconciliation.',
+        description:
+          'This page ensures transactions match the money actually received, adjusted, or closed. It is important for reconciliation, payment clarity, and clean end-of-day finance control.',
+        keyUses: ['Perform reconciliation', 'Handle settlement activity', 'Review receipt matching'],
+        links: [
+          { label: 'Open Settlements', to: '/accounting/settlements' },
+          { label: 'Open Accounting', to: '/accounting' },
+          { label: 'Open Reports', to: '/reports' },
         ],
-        notes: [
-          'If a user says a page is missing, this is the first screen to check.',
-          'Password is only compulsory when the user is being created for the first time.',
+      },
+    ],
+  },
+  {
+    id: 'admin-menu',
+    title: 'Admin Menu',
+    summary:
+      'The Admin menu is responsible for system configuration, security, and shared setup across the entire application.',
+    accent: 'from-rose-500/20 via-pink-500/10 to-transparent',
+    pages: [
+      {
+        id: 'settings',
+        title: 'Settings',
+        route: '/settings',
+        navigation: 'Top menu > Admin > Settings',
+        purpose: 'Controls system behavior.',
+        description:
+          'This page manages application configuration and preferences such as business profile, logos, print settings, mail settings, database tools, and shared operating preferences.',
+        keyUses: ['Manage configuration', 'Control preferences', 'Support system setup'],
+        links: [
+          { label: 'Open Settings', to: '/settings' },
+          { label: 'Open Users', to: '/user-management' },
+          { label: 'Open Company Create', to: '/admin/company-create' },
+        ],
+      },
+      {
+        id: 'users',
+        title: 'Users',
+        route: '/user-management',
+        navigation: 'Top menu > Admin > Users',
+        purpose: 'Manages user access.',
+        description:
+          'This page controls user accounts, roles, and permissions. Administrators use it to decide who can access the system and which modules or pages each user is allowed to open.',
+        keyUses: ['Manage users', 'Control roles', 'Manage permissions'],
+        links: [
+          { label: 'Open Users', to: '/user-management' },
+          { label: 'Open Settings', to: '/settings' },
+          { label: 'Open Dashboard', to: '/' },
+        ],
+      },
+      {
+        id: 'company-create',
+        title: 'Company Create',
+        route: '/admin/company-create',
+        navigation: 'Top menu > Admin > Company Create',
+        purpose: 'Defines company details.',
+        description:
+          'This page stores organization-level company information used during onboarding and system setup. It is typically used by administrators when creating or updating company-level configuration.',
+        keyUses: ['Store company details', 'Support onboarding', 'Maintain organization setup'],
+        links: [
+          { label: 'Open Company Create', to: '/admin/company-create' },
+          { label: 'Open Settings', to: '/settings' },
+          { label: 'Open Users', to: '/user-management' },
         ],
       },
     ],
   },
 ];
 
-const quickFormLinks = guideCategories.flatMap((category) =>
-  category.forms.map((form) => ({
-    id: form.id,
-    title: form.title,
-    route: form.route,
-    navigation: form.navigation,
-    category: category.title,
-  }))
-);
+const quickLinks = [
+  ...moduleSummaries.map((module) => ({
+    id: module.id,
+    title: module.title,
+    route: module.route,
+    navigation: module.navigation,
+    category: 'Main Module',
+  })),
+  ...menuSections.flatMap((section) =>
+    section.pages.map((page) => ({
+      id: page.id,
+      title: page.title,
+      route: page.route,
+      navigation: page.navigation,
+      category: section.title,
+    }))
+  ),
+];
+
+const navigationFlowSteps: string[] = [
+  'Admin sets up company details, users, permissions, settings, and shared system controls.',
+  'Catalog team adds products, categories, stock structure, and procurement-related setup.',
+  'Operations team prepares facilities, plans, subscriptions, bookings, and event workflows.',
+  'Sales team manages customers, quotations, orders, returns, and commercial follow-up.',
+  'People module maintains employees, attendance, shifts, and payroll processing.',
+  'Accounts tracks financial transactions, reconciliation, settlements, and reporting for management review.',
+];
+
+const finalSummaryPoints: string[] = [
+  'The application combines sports complex operations, sales, staff, inventory, memberships, and finance into one connected platform.',
+  'Each module plays a specific role so the overall business workflow stays structured, efficient, and easier to monitor.',
+  'Use the hyperlinks in this manual to open the correct page quickly and use the menu path descriptions when training new users.',
+];
 
 export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false }) => {
   const settings = useMemo(() => getGeneralSettings(), []);
   const supportEmail = settings.business.email?.trim() || '';
   const supportPhone = settings.business.phone?.trim() || '';
-  const brandName = settings.business.tradeName || settings.business.legalName || 'SPARK AI';
-  const routeActionLabel = isPublic ? 'Open route after login' : 'Open page';
+  const routeActionLabel = isPublic ? 'Login to open' : 'Open page';
+  const resolveRouteTarget = (to: string) => (isPublic && to !== '/user-manual' ? '/login' : to);
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-          <div className="grid gap-0 lg:grid-cols-[1.5fr_0.9fr]">
+          <div className="grid gap-0 lg:grid-cols-[1.55fr_0.95fr]">
             <div className="bg-gradient-to-br from-indigo-500/20 via-sky-500/10 to-transparent p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-200">
-                {isPublic ? 'Public User Manual' : 'User Manual'}
+                {isPublic ? 'Public User Manual' : 'User Manual and Product Documentation'}
               </p>
-              <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">How to use {brandName}</h1>
+              <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">{APPLICATION_TITLE}</h1>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-gray-200 sm:text-base">
-                This guide is now organized screen by screen. For each main form, you can see how to reach the page,
-                the direct route, the current mandatory field count, and a plain-language explanation of the fields on
-                that form.
+                This manual explains how the application is structured, what each module is used for, and how every
+                major page or form supports day-to-day business operations. Each section below includes direct
+                hyperlinks so staff can jump to the exact screen they need.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 {isPublic ? (
                   <>
                     <Link
-                      to="/"
+                      to="/login"
                       className="inline-flex items-center rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
                     >
                       Back to Login
                     </Link>
                     <a
-                      href="#quick-form-links"
+                      href="#quick-links"
                       className="inline-flex items-center rounded-md border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
                     >
-                      Jump to Form Links
+                      Jump to Hyperlinks
                     </a>
                   </>
                 ) : (
@@ -716,35 +725,36 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                       Go to Dashboard
                     </Link>
                     <a
-                      href="#form-guides"
+                      href="#menu-guides"
                       className="inline-flex items-center rounded-md border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
                     >
-                      Jump to Form Guides
+                      Jump to Detailed Pages
                     </a>
                   </>
                 )}
               </div>
               <div className="mt-6 flex flex-wrap gap-2 text-xs text-gray-300">
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Available before login</span>
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Direct page routes included</span>
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Mandatory counts from live form rules</span>
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Module-by-module guide</span>
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Direct hyperlinks included</span>
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Expanded page descriptions</span>
               </div>
             </div>
 
             <div className="border-t border-white/10 bg-gray-950/35 p-6 sm:p-8 lg:border-l lg:border-t-0">
               <div className="space-y-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Support Checklist</p>
-                  <p className="mt-2 text-sm text-white">Share these details when reporting an issue:</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Quick Orientation</p>
+                  <p className="mt-2 text-sm text-white">The application usually follows this sequence in real usage:</p>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-300">
-                  <li className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">The page name and the menu path you used to open it</li>
-                  <li className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">The fields you filled and which mandatory field blocked you</li>
-                  <li className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Date, time, and a screenshot of the error or wrong result</li>
-                  <li className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Whether the issue happens every time or only for one record</li>
+                  {navigationFlowSteps.map((step) => (
+                    <li key={step} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                      {step}
+                    </li>
+                  ))}
                 </ul>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Contact</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Support Contact</p>
                   <p className="mt-2 text-sm text-gray-100">
                     {supportEmail ? supportEmail : 'Contact your administrator or internal support desk.'}
                   </p>
@@ -755,27 +765,27 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
           </div>
         </section>
 
-        <section id="navigation-basics" className="space-y-4">
+        <section id="overview" className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Navigation Basics</p>
-              <h2 className="text-2xl font-bold text-white">How to access each page</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Overview</p>
+              <h2 className="text-2xl font-bold text-white">Introduction, objective, structure, and flow</h2>
             </div>
             <p className="max-w-2xl text-sm text-gray-300">
-              Every form below includes its menu path and direct route. Use the menu path first, and use the route when
-              you want the exact page link.
+              These sections explain what the application is for and how the business typically moves through the
+              system.
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            {navigationGuides.map((guide) => (
-              <article key={guide.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
-                <h3 className="text-lg font-semibold text-white">{guide.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-300">{guide.detail}</p>
-                <ul className="mt-4 space-y-3">
-                  {guide.steps.map((step) => (
-                    <li key={step} className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200">
-                      {step}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {overviewSections.map((section) => (
+              <article key={section.id} id={section.id} className="rounded-3xl border border-white/10 bg-white/5 p-6">
+                <h3 className="text-lg font-semibold text-white">{section.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
+                <ul className="mt-4 space-y-2">
+                  {section.bullets.map((bullet) => (
+                    <li key={bullet} className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200">
+                      {bullet}
                     </li>
                   ))}
                 </ul>
@@ -784,37 +794,102 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
           </div>
         </section>
 
-        <section id="quick-form-links" className="space-y-4">
+        <section id="main-modules" className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Quick Form Links</p>
-              <h2 className="text-2xl font-bold text-white">Jump to the form you need</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Main Menu Modules</p>
+              <h2 className="text-2xl font-bold text-white">Seven core modules of the application</h2>
             </div>
             <p className="max-w-2xl text-sm text-gray-300">
-              The anchor opens the guide section on this page. The route button opens the actual form route in the app.
+              Each module below includes a direct route hyperlink, a purpose statement, and a longer description of how
+              the module supports the overall business.
+            </p>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {moduleSummaries.map((module) => (
+              <article key={module.id} id={module.id} className="rounded-3xl border border-white/10 bg-white/5 p-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">{module.navigation}</p>
+                    <h3 className="mt-2 text-xl font-semibold text-white">{module.title}</h3>
+                    <p className="mt-3 text-sm font-semibold text-sky-200">{module.purpose}</p>
+                    <p className="mt-3 text-sm leading-7 text-gray-300">{module.description}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-gray-950/25 p-4 text-sm text-gray-100">
+                    <p className="text-xs uppercase tracking-[0.14em] text-gray-400">Direct Route</p>
+                    <code className="mt-2 block text-sm text-sky-200">{module.route}</code>
+                    <Link
+                      to={resolveRouteTarget(module.route)}
+                      className="mt-3 inline-flex rounded-md bg-indigo-500 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-400"
+                    >
+                      {routeActionLabel}
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="mt-5">
+                  <p className="text-sm font-semibold uppercase tracking-[0.14em] text-amber-200">Key Uses</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {module.keyUses.map((item) => (
+                      <span
+                        key={`${module.id}-${item}`}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-100"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {module.links.map((link) => (
+                    <Link
+                      key={`${module.id}-${link.to}-${link.label}`}
+                      to={resolveRouteTarget(link.to)}
+                      className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-100 hover:bg-white/10"
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section id="quick-links" className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-200">Quick Hyperlinks</p>
+              <h2 className="text-2xl font-bold text-white">Direct links to modules and pages</h2>
+            </div>
+            <p className="max-w-2xl text-sm text-gray-300">
+              Use the anchor link to jump to the explanation on this page, or use the route link to open the actual
+              screen in the application.
             </p>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            {quickFormLinks.map((form) => (
-              <article key={form.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            {quickLinks.map((item) => (
+              <article key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">{form.title}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.14em] text-gray-400">{form.category}</p>
+                    <p className="text-sm font-semibold text-white">{item.title}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.14em] text-gray-400">{item.category}</p>
                   </div>
                   <a
-                    href={`#${form.id}`}
+                    href={`#${item.id}`}
                     className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs font-semibold text-gray-100 hover:bg-white/10"
                   >
                     View Guide
                   </a>
                 </div>
-                <p className="mt-3 text-sm leading-6 text-gray-300">{form.navigation}</p>
+                <p className="mt-3 text-sm leading-6 text-gray-300">{item.navigation}</p>
                 <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gray-950/25 px-3 py-2">
-                  <code className="text-xs text-sky-200">{form.route}</code>
+                  <code className="text-xs text-sky-200">{item.route}</code>
                   <Link
-                    to={form.route}
+                    to={resolveRouteTarget(item.route)}
                     className="rounded-md bg-indigo-500 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-400"
                   >
                     {routeActionLabel}
@@ -825,115 +900,103 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
           </div>
         </section>
 
-        <section id="form-guides" className="space-y-6">
+        <section id="menu-guides" className="space-y-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-200">Form Guides</p>
-              <h2 className="text-2xl font-bold text-white">Field-by-field user manual</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Detailed Menu Guides</p>
+              <h2 className="text-2xl font-bold text-white">Expanded description of every major page</h2>
             </div>
             <p className="max-w-2xl text-sm text-gray-300">
-              Mandatory counts below reflect the current screen validations in the app. Your business process may still
-              expect extra optional fields for cleaner records.
+              Each page card below includes purpose, a longer description, key uses, and direct hyperlinks to related
+              screens.
             </p>
           </div>
 
-          {guideCategories.map((category) => (
+          {menuSections.map((section) => (
             <section
-              key={category.id}
-              className={`rounded-3xl border border-white/10 bg-gradient-to-br ${category.accent} p-6 shadow-[0_18px_60px_rgba(15,23,42,0.28)]`}
+              key={section.id}
+              id={section.id}
+              className={`rounded-3xl border border-white/10 bg-gradient-to-br ${section.accent} p-6 shadow-[0_18px_60px_rgba(15,23,42,0.28)]`}
             >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-200">{category.title}</p>
-                  <h3 className="text-xl font-bold text-white">{category.summary}</h3>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-200">{section.title}</p>
+                  <h3 className="text-xl font-bold text-white">{section.summary}</h3>
                 </div>
               </div>
 
               <div className="mt-5 grid gap-5">
-                {category.forms.map((form) => (
-                  <article key={form.id} id={form.id} className="rounded-3xl border border-white/10 bg-gray-950/35 p-5">
+                {section.pages.map((page) => (
+                  <article key={page.id} id={page.id} className="rounded-3xl border border-white/10 bg-gray-950/35 p-5">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
-                        <h4 className="text-xl font-semibold text-white">{form.title}</h4>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">{form.purpose}</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">{page.navigation}</p>
+                        <h4 className="mt-2 text-xl font-semibold text-white">{page.title}</h4>
+                        <p className="mt-3 text-sm font-semibold text-indigo-200">{page.purpose}</p>
+                        <p className="mt-3 max-w-4xl text-sm leading-7 text-gray-300">{page.description}</p>
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-gray-100">
-                        <p className="text-xs uppercase tracking-[0.14em] text-gray-400">Mandatory Count</p>
-                        <p className="mt-1 font-semibold">{form.mandatoryCount}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 lg:grid-cols-3">
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-xs uppercase tracking-[0.14em] text-gray-400">How To Access</p>
-                        <p className="mt-2 text-sm leading-6 text-gray-200">{form.navigation}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                         <p className="text-xs uppercase tracking-[0.14em] text-gray-400">Direct Route</p>
-                        <code className="mt-2 block text-sm text-sky-200">{form.route}</code>
+                        <code className="mt-2 block text-sm text-sky-200">{page.route}</code>
                         <Link
-                          to={form.route}
+                          to={resolveRouteTarget(page.route)}
                           className="mt-3 inline-flex rounded-md bg-indigo-500 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-400"
                         >
                           {routeActionLabel}
                         </Link>
                       </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-xs uppercase tracking-[0.14em] text-gray-400">Mandatory Rule</p>
-                        <p className="mt-2 text-sm leading-6 text-gray-200">{form.mandatorySummary}</p>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-amber-200">Key Uses</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {page.keyUses.map((item) => (
+                          <span
+                            key={`${page.id}-${item}`}
+                            className="rounded-full border border-white/15 bg-gray-950/25 px-3 py-1.5 text-xs font-semibold text-gray-100"
+                          >
+                            {item}
+                          </span>
+                        ))}
                       </div>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {form.links.map((link) => (
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {page.links.map((link) => (
                         <Link
-                          key={`${form.id}-${link.to}-${link.label}`}
-                          to={link.to}
+                          key={`${page.id}-${link.to}-${link.label}`}
+                          to={resolveRouteTarget(link.to)}
                           className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-100 hover:bg-white/10"
                         >
                           {link.label}
                         </Link>
                       ))}
                     </div>
-
-                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                      {form.fieldGroups.map((group) => (
-                        <section key={`${form.id}-${group.title}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <h5 className="text-sm font-semibold uppercase tracking-[0.14em] text-indigo-200">{group.title}</h5>
-                          <div className="mt-4 grid gap-3">
-                            {group.fields.map((field) => (
-                              <div key={`${form.id}-${group.title}-${field.name}`} className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-white">{field.name}</p>
-                                  {field.required ? (
-                                    <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-200">
-                                      Required
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <p className="mt-2 text-sm leading-6 text-gray-300">{field.detail}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-
-                    <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-amber-200">Usage Notes</p>
-                      <ul className="mt-3 space-y-2">
-                        {form.notes.map((note) => (
-                          <li key={`${form.id}-${note}`} className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200">
-                            {note}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
                   </article>
                 ))}
               </div>
             </section>
           ))}
+        </section>
+
+        <section id="final-summary" className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Final Summary</p>
+          <h2 className="mt-2 text-2xl font-bold text-white">One complete platform for sports complex operations</h2>
+          <p className="mt-4 max-w-4xl text-sm leading-7 text-gray-300">
+            {APPLICATION_NAME} is a complete system for managing sports facility operations, sales, staff,
+            memberships, and financial activity in one place. Each module plays a specific role, which keeps the
+            overall workflow smooth, structured, and efficient.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {finalSummaryPoints.map((point) => (
+              <li
+                key={point}
+                className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200"
+              >
+                {point}
+              </li>
+            ))}
+          </ul>
         </section>
       </div>
     </div>
