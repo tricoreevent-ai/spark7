@@ -11,6 +11,16 @@ export interface IAccountingVoucherLine {
   narration?: string;
 }
 
+export interface IAccountingVoucherDocumentFields {
+  accountName?: string;
+  beingPaymentOf?: string;
+  forPeriod?: string;
+  receivedBy?: string;
+  authorizedBy?: string;
+  receivedSign?: string;
+  authorizedSign?: string;
+}
+
 export interface IAccountingVoucher extends Document {
   voucherNumber: string;
   voucherType: VoucherType;
@@ -19,6 +29,7 @@ export interface IAccountingVoucher extends Document {
   referenceNo?: string;
   counterpartyName?: string;
   notes?: string;
+  documentFields?: IAccountingVoucherDocumentFields;
   totalAmount: number;
   lines: IAccountingVoucherLine[];
   isPrinted: boolean;
@@ -51,6 +62,15 @@ const AccountingVoucherSchema = new Schema<IAccountingVoucher>(
     referenceNo: { type: String, trim: true, index: true },
     counterpartyName: { type: String, trim: true },
     notes: { type: String, trim: true },
+    documentFields: {
+      accountName: { type: String, trim: true },
+      beingPaymentOf: { type: String, trim: true },
+      forPeriod: { type: String, trim: true },
+      receivedBy: { type: String, trim: true },
+      authorizedBy: { type: String, trim: true },
+      receivedSign: { type: String, trim: true },
+      authorizedSign: { type: String, trim: true },
+    },
     totalAmount: { type: Number, required: true, min: 0 },
     lines: { type: [AccountingVoucherLineSchema], default: [] },
     isPrinted: { type: Boolean, default: false, index: true },

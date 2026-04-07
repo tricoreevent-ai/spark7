@@ -38,6 +38,7 @@ export interface PrintingSettings {
   autoPrintAfterSale: boolean;
   profile: PrintProfile;
   showPrintPreviewHint: boolean;
+  showVoucherSignatureLines: boolean;
 }
 
 export interface MailSettings {
@@ -51,11 +52,32 @@ export interface MailSettings {
   appName: string;
 }
 
+export interface HomeBackgroundImage {
+  id: string;
+  url: string;
+  storagePath: string;
+  fileName: string;
+  uploadedAt: string;
+}
+
+export interface AppearanceSettings {
+  homeBackgrounds: HomeBackgroundImage[];
+  homeBackgroundRotationSeconds: number;
+}
+
+export interface SecuritySettings {
+  emailOtpEnabled: boolean;
+  otpExpiryMinutes: number;
+  otpCopyRecipients: string;
+}
+
 export interface GeneralSettings {
   business: BusinessSettings;
   invoice: InvoiceSettings;
   printing: PrintingSettings;
   mail: MailSettings;
+  appearance: AppearanceSettings;
+  security: SecuritySettings;
 }
 
 export const GENERAL_SETTINGS_KEY = 'pos_general_settings_v1';
@@ -97,6 +119,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     autoPrintAfterSale: false,
     profile: 'a4',
     showPrintPreviewHint: true,
+    showVoucherSignatureLines: true,
   },
   mail: {
     smtpHost: '',
@@ -107,6 +130,15 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     smtpToRecipients: '',
     smtpSecure: false,
     appName: 'Tricore',
+  },
+  appearance: {
+    homeBackgrounds: [],
+    homeBackgroundRotationSeconds: 8,
+  },
+  security: {
+    emailOtpEnabled: false,
+    otpExpiryMinutes: 10,
+    otpCopyRecipients: '',
   },
 };
 
@@ -135,6 +167,25 @@ export const mergeGeneralSettings = (saved?: Partial<GeneralSettings> | null): G
   mail: {
     ...DEFAULT_GENERAL_SETTINGS.mail,
     ...((saved?.mail as Partial<MailSettings>) || {}),
+  },
+  appearance: {
+    ...DEFAULT_GENERAL_SETTINGS.appearance,
+    ...((saved?.appearance as Partial<AppearanceSettings>) || {}),
+    homeBackgrounds: Array.isArray(saved?.appearance?.homeBackgrounds)
+      ? saved!.appearance!.homeBackgrounds
+        .map((image) => ({
+          id: String(image?.id || '').trim(),
+          url: String(image?.url || '').trim(),
+          storagePath: String(image?.storagePath || '').trim(),
+          fileName: String(image?.fileName || '').trim(),
+          uploadedAt: String(image?.uploadedAt || '').trim(),
+        }))
+        .filter((image) => image.id && image.url)
+      : [],
+  },
+  security: {
+    ...DEFAULT_GENERAL_SETTINGS.security,
+    ...((saved?.security as Partial<SecuritySettings>) || {}),
   },
 });
 
@@ -197,8 +248,17 @@ export const loadGeneralSettingsFromServer = async (
 };
 
 export const resetGeneralSettings = (): GeneralSettings => {
-  localStorage.setItem(GENERAL_SETTINGS_KEY, JSON.stringify(DEFAULT_GENERAL_SETTINGS));
-  return { ...DEFAULT_GENERAL_SETTINGS };
+  const reset = mergeGeneralSettings(DEFAULT_GENERAL_SETTINGS);
+  localStorage.setItem(GENERAL_SETTINGS_KEY, JSON.stringify(reset));
+  return reset;
+};
+
+export const resolveGeneralSettingsAssetUrl = (value?: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('data:')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return apiUrl(raw.startsWith('/') ? raw : `/${raw}`);
 };
 
 export const formatCustomInvoiceNumber = (prefix: string, nextNumber: number): string => {

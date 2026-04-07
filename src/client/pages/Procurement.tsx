@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showConfirmDialog } from '../utils/appDialogs';
 
 interface SupplierRow {
   _id: string;
@@ -274,7 +275,7 @@ export const Procurement: React.FC = () => {
   };
 
   const deactivateSupplier = async (supplier: SupplierRow) => {
-    if (!window.confirm(`Deactivate supplier "${supplier.name}"?`)) return;
+    if (!(await showConfirmDialog(`Deactivate supplier "${supplier.name}"?`, { title: 'Deactivate Supplier', confirmText: 'Deactivate' }))) return;
     setLoading(true);
     setError('');
     setMessage('');

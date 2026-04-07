@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showConfirmDialog } from '../utils/appDialogs';
 
 interface QuoteItemFormRow {
   productId: string;
@@ -397,7 +398,7 @@ export const Quotations: React.FC = () => {
   };
 
   const deleteQuote = async (quoteId: string) => {
-    if (!window.confirm('Delete this quotation?')) return;
+    if (!(await showConfirmDialog('Delete this quotation?', { title: 'Delete Quotation', confirmText: 'Delete' }))) return;
     try {
       setError('');
       setMessage('');

@@ -11,6 +11,7 @@ interface AuditPayload {
   entityId?: string;
   referenceNo?: string;
   userId?: string;
+  ipAddress?: string;
   metadata?: Record<string, any>;
   before?: Record<string, any>;
   after?: Record<string, any>;
@@ -80,11 +81,15 @@ export const writeAuditLog = async (payload: AuditPayload): Promise<void> => {
       scoped = { ...scoped, ...deriveStoreScope(null, payload.userId) };
     }
 
+    const metadataIp = String(payload?.metadata?.ip || payload?.metadata?.ipAddress || '').trim();
+    const ipAddress = String(payload.ipAddress || '').trim() || metadataIp || undefined;
+
     await AuditLog.create({
       ...payload,
       storeKey: scoped.storeKey,
       storeName: scoped.storeName,
       storeGstin: scoped.storeGstin,
+      ipAddress,
     });
   } catch (error) {
     console.error('Failed to write audit log:', error);

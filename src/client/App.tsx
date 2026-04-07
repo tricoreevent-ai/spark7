@@ -4,6 +4,7 @@ import { EMPTY_PERMISSIONS, PAGE_META, PageKey, PermissionMatrix } from '@shared
 import { IUser } from '@shared/types';
 import { formatCurrency } from './config';
 import { Navbar } from './components/Navbar';
+import { HomeDashboard as ModernHomeDashboard } from './components/HomeDashboard';
 import { Inventory } from './Inventory';
 import { AddProduct } from './pages/AddProduct';
 import { Accounting } from './pages/Accounting';
@@ -36,7 +37,7 @@ import { Shifts } from './pages/Shifts';
 import { UserManagement } from './pages/UserManagement';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { initializeAutoTooltips } from './utils/autoTooltips';
-import { getGeneralSettings, loadGeneralSettingsFromServer } from './utils/generalSettings';
+import { getGeneralSettings, loadGeneralSettingsFromServer, resolveGeneralSettingsAssetUrl } from './utils/generalSettings';
 import { applyAndPersistUiPreferencesLocal, loadUiPreferencesFromServer } from './utils/uiPreferences';
 
 const SAVED_CREDENTIALS_KEY = 'sarva_saved_credentials';
@@ -127,6 +128,9 @@ const DashboardHome: React.FC<{
   const [now, setNow] = useState<Date>(new Date());
   const [brandName, setBrandName] = useState('Sarva');
   const [homeLogo, setHomeLogo] = useState('');
+  const [homeBackgrounds, setHomeBackgrounds] = useState<string[]>([]);
+  const [backgroundRotationSeconds, setBackgroundRotationSeconds] = useState(8);
+  const [activeBackgroundIndex, setActiveBackgroundIndex] = useState(0);
   const [eventReminders, setEventReminders] = useState<any[]>([]);
   const [eventPaymentsDue, setEventPaymentsDue] = useState<any[]>([]);
   const [membershipExpiring, setMembershipExpiring] = useState<any[]>([]);
@@ -140,8 +144,15 @@ const DashboardHome: React.FC<{
       const settings = getGeneralSettings();
       const name = settings.business.tradeName || settings.business.legalName || user.businessName || 'Sarva';
       const logo = settings.business.reportLogoDataUrl || settings.business.invoiceLogoDataUrl || '';
+      const backgrounds = Array.isArray(settings.appearance.homeBackgrounds)
+        ? settings.appearance.homeBackgrounds
+          .map((image) => resolveGeneralSettingsAssetUrl(image.url))
+          .filter(Boolean)
+        : [];
       setBrandName(name);
       setHomeLogo(logo);
+      setHomeBackgrounds(backgrounds);
+      setBackgroundRotationSeconds(Math.min(60, Math.max(3, Number(settings.appearance.homeBackgroundRotationSeconds || 8))));
     };
 
     refreshBrand();
@@ -152,6 +163,24 @@ const DashboardHome: React.FC<{
       window.removeEventListener('sarva-settings-updated', refreshBrand as EventListener);
     };
   }, [user.businessName]);
+
+  useEffect(() => {
+    if (activeBackgroundIndex < homeBackgrounds.length) return;
+    setActiveBackgroundIndex(0);
+  }, [activeBackgroundIndex, homeBackgrounds.length]);
+
+  useEffect(() => {
+    if (homeBackgrounds.length <= 1) {
+      setActiveBackgroundIndex(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setActiveBackgroundIndex((prev) => ((prev + 1) % homeBackgrounds.length));
+    }, backgroundRotationSeconds * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [backgroundRotationSeconds, homeBackgrounds]);
 
   useEffect(() => {
     const loadReminders = async () => {
@@ -450,10 +479,22 @@ const DashboardHome: React.FC<{
     hour: '2-digit',
     minute: '2-digit',
   });
+  const activeBackgroundImage = homeBackgrounds[activeBackgroundIndex] || '';
 
   return (
     <div className="sarva-dashboard space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="sarva-dashboard-hero sarva-animate-rise relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500/20 via-cyan-500/10 to-transparent p-5 sm:p-6 lg:p-8">
+      <div
+        className="sarva-dashboard-hero sarva-animate-rise relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500/20 via-cyan-500/10 to-transparent p-5 sm:p-6 lg:p-8"
+        style={
+          activeBackgroundImage
+            ? {
+                backgroundImage: `linear-gradient(120deg, rgba(2, 6, 23, 0.84), rgba(15, 23, 42, 0.78), rgba(8, 47, 73, 0.58)), url("${activeBackgroundImage}")`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }
+            : undefined
+        }
+      >
         <div className="pointer-events-none absolute -right-20 -top-16 h-44 w-44 rounded-full bg-indigo-500/20 blur-3xl lg:h-60 lg:w-60" />
         <div className="pointer-events-none absolute -bottom-24 left-20 h-44 w-44 rounded-full bg-cyan-500/20 blur-3xl lg:h-60 lg:w-60" />
         <div className="relative grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -499,6 +540,21 @@ const DashboardHome: React.FC<{
                 <p className="text-sm font-semibold text-indigo-200">{quickActions.length}</p>
               </div>
             </div>
+            {homeBackgrounds.length > 1 ? (
+              <div className="mt-4 flex items-center gap-2">
+                {homeBackgrounds.map((_, index) => (
+                  <button
+                    key={`hero-bg-${index}`}
+                    type="button"
+                    onClick={() => setActiveBackgroundIndex(index)}
+                    className={`h-2.5 rounded-full transition ${
+                      index === activeBackgroundIndex ? 'w-8 bg-cyan-300' : 'w-2.5 bg-white/35 hover:bg-white/60'
+                    }`}
+                    title={`Show background ${index + 1}`}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -838,6 +894,9 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberCredentials, setRememberCredentials] = useState(false);
   const [tenantSlug, setTenantSlug] = useState('');
+  const [pendingOtpChallengeId, setPendingOtpChallengeId] = useState('');
+  const [pendingOtpEmail, setPendingOtpEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [companyCreationConfig, setCompanyCreationConfig] = useState<CompanyCreationConfig>({
     enabled: false,
     requiresAccessKey: false,
@@ -887,10 +946,26 @@ function App() {
     ]);
   };
 
+  const clearPendingLoginOtp = () => {
+    setPendingOtpChallengeId('');
+    setPendingOtpEmail('');
+    setOtpCode('');
+  };
+
+  const startPendingLoginOtp = (data: any) => {
+    setPendingOtpChallengeId(String(data?.otpChallengeId || ''));
+    setPendingOtpEmail(String(data?.otpEmail || ''));
+    setOtpCode('');
+    setError('');
+    setSuccess(String(data?.message || 'OTP sent to your email address.'));
+    window.history.replaceState({}, '', '/login');
+  };
+
   const finalizeLogin = async (sessionToken: string, sessionUser: Partial<IUser>) => {
     localStorage.setItem('token', sessionToken);
     setToken(sessionToken);
     setUser(sessionUser);
+    clearPendingLoginOtp();
     await syncClientSettingsFromServer(sessionToken);
     window.history.replaceState({}, '', '/');
     setIsLoggedIn(true);
@@ -943,6 +1018,11 @@ function App() {
             tenantSlug: String(saved.tenantSlug || '').trim() || undefined,
           }),
         });
+
+        if (data?.otpRequired) {
+          startPendingLoginOtp(data);
+          return;
+        }
 
         await finalizeLogin(data.token, data.user);
         setEmail('');
@@ -1108,6 +1188,15 @@ function App() {
           tenantSlug: tenantSlug.trim() || undefined,
         }),
       });
+
+      if (data?.otpRequired) {
+        if (!rememberCredentials) {
+          clearSavedCredentials();
+        }
+        startPendingLoginOtp(data);
+        return;
+      }
+
       if (rememberCredentials) {
         writeSavedCredentials(email, password, tenantSlug);
       } else {
@@ -1124,6 +1213,80 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyLoginOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading || !pendingOtpChallengeId) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = await fetchApiJson(apiUrl('/api/auth/verify-login-otp'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          challengeId: pendingOtpChallengeId,
+          otp: otpCode.trim(),
+        }),
+      });
+
+      if (rememberCredentials) {
+        writeSavedCredentials(email, password, tenantSlug);
+      } else {
+        clearSavedCredentials();
+      }
+
+      await finalizeLogin(data.token, data.user);
+      setEmail('');
+      setPassword('');
+      setTenantSlug('');
+      setError('');
+      setSuccess('');
+    } catch (err) {
+      setError(String((err as Error)?.message || err));
+      console.error('OTP verification error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendLoginOtp = async () => {
+    if (loading || !pendingOtpChallengeId) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = await fetchApiJson(apiUrl('/api/auth/resend-login-otp'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          challengeId: pendingOtpChallengeId,
+        }),
+      });
+
+      setPendingOtpChallengeId(String(data?.otpChallengeId || pendingOtpChallengeId));
+      setPendingOtpEmail(String(data?.otpEmail || pendingOtpEmail));
+      setOtpCode('');
+      setSuccess(String(data?.message || 'OTP sent to your email address.'));
+    } catch (err) {
+      setError(String((err as Error)?.message || err));
+      console.error('OTP resend error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelOtpLogin = () => {
+    clearPendingLoginOtp();
+    setError('');
+    setSuccess('');
   };
 
   const handleLogout = async () => {
@@ -1152,6 +1315,7 @@ function App() {
     setShowPassword(false);
     setRememberCredentials(false);
     setSuccess('');
+    clearPendingLoginOtp();
   };
 
   const publicLoginForm = (
@@ -1169,78 +1333,124 @@ function App() {
         </span>
       </div>
 
-      <form ref={loginFormRef} onSubmit={handleLogin} className="mt-6 space-y-4">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="user@example.com"
-          required
-          disabled={false}
-          readOnly={false}
-          className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-        />
-        <input
-          type="text"
-          value={tenantSlug}
-          onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
-          placeholder="Company or tenant id"
-          className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-        />
+      <form ref={loginFormRef} onSubmit={pendingOtpChallengeId ? handleVerifyLoginOtp : handleLogin} className="mt-6 space-y-4">
+        {pendingOtpChallengeId ? (
+          <>
+            <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              Enter the OTP sent to <span className="font-semibold text-white">{pendingOtpEmail || email}</span> to finish login.
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value.replace(/\D+/g, '').slice(0, 6))}
+              placeholder="Enter 6-digit OTP"
+              required
+              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+            />
+          </>
+        ) : (
+          <>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="user@example.com"
+              required
+              disabled={false}
+              readOnly={false}
+              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+            />
+            <input
+              type="text"
+              value={tenantSlug}
+              onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+              placeholder="Company or tenant id"
+              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+            />
 
-        <div className="space-y-2">
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            required
-            disabled={false}
-            readOnly={false}
-            className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-          />
-          <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={showPassword}
-              onChange={(e) => setShowPassword(e.target.checked)}
-              disabled={false}
-              className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
-            />
-            Show password
-          </label>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={rememberCredentials}
-              onChange={(e) => setRememberCredentials(e.target.checked)}
-              disabled={false}
-              className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
-            />
-            Keep me signed in for 7 days
-          </label>
-        </div>
+            <div className="space-y-2">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password"
+                required
+                disabled={false}
+                readOnly={false}
+                className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+              />
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showPassword}
+                  onChange={(e) => setShowPassword(e.target.checked)}
+                  disabled={false}
+                  className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
+                />
+                Show password
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={rememberCredentials}
+                  onChange={(e) => setRememberCredentials(e.target.checked)}
+                  disabled={false}
+                  className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
+                />
+                Keep me signed in for 7 days
+              </label>
+            </div>
+          </>
+        )}
 
         {error ? <div className="rounded-2xl border border-red-400/15 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div> : null}
         {success ? (
           <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{success}</div>
         ) : null}
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <button
-            type="submit"
-            disabled={false}
-            className="pointer-events-auto opacity-100 w-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:from-cyan-400 hover:to-emerald-400"
-          >
-            {loading ? 'Please wait...' : 'Login'}
-          </button>
-          <a
-            href="/user-manual"
-            className="pointer-events-auto flex w-full items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
-          >
-            User Manual
-          </a>
-        </div>
+        {pendingOtpChallengeId ? (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <button
+              type="submit"
+              disabled={false}
+              className="pointer-events-auto opacity-100 w-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:from-cyan-400 hover:to-emerald-400"
+            >
+              {loading ? 'Please wait...' : 'Verify OTP'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleResendLoginOtp()}
+              className="pointer-events-auto opacity-100 w-full rounded-full border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
+            >
+              Resend OTP
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelOtpLogin}
+              className="pointer-events-auto opacity-100 w-full rounded-full border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-100 hover:bg-rose-500/20"
+            >
+              Back to Login
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="submit"
+              disabled={false}
+              className="pointer-events-auto opacity-100 w-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:from-cyan-400 hover:to-emerald-400"
+            >
+              {loading ? 'Please wait...' : 'Login'}
+            </button>
+            <a
+              href="/user-manual"
+              className="pointer-events-auto flex w-full items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
+            >
+              User Manual
+            </a>
+          </div>
+        )}
         {loading ? (
           <button
             type="button"
@@ -1269,7 +1479,7 @@ function App() {
               path="/"
               element={
                 permissions.dashboard ? (
-                  <DashboardHome user={user} todaySales={todaySales} permissions={permissions} />
+                  <ModernHomeDashboard user={user} todaySales={todaySales} permissions={permissions} />
                 ) : (
                   <Navigate to={fallbackPath} replace />
                 )

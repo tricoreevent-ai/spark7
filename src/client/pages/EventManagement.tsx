@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { openPdfDocument, ServerPdfDocument } from '../utils/pdfDocument';
+import { showPromptDialog } from '../utils/appDialogs';
 
 interface Facility {
   _id: string;
@@ -510,7 +511,15 @@ export const EventManagement: React.FC = () => {
   };
 
   const cancelEvent = async (id: string) => {
-    const reason = window.prompt('Cancellation reason', 'Organizer cancelled event') || 'Organizer cancelled event';
+    const reason = await showPromptDialog('Enter the cancellation reason for this event.', {
+      title: 'Cancel Event',
+      label: 'Cancellation reason',
+      defaultValue: 'Organizer cancelled event',
+      confirmText: 'Cancel Event',
+      inputType: 'textarea',
+      required: true,
+    });
+    if (!reason) return;
     setError('');
     setMessage('');
     try {
@@ -535,13 +544,40 @@ export const EventManagement: React.FC = () => {
       return;
     }
 
-    const nextDate = window.prompt('Enter new date (YYYY-MM-DD)', toDateInput(new Date(booking.startTime)));
+    const nextDate = await showPromptDialog('Enter the new event date.', {
+      title: 'Reschedule Event',
+      label: 'Date',
+      defaultValue: toDateInput(new Date(booking.startTime)),
+      inputType: 'date',
+      confirmText: 'Next',
+      required: true,
+    });
     if (!nextDate) return;
-    const nextStart = window.prompt('Enter new start time (HH:MM)', new Date(booking.startTime).toTimeString().slice(0, 5));
+    const nextStart = await showPromptDialog('Enter the new start time.', {
+      title: 'Reschedule Event',
+      label: 'Start time',
+      defaultValue: new Date(booking.startTime).toTimeString().slice(0, 5),
+      inputType: 'time',
+      confirmText: 'Next',
+      required: true,
+    });
     if (!nextStart) return;
-    const nextEnd = window.prompt('Enter new end time (HH:MM)', new Date(booking.endTime).toTimeString().slice(0, 5));
+    const nextEnd = await showPromptDialog('Enter the new end time.', {
+      title: 'Reschedule Event',
+      label: 'End time',
+      defaultValue: new Date(booking.endTime).toTimeString().slice(0, 5),
+      inputType: 'time',
+      confirmText: 'Next',
+      required: true,
+    });
     if (!nextEnd) return;
-    const reason = window.prompt('Reason (optional)', 'Organizer requested change') || '';
+    const reason = (await showPromptDialog('Reason for the reschedule (optional).', {
+      title: 'Reschedule Event',
+      label: 'Reason',
+      defaultValue: 'Organizer requested change',
+      inputType: 'textarea',
+      confirmText: 'Save Changes',
+    })) || '';
 
     setError('');
     setMessage('');

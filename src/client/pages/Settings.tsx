@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CardTabs } from '../components/CardTabs';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import {
@@ -7,6 +8,7 @@ import {
   getGeneralSettings,
   loadGeneralSettingsFromServer,
   mergeGeneralSettings,
+  resolveGeneralSettingsAssetUrl,
   saveGeneralSettings,
 } from '../utils/generalSettings';
 import { printInvoice } from '../utils/invoicePrint';
@@ -21,6 +23,7 @@ import {
   readUiPreferencesFromStorage,
   saveUiPreferencesToServer,
 } from '../utils/uiPreferences';
+import { showAlertDialog, showConfirmDialog } from '../utils/appDialogs';
 
 interface BackupRestoreHistoryItem {
   id: string;
@@ -48,8 +51,29 @@ interface DatabaseStats {
   connectionState?: number;
 }
 
+type SettingsSectionKey = 'appearance' | 'business' | 'mail' | 'invoice' | 'printing' | 'security' | 'backup';
+type BackupSectionKey = 'utility' | 'take_restore' | 'history';
+
+const settingsTabs: Array<{ key: SettingsSectionKey; label: string }> = [
+  { key: 'appearance', label: 'Appearance' },
+  { key: 'business', label: 'Business Details' },
+  { key: 'mail', label: 'Mail Settings' },
+  { key: 'invoice', label: 'Invoice Configuration' },
+  { key: 'printing', label: 'Printing Preferences' },
+  { key: 'security', label: 'Security' },
+  { key: 'backup', label: 'Backup & Restore' },
+];
+
+const backupTabs: Array<{ key: BackupSectionKey; label: string }> = [
+  { key: 'utility', label: 'Database Utility' },
+  { key: 'take_restore', label: 'Take / Restore Backup' },
+  { key: 'history', label: 'Backup History' },
+];
+
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<GeneralSettings>(() => getGeneralSettings());
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('mail');
+  const [backupSection, setBackupSection] = useState<BackupSectionKey>('utility');
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const [uiSettingsMessage, setUiSettingsMessage] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
@@ -65,6 +89,8 @@ export const Settings: React.FC = () => {
   const [mailTestSending, setMailTestSending] = useState(false);
   const [mailTestMessage, setMailTestMessage] = useState('');
   const [mailTestRecipient, setMailTestRecipient] = useState('');
+  const [backgroundUploadInProgress, setBackgroundUploadInProgress] = useState(false);
+  const [appearanceMessage, setAppearanceMessage] = useState('');
   const [databaseStats, setDatabaseStats] = useState<DatabaseStats | null>(null);
   const [databaseStatsLoading, setDatabaseStatsLoading] = useState(false);
   const [databaseStatsError, setDatabaseStatsError] = useState('');
@@ -165,8 +191,50 @@ export const Settings: React.FC = () => {
     setSettings((prev) => ({ ...prev, mail: { ...prev.mail, [field]: value } }));
   };
 
+  const updateAppearance = <K extends keyof GeneralSettings['appearance']>(
+    field: K,
+    value: GeneralSettings['appearance'][K]
+  ) => {
+    setSettings((prev) => ({ ...prev, appearance: { ...prev.appearance, [field]: value } }));
+  };
+
+  const updateSecurity = <K extends keyof GeneralSettings['security']>(
+    field: K,
+    value: GeneralSettings['security'][K]
+  ) => {
+    setSettings((prev) => ({ ...prev, security: { ...prev.security, [field]: value } }));
+  };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        if (!result) {
+          reject(new Error('Could not read image file'));
+          return;
+        }
+        resolve(result);
+      };
+      reader.onerror = () => reject(new Error('Failed to load selected image'));
+      reader.readAsDataURL(file);
+    });
+
   const saveSettings = async () => {
     const normalized = mergeGeneralSettings(settings);
+    const confirmed = await showConfirmDialog(
+      normalized.security.emailOtpEnabled
+        ? 'Save settings and require email OTP after password login for all future sign-ins?'
+        : 'Save general settings for all users?',
+      {
+        title: 'Confirm Settings Save',
+        confirmText: 'Save Settings',
+        cancelText: 'Cancel',
+        severity: normalized.security.emailOtpEnabled ? 'warning' : 'info',
+      }
+    );
+    if (!confirmed) return;
+
     const token = localStorage.getItem('token');
     if (token) {
       try {
@@ -196,6 +264,121 @@ export const Settings: React.FC = () => {
     window.dispatchEvent(new Event('sarva-settings-updated'));
     setSavedMessage(token ? 'Saved locally, but server sync failed.' : 'Settings saved locally.');
     setTimeout(() => setSavedMessage(''), 2400);
+  };
+
+  const uploadHomeBackgrounds = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      await showAlertDialog('Login required to upload home background images.');
+      return;
+    }
+
+    setBackgroundUploadInProgress(true);
+    setAppearanceMessage('');
+
+    try {
+      let latest = settings;
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+          throw new Error(`"${file.name}" is not an image file.`);
+        }
+        if (file.size > 6 * 1024 * 1024) {
+          throw new Error(`"${file.name}" is larger than 6 MB.`);
+        }
+
+        const dataUrl = await fileToDataUrl(file);
+        const response = await fetchApiJson(apiUrl('/api/general-settings/appearance/home-backgrounds/upload'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            contentType: file.type,
+            dataUrl,
+          }),
+        });
+
+        latest = mergeGeneralSettings(
+          (response?.data?.settings as Partial<GeneralSettings> | undefined) || latest
+        );
+      }
+
+      saveGeneralSettings(latest);
+      setSettings(latest);
+      window.dispatchEvent(new Event('sarva-settings-updated'));
+      setAppearanceMessage(
+        `${files.length} home background${files.length === 1 ? '' : 's'} uploaded and saved.`
+      );
+    } catch (error: any) {
+      setAppearanceMessage(error?.message || 'Failed to upload home backgrounds');
+    } finally {
+      setBackgroundUploadInProgress(false);
+    }
+  };
+
+  const removeHomeBackground = async (imageId: string, fileName: string) => {
+    const confirmed = await showConfirmDialog(
+      `Remove "${fileName}" from the home page background rotation?`,
+      {
+        title: 'Remove Home Background',
+        confirmText: 'Remove',
+        cancelText: 'Keep',
+        severity: 'warning',
+      }
+    );
+    if (!confirmed) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      await showAlertDialog('Login required to remove home background images.');
+      return;
+    }
+
+    try {
+      const response = await fetchApiJson(apiUrl(`/api/general-settings/appearance/home-backgrounds/${imageId}`), {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const latest = mergeGeneralSettings(
+        (response?.data?.settings as Partial<GeneralSettings> | undefined) || settings
+      );
+      saveGeneralSettings(latest);
+      setSettings(latest);
+      window.dispatchEvent(new Event('sarva-settings-updated'));
+      setAppearanceMessage(`Removed "${fileName}" from the home background list.`);
+    } catch (error: any) {
+      setAppearanceMessage(error?.message || 'Failed to remove home background');
+    }
+  };
+
+  const handleEmailOtpToggle = async (enabled: boolean) => {
+    if (enabled === settings.security.emailOtpEnabled) return;
+
+    const confirmed = await showConfirmDialog(
+      enabled
+        ? 'Enable email OTP after password login? The OTP will go to the user email and any extra OTP copy emails you configure here.'
+        : 'Disable email OTP and allow password-only login again?',
+      {
+        title: enabled ? 'Enable Extra Login Security' : 'Disable Extra Login Security',
+        confirmText: enabled ? 'Enable OTP' : 'Disable OTP',
+        cancelText: 'Cancel',
+        severity: 'warning',
+      }
+    );
+    if (!confirmed) return;
+
+    updateSecurity('emailOtpEnabled', enabled);
+    setSavedMessage(enabled ? 'OTP login enabled in draft. Click Save Settings to apply.' : 'OTP login disabled in draft. Click Save Settings to apply.');
+    setTimeout(() => setSavedMessage(''), 3200);
   };
 
   const testMailSettings = async () => {
@@ -378,8 +561,9 @@ export const Settings: React.FC = () => {
       return;
     }
 
-    const confirmed = confirm(
-      'This will restore database data and may overwrite existing records. Continue?'
+    const confirmed = await showConfirmDialog(
+      'This will restore database data and may overwrite existing records. Continue?',
+      { title: 'Restore Database Backup', confirmText: 'Restore', severity: 'warning' }
     );
     if (!confirmed) return;
 
@@ -430,13 +614,13 @@ export const Settings: React.FC = () => {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+      void showAlertDialog('Please select an image file');
       return;
     }
 
     const maxBytes = 2 * 1024 * 1024;
     if (file.size > maxBytes) {
-      alert('Image size should be less than 2 MB');
+      void showAlertDialog('Image size should be less than 2 MB');
       return;
     }
 
@@ -444,13 +628,13 @@ export const Settings: React.FC = () => {
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : '';
       if (!result) {
-        alert('Could not read image file');
+        void showAlertDialog('Could not read image file');
         return;
       }
       updateBusinessLogo(field, result);
     };
     reader.onerror = () => {
-      alert('Failed to load selected image');
+      void showAlertDialog('Failed to load selected image');
     };
     reader.readAsDataURL(file);
   };
@@ -491,7 +675,7 @@ export const Settings: React.FC = () => {
     );
 
     if (!success) {
-      alert('Could not open print window. Please allow popups and try again.');
+      void showAlertDialog('Could not open print window. Please allow popups and try again.');
     }
   };
 
@@ -522,22 +706,13 @@ export const Settings: React.FC = () => {
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-white sm:text-3xl">General Settings</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={testPrint}
-            className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
-          >
-            Test Print
-          </button>
-          <button
-            type="button"
-            onClick={saveSettings}
-            className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
-          >
-            Save Settings
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={saveSettings}
+          className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+        >
+          Save Settings
+        </button>
       </div>
 
       {savedMessage && (
@@ -546,7 +721,16 @@ export const Settings: React.FC = () => {
         </div>
       )}
 
-      <section className={sectionCard}>
+      <CardTabs
+        ariaLabel="General settings tabs"
+        items={settingsTabs}
+        activeKey={settingsSection}
+        onChange={setSettingsSection}
+        className="w-fit max-w-full"
+        listClassName="border-b-0 px-0 pt-0"
+      />
+
+      <section className={`${sectionCard} ${settingsSection === 'appearance' ? '' : 'hidden'}`}>
         <h2 className="mb-4 text-lg font-semibold text-white">Appearance</h2>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -606,9 +790,93 @@ export const Settings: React.FC = () => {
         {uiSettingsMessage && (
           <p className="mt-3 text-xs text-indigo-200">{uiSettingsMessage}</p>
         )}
+
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-white">Home Page Background Slideshow</h3>
+              <p className="mt-1 max-w-2xl text-sm text-gray-400">
+                Upload one or more images for the dashboard home page. Files are stored on the server, and the database keeps each saved image location for reuse across sessions.
+              </p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center justify-center rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400">
+              {backgroundUploadInProgress ? 'Uploading...' : 'Upload Background Images'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                onChange={uploadHomeBackgrounds}
+                disabled={backgroundUploadInProgress}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-[220px_1fr]">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Rotation Duration (seconds)</label>
+              <input
+                className={inputClass}
+                type="number"
+                min={3}
+                max={60}
+                value={settings.appearance.homeBackgroundRotationSeconds}
+                onChange={(e) => updateAppearance('homeBackgroundRotationSeconds', Math.min(60, Math.max(3, Number(e.target.value || 8))))}
+              />
+              <p className="mt-2 text-xs text-gray-500">The dashboard hero rotates through the uploaded images using this delay.</p>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Saved Home Backgrounds</p>
+                  <p className="text-xs text-gray-400">{settings.appearance.homeBackgrounds.length} image(s) in rotation</p>
+                </div>
+              </div>
+
+              {appearanceMessage ? (
+                <div className="mt-3 rounded-md border border-indigo-400/25 bg-indigo-500/10 px-3 py-2 text-sm text-indigo-100">
+                  {appearanceMessage}
+                </div>
+              ) : null}
+
+              {settings.appearance.homeBackgrounds.length ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {settings.appearance.homeBackgrounds.map((image) => (
+                    <div key={image.id} className="overflow-hidden rounded-lg border border-white/10 bg-slate-950/60">
+                      <img
+                        src={resolveGeneralSettingsAssetUrl(image.url)}
+                        alt={image.fileName || 'Home background'}
+                        className="h-36 w-full object-cover"
+                      />
+                      <div className="space-y-2 p-3">
+                        <p className="truncate text-sm font-semibold text-white">{image.fileName || 'Background image'}</p>
+                        <p className="truncate text-[11px] text-gray-400">{image.storagePath || image.url}</p>
+                        <p className="text-[11px] text-gray-500">
+                          Uploaded {image.uploadedAt ? new Date(image.uploadedAt).toLocaleString() : 'recently'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void removeHomeBackground(image.id, image.fileName || 'background image')}
+                          className="w-full rounded-md bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-500/25"
+                        >
+                          Remove Background
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg border border-dashed border-white/10 bg-black/10 px-4 py-6 text-sm text-gray-500">
+                  No home background images uploaded yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section className={sectionCard}>
+      <section className={`${sectionCard} ${settingsSection === 'business' ? '' : 'hidden'}`}>
         <h2 className="mb-4 text-lg font-semibold text-white">Business Details</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <input className={inputClass} placeholder="Legal Name" value={settings.business.legalName} onChange={(e) => updateBusiness('legalName', e.target.value)} />
@@ -678,7 +946,7 @@ export const Settings: React.FC = () => {
         </div>
       </section>
 
-      <section className={sectionCard}>
+      <section className={`${sectionCard} ${settingsSection === 'mail' ? '' : 'hidden'}`}>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">Mail Settings</h2>
@@ -721,7 +989,7 @@ export const Settings: React.FC = () => {
         )}
       </section>
 
-      <section className={sectionCard}>
+      <section className={`${sectionCard} ${settingsSection === 'invoice' ? '' : 'hidden'}`}>
         <h2 className="mb-4 text-lg font-semibold text-white">Invoice Configuration</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <input className={inputClass} placeholder="Invoice Title" value={settings.invoice.title} onChange={(e) => updateInvoice('title', e.target.value)} />
@@ -757,8 +1025,20 @@ export const Settings: React.FC = () => {
         </div>
       </section>
 
-      <section className={sectionCard}>
-        <h2 className="mb-4 text-lg font-semibold text-white">Printing Preferences</h2>
+      <section className={`${sectionCard} ${settingsSection === 'printing' ? '' : 'hidden'}`}>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Printing Preferences</h2>
+            <p className="mt-1 text-sm text-gray-400">Configure invoice printing behavior and test the current print layout from here.</p>
+          </div>
+          <button
+            type="button"
+            onClick={testPrint}
+            className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
+          >
+            Test Print
+          </button>
+        </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="mb-1 block text-sm text-gray-300">Printer Profile</label>
@@ -783,12 +1063,74 @@ export const Settings: React.FC = () => {
           Show print preview hint in sales page
         </label>
 
+        <label className="mt-3 flex items-center gap-2 text-sm text-gray-200">
+          <input
+            type="checkbox"
+            checked={settings.printing.showVoucherSignatureLines}
+            onChange={(e) => updatePrinting('showVoucherSignatureLines', e.target.checked)}
+          />
+          Show signature lines in printed vouchers
+        </label>
+
         <p className="mt-3 text-xs text-gray-400">
-          Printing uses your system print dialog, so it supports all installed printers and drivers.
+          Printing uses your system print dialog, so it supports all installed printers and drivers. Disable voucher signature lines when the printed file should be unsigned.
         </p>
       </section>
 
-      <section className={sectionCard}>
+      <section className={`${sectionCard} ${settingsSection === 'security' ? '' : 'hidden'}`}>
+        <h2 className="mb-2 text-lg font-semibold text-white">Security</h2>
+        <p className="text-sm text-gray-400">
+          Add an extra login verification step. When enabled, the application sends a one-time password to the user's email after the password check.
+        </p>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/5 px-4 py-4 text-sm text-gray-200">
+            <input
+              type="checkbox"
+              checked={settings.security.emailOtpEnabled}
+              onChange={(e) => void handleEmailOtpToggle(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-white/20 bg-white/5 accent-indigo-500"
+            />
+            <span>
+              <span className="block font-semibold text-white">Enable email OTP after login</span>
+              <span className="mt-1 block text-xs text-gray-400">
+                Users enter email and password first. The application then emails an OTP, and only verified users can enter the workspace.
+              </span>
+            </span>
+          </label>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-300">OTP Expiry (minutes)</label>
+            <input
+              className={inputClass}
+              type="number"
+              min={3}
+              max={30}
+              value={settings.security.otpExpiryMinutes}
+              onChange={(e) => updateSecurity('otpExpiryMinutes', Math.min(30, Math.max(3, Number(e.target.value || 10))))}
+            />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="mb-1 block text-sm font-medium text-gray-300">OTP Copy Email IDs</label>
+          <input
+            className={inputClass}
+            placeholder="dinucd@gmail.com, owner@example.com"
+            value={settings.security.otpCopyRecipients}
+            onChange={(e) => updateSecurity('otpCopyRecipients', e.target.value)}
+          />
+          <p className="mt-2 text-xs text-gray-400">
+            The same OTP will always go to the user&apos;s own email. Add one or more extra email IDs here, separated by commas, when the OTP should also be copied to an owner or security mailbox.
+          </p>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+          OTP delivery uses the SMTP configuration in <span className="font-semibold">Mail Settings</span>. Test email delivery there before enabling this option for all users, and enter valid extra OTP copy emails if you want the same OTP sent to another mailbox.
+        </div>
+      </section>
+
+      <section className={`${sectionCard} ${settingsSection === 'backup' ? '' : 'hidden'}`}>
         <h2 className="mb-2 text-lg font-semibold text-white">Database Backup & Restore</h2>
         <p className="text-sm text-gray-300">
           Admin module utility for full database backup and restore. Only <span className="font-semibold text-white">super admin</span> can run these actions.
@@ -806,6 +1148,16 @@ export const Settings: React.FC = () => {
           </div>
         )}
 
+        <CardTabs
+          ariaLabel="Backup settings tabs"
+          items={backupTabs}
+          activeKey={backupSection}
+          onChange={setBackupSection}
+          className="mt-4 w-fit max-w-full"
+          listClassName="border-b-0 px-0 pt-0"
+        />
+
+        {backupSection === 'utility' && (
         <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -860,7 +1212,9 @@ export const Settings: React.FC = () => {
             </div>
           ) : null}
         </div>
+        )}
 
+        {backupSection === 'take_restore' && (
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
             <h3 className="text-sm font-semibold text-white">Take Backup</h3>
@@ -899,7 +1253,9 @@ export const Settings: React.FC = () => {
             </button>
           </div>
         </div>
+        )}
 
+        {backupSection === 'history' && (
         <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-white">Backup & Restore History</h3>
@@ -963,6 +1319,7 @@ export const Settings: React.FC = () => {
             onPageSizeChange={backupHistoryPagination.setPageSize}
           />
         </div>
+        )}
       </section>
     </div>
   );

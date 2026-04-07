@@ -7,6 +7,7 @@ import type { AccountSubType, AccountType } from '../models/ChartAccount.js';
 import { AppSetting } from '../models/AppSetting.js';
 import { NumberSequence } from '../models/NumberSequence.js';
 import { OpeningBalanceSetup } from '../models/OpeningBalanceSetup.js';
+import { User } from '../models/User.js';
 import { ensureDefaultRolesAndPermissions } from './rbac.js';
 import { backfillLegacyTenantIds } from './tenant.js';
 import { runWithTenantContext } from './tenantContext.js';
@@ -52,6 +53,7 @@ const REQUIRED_SEQUENCE_KEYS = [
 ];
 
 const GENERAL_SETTINGS_KEY = 'general_settings';
+const REQUESTED_CURRENT_USER_EMAIL = 'dinucd@gmail.com';
 
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
   if (typeof value !== 'string') return fallback;
@@ -247,6 +249,46 @@ const syncGeneralMailSettings = async (): Promise<void> => {
   );
 };
 
+const backfillRequestedCurrentUserEmail = async (): Promise<void> => {
+  const desiredEmail = REQUESTED_CURRENT_USER_EMAIL.trim().toLowerCase();
+  if (!desiredEmail) return;
+
+  const existingDesiredUser = await User.findOne({
+    email: desiredEmail,
+    isDeleted: { $ne: true },
+  }).select('_id');
+  if (existingDesiredUser) {
+    return;
+  }
+
+  const target = await User.findOne({
+    isDeleted: { $ne: true },
+    $or: [
+      { email: /^spark@spark\.com$/i },
+      {
+        $and: [
+          { firstName: /^dinesh$/i },
+          { lastName: /chirayil/i },
+          { email: /^(spark@spark\.com|.+@example\.com)$/i },
+        ],
+      },
+    ],
+  }).select('email firstName lastName');
+
+  if (!target) {
+    return;
+  }
+
+  const previousEmail = String(target.email || '').trim().toLowerCase();
+  if (previousEmail === desiredEmail) {
+    return;
+  }
+
+  target.email = desiredEmail;
+  await target.save();
+  console.log(`Updated legacy user email from ${previousEmail} to ${desiredEmail}`);
+};
+
 export const initializeTenantDefaults = async (tenantId: string): Promise<void> => {
   await runWithTenantContext(tenantId, async () => {
     await ensureOpeningBalanceSetup();
@@ -273,6 +315,7 @@ export const bootstrapDatabaseOnStartup = async (): Promise<void> => {
   }
 
   await ensureDefaultRolesAndPermissions();
+  await backfillRequestedCurrentUserEmail();
   await initializeTenantDefaults(defaultTenantId);
 
   if (isLikelyNewDatabase) {

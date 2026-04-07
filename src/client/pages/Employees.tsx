@@ -3,6 +3,7 @@ import { PaginationControls } from '../components/PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showConfirmDialog } from '../utils/appDialogs';
 
 interface Employee {
   _id: string;
@@ -138,7 +139,7 @@ export const Employees: React.FC = () => {
   const deleteEmployee = async (id: string) => {
     setError('');
     setMessage('');
-    if (!window.confirm('Delete this employee?')) return;
+    if (!(await showConfirmDialog('Delete this employee?', { title: 'Delete Employee', confirmText: 'Delete' }))) return;
 
     try {
       await fetchApiJson(apiUrl(`/api/employees/${id}`), {

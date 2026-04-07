@@ -22,7 +22,7 @@ export const requirePageAccess = (page: PageKey) => {
     try {
       const user = await loadRequestUser(req);
 
-      if (!user || !user.isActive) {
+      if (!user || !user.isActive || user.isDeleted) {
         return res.status(403).json({ success: false, error: 'User is inactive or not found' });
       }
 
@@ -43,7 +43,7 @@ export const requireAnyPageAccess = (pages: PageKey[]) => {
     try {
       const user = await loadRequestUser(req);
 
-      if (!user || !user.isActive) {
+      if (!user || !user.isActive || user.isDeleted) {
         return res.status(403).json({ success: false, error: 'User is inactive or not found' });
       }
 
@@ -61,3 +61,4 @@ export const requireAnyPageAccess = (pages: PageKey[]) => {
     }
   };
 };
+

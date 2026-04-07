@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CardTabs } from '../components/CardTabs';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -368,22 +369,17 @@ export const SettlementCenter: React.FC = () => {
       {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       {outstandingError && <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{outstandingError}</div>}
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          ['receipts', 'Receipts & Collections'],
-          ['credit', 'Credit Notes'],
-          ['dayEnd', 'Day-End'],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveTab(key as TabKey)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${activeTab === key ? 'bg-indigo-500 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <CardTabs
+        ariaLabel="Settlement tabs"
+        items={[
+          { key: 'receipts', label: 'Receipts & Collections' },
+          { key: 'credit', label: 'Credit Notes' },
+          { key: 'dayEnd', label: 'Day-End' },
+        ]}
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        listClassName="flex flex-wrap gap-2 border-b-0 px-0 pt-0"
+      />
 
       {activeTab === 'receipts' && (
         <div className="space-y-5">

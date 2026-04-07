@@ -73,6 +73,16 @@ const userSchema = new Schema<IUserDocument>(
       type: Boolean,
       default: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: Date,
+    deletedBy: {
+      type: String,
+      trim: true,
+    },
   },
   { timestamps: true, tenantUniqueRewrite: false } as any
 );

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useCategories } from '../hooks/useCategories';
 import { apiUrl } from '../utils/api';
+import { showAlertDialog } from '../utils/appDialogs';
 
 export const EditProduct: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +50,7 @@ export const EditProduct: React.FC = () => {
         });
 
         if (!response.ok) {
-          alert('Failed to fetch product details');
+          await showAlertDialog('Failed to fetch product details');
           navigate('/products/catalog');
           return;
         }
@@ -94,7 +95,7 @@ export const EditProduct: React.FC = () => {
         });
       } catch (error) {
         console.error(error);
-        alert('Error loading product');
+        await showAlertDialog('Error loading product');
       } finally {
         setLoading(false);
       }
@@ -167,15 +168,15 @@ export const EditProduct: React.FC = () => {
       });
 
       if (response.ok) {
-        alert('Product updated successfully');
+        await showAlertDialog('Product updated successfully', { title: 'Product Updated', severity: 'success' });
         navigate('/products/catalog');
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to update product');
+        await showAlertDialog(data.error || 'Failed to update product');
       }
     } catch (error) {
       console.error('Error updating product:', error);
-      alert('Error updating product');
+      await showAlertDialog('Error updating product');
     } finally {
       setSubmitting(false);
     }

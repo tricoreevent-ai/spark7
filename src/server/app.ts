@@ -85,6 +85,7 @@ const app: Express = express();
 const PORT: number = Number(process.env.PORT) || 3000;
 const DB_RETRY_MS: number = Number(process.env.DB_RETRY_MS) || 15000;
 const clientDistPath = path.join(distRoot, 'client');
+const uploadsRoot = path.join(runtimeRoot, 'uploads');
 
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
   if (typeof value !== 'string') return fallback;
@@ -140,6 +141,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use('/uploads', express.static(uploadsRoot));
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -209,6 +211,16 @@ app.use('/api/reports', authMiddleware, requirePageAccess('reports'), reportsRou
 app.use('/api/settlements', authMiddleware, requirePageAccess('accounting'), settlementRoutes);
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
 app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
+
+app.use('/api', (req: Request, res: Response) => {
+  const detail = `API endpoint not found: ${req.method} ${req.originalUrl}`;
+  console.warn(detail);
+  res.status(404).json({
+    success: false,
+    error: detail,
+    message: 'The requested API route does not exist on this server. Make sure the frontend and backend are running the same latest code.',
+  });
+});
 
 if (serveClient) {
   // Combined mode: API + built frontend served from the same Node process.

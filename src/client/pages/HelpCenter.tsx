@@ -172,8 +172,14 @@ const moduleSummaries: ModuleSummary[] = [
     navigation: 'Top menu > Accounts',
     purpose: 'The Accounts module manages financial transactions and records.',
     description:
-      'It helps the business maintain income and expense records, review financial activity, and complete settlement and reconciliation processes in a structured way.',
-    keyUses: ['Track finances', 'Maintain records', 'Perform settlements'],
+      'It gives finance and operations teams one accounting workspace for posting, review, reconciliation, vouchers, and exports. Inside Accounting, users switch sections from the left sidebar menu instead of jumping between separate pages.',
+    keyUses: [
+      'Track finances section-wise',
+      'Create invoices, payments, and vouchers',
+      'Control periods, assets, and openings',
+      'Run reconciliation and ledger review',
+      'Generate financial reports and exports',
+    ],
     links: [
       { label: 'Accounting', to: '/accounting' },
       { label: 'Settlements', to: '/accounting/settlements' },
@@ -553,18 +559,24 @@ const menuSections: MenuSection[] = [
     id: 'accounts-menu',
     title: 'Accounts Menu',
     summary:
-      'The Accounts menu gives finance and management teams a controlled way to review financial records and settlement activity.',
+      'The Accounts menu gives finance and management teams a controlled workspace for daily accounting, vouchers, reconciliation, and period-end reporting.',
     accent: 'from-cyan-500/20 via-blue-500/10 to-transparent',
     pages: [
       {
         id: 'accounting',
         title: 'Accounting',
         route: '/accounting',
-        navigation: 'Top menu > Accounts > Accounting',
-        purpose: 'Maintains financial records.',
+        navigation: 'Top menu > Accounts > Accounting > Left Sidebar Sections',
+        purpose: 'Runs the full accounting workspace.',
         description:
-          'This page tracks income, expenses, and accounting activity. It provides the financial backbone of the system and helps the business maintain organized records for review and control.',
-        keyUses: ['Track income', 'Track expenses', 'Maintain records'],
+          'This page is the central accounting console. Use the left sidebar to move between MIS Dashboard, Invoices & Payments, Vendors / Assets / Periods, Salary & Contract, Opening Balances, Expenses & Income, Vouchers, Cash & Bank Book, Chart & Ledger, and Financial Reports. The Payment Voucher section also supports reference-style fields such as account name, payment purpose, period, and received/authorized signatures for print-ready documents.',
+        keyUses: [
+          'Track income, expense, and GST indicators',
+          'Manage invoices, payments, vendors, assets, and periods',
+          'Record salary, contract, opening, and manual day-book entries',
+          'Create and print receipt/payment/journal/transfer vouchers',
+          'Reconcile bank entries and export financial statements',
+        ],
         links: [
           { label: 'Open Accounting', to: '/accounting' },
           { label: 'Open Settlements', to: '/accounting/settlements' },

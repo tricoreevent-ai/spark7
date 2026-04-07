@@ -35,6 +35,9 @@ export interface IUser {
   };
   uiPreferences?: UiPreferences;
   isActive?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -143,6 +146,9 @@ export interface AuthResponse {
   token?: string;
   user?: Partial<IUser>;
   tenant?: ITenantInfo;
+  otpRequired?: boolean;
+  otpChallengeId?: string;
+  otpEmail?: string;
 }
 
 export interface ErrorResponse {

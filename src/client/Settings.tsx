@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { showAlertDialog } from './utils/appDialogs';
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState({
@@ -26,7 +27,7 @@ export const Settings: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem('pos_settings', JSON.stringify(settings));
-    alert('Settings saved successfully!');
+    void showAlertDialog('Settings saved successfully!', { title: 'Settings Saved', severity: 'success' });
   };
 
   return (

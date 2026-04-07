@@ -43,6 +43,23 @@ export const parseRecipients = (value: unknown): string[] =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+export const isValidEmailAddress = (value: unknown): boolean => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(String(value || '').trim());
+};
+
+export const uniqueRecipients = (values: unknown[]): string[] => {
+  const seen = new Set<string>();
+  return values.reduce<string[]>((acc, value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      return acc;
+    }
+    seen.add(normalized);
+    acc.push(normalized);
+    return acc;
+  }, []);
+};
+
 export const mergeMailSettings = (value: any): ResolvedMailSettings => ({
   ...buildMailDefaults(),
   ...((value && typeof value === 'object') ? value : {}),

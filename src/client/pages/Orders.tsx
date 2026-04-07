@@ -5,6 +5,7 @@ import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings } from '../utils/generalSettings';
 import { printInvoice, PrintableSale } from '../utils/invoicePrint';
 import ReturnModal from '../components/ReturnModal';
+import { showAlertDialog } from '../utils/appDialogs';
 
 interface HistoryItem {
   productId?: string;
@@ -631,7 +632,7 @@ export const Orders: React.FC = () => {
         throw new Error('Unable to open print window. Please allow popups and try again.');
       }
     } catch (err: any) {
-      alert(err?.message || 'Failed to print invoice');
+      await showAlertDialog(err?.message || 'Failed to print invoice');
     } finally {
       setPrintingSaleId('');
     }

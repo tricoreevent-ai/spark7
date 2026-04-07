@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
+import { CardTabs } from '../components/CardTabs';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings } from '../utils/generalSettings';
@@ -1530,24 +1531,15 @@ export const Reports: React.FC = () => {
 
       <div className="rounded-xl border border-white/10 bg-white/5 p-4">
         <h2 className="mb-2 text-lg font-semibold text-white">Reports Menu</h2>
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Report tabs">
-          {reportMenu.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === item.key}
-              onClick={() => setActiveTab(item.key)}
-              className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition ${
-                activeTab === item.key
-                  ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-100'
-                  : 'border-white/15 bg-white/5 text-gray-200 hover:bg-white/10'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <CardTabs
+          compact
+          frame={false}
+          ariaLabel="Report tabs"
+          items={reportMenu}
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          listClassName="flex flex-wrap gap-2 border-b-0 px-0 pt-0"
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">

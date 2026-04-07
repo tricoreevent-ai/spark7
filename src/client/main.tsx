@@ -2,13 +2,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
-import 'sweetalert2/dist/sweetalert2.min.css'
-import { installGlobalAlert } from './utils/globalAlert'
-
-installGlobalAlert()
+import { AppDialogProvider } from './components/AppDialogProvider'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <AppDialogProvider>
+      <App />
+    </AppDialogProvider>
   </React.StrictMode>,
 )

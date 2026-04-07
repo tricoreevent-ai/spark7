@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatCurrency, formatDate, APP_CONFIG } from '../config';
 import { Table, Column } from '../components/Table';
+import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
 
 interface ReturnItem {
   productName: string;
@@ -150,7 +151,13 @@ const Returns: React.FC = () => {
   const handleReject = async (returnId: string) => {
     const token = localStorage.getItem('token');
     try {
-      const reason = prompt('Enter rejection reason:');
+      const reason = await showPromptDialog('Enter rejection reason:', {
+        title: 'Reject Return',
+        label: 'Reason',
+        confirmText: 'Reject',
+        inputType: 'textarea',
+        required: true,
+      });
       if (!reason) return;
 
       const response = await fetch(`${API_BASE}/api/returns/${returnId}/reject`, {
@@ -182,7 +189,7 @@ const Returns: React.FC = () => {
 
   const handleDelete = async (returnId: string) => {
     const token = localStorage.getItem('token');
-    if (!window.confirm('Are you sure you want to delete this return?')) return;
+    if (!(await showConfirmDialog('Are you sure you want to delete this return?', { title: 'Delete Return', confirmText: 'Delete' }))) return;
 
     try {
       const response = await fetch(`${API_BASE}/api/returns/${returnId}`, {

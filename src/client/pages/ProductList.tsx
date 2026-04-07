@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatCurrency } from '../config';
 import { Product, useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showAlertDialog, showConfirmDialog } from '../utils/appDialogs';
 
 type ProductColumnId =
   | 'name'
@@ -178,7 +179,7 @@ export const ProductList: React.FC = () => {
   }, [visibleColumns]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
+    if (!(await showConfirmDialog('Are you sure you want to delete this product?', { title: 'Delete Product', confirmText: 'Delete' }))) return;
 
     try {
       const token = localStorage.getItem('token');
@@ -188,7 +189,7 @@ export const ProductList: React.FC = () => {
       });
       refetch();
     } catch (err) {
-      alert((err as Error)?.message || 'Failed to delete product');
+      await showAlertDialog((err as Error)?.message || 'Failed to delete product');
     }
   };
 

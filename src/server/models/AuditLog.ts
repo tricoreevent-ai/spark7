@@ -10,6 +10,7 @@ export interface IAuditLog extends Document {
   entityId?: string;
   referenceNo?: string;
   userId?: string;
+  ipAddress?: string;
   metadata?: Record<string, any>;
   before?: Record<string, any>;
   after?: Record<string, any>;
@@ -28,6 +29,7 @@ const AuditLogSchema = new Schema<IAuditLog>(
     entityId: { type: String, trim: true, index: true },
     referenceNo: { type: String, trim: true, index: true },
     userId: { type: String, trim: true, index: true },
+    ipAddress: { type: String, trim: true, index: true },
     metadata: { type: Schema.Types.Mixed },
     before: { type: Schema.Types.Mixed },
     after: { type: Schema.Types.Mixed },

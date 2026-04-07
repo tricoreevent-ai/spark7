@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCategories } from '../hooks/useCategories';
 import { apiUrl } from '../utils/api';
+import { showAlertDialog } from '../utils/appDialogs';
 
 export const AddProduct: React.FC = () => {
   const { categories, loading: categoriesLoading } = useCategories();
@@ -72,7 +73,7 @@ export const AddProduct: React.FC = () => {
   const applyScannedCode = () => {
     const code = String(scanValue || '').trim().toUpperCase();
     if (!code) {
-      alert('Please scan or enter a product code first.');
+      void showAlertDialog('Please scan or enter a product code first.');
       return;
     }
 
@@ -149,11 +150,11 @@ export const AddProduct: React.FC = () => {
         setSuccessMessage(createdName ? `${createdName} was added successfully.` : 'Product created successfully.');
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to create product');
+        await showAlertDialog(data.error || 'Failed to create product');
       }
     } catch (error) {
       console.error('Error creating product:', error);
-      alert('Error creating product');
+      await showAlertDialog('Error creating product');
     } finally {
       setLoading(false);
     }

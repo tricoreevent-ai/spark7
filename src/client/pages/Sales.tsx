@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CardTabs } from '../components/CardTabs';
 import { formatCurrency } from '../config';
 import { IProduct } from '@shared/types';
 import {
@@ -7,6 +8,7 @@ import {
   loadGeneralSettingsFromServer,
 } from '../utils/generalSettings';
 import { printInvoice, PrintableSale } from '../utils/invoicePrint';
+import { showAlertDialog } from '../utils/appDialogs';
 
 interface CartItem extends IProduct {
   quantity: number;
@@ -487,16 +489,17 @@ export const Sales = () => {
 
   const addToCart = (product: IProduct) => {
     if (requiresStockTracking(product) && product.stock <= 0) {
-      alert('Out of stock!');
+      void showAlertDialog('Out of stock!');
       return;
     }
 
     let added = false;
+    let warningMessage = '';
     setCart((prev) => {
       const existing = prev.find((item) => item._id === product._id);
       if (existing) {
         if (requiresStockTracking(product) && existing.quantity >= product.stock) {
-          alert('Cannot add more than available stock');
+          warningMessage = 'Cannot add more than available stock';
           return prev;
         }
         added = true;
@@ -505,19 +508,24 @@ export const Sales = () => {
         );
       }
       added = true;
-      return [...prev, { ...product, quantity: 1, cartId: Date.now().toString() }];
+        return [...prev, { ...product, quantity: 1, cartId: Date.now().toString() }];
     });
+    if (warningMessage) {
+      void showAlertDialog(warningMessage);
+      return;
+    }
     if (added) triggerProductFeedback(product);
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    let warningMessage = '';
     setCart((prev) =>
       prev.map((item) => {
         if (item._id === productId) {
           const newQty = item.quantity + delta;
           if (newQty < 1) return item;
           if (requiresStockTracking(item) && newQty > item.stock) {
-            alert('Stock limit reached');
+            warningMessage = 'Stock limit reached';
             return item;
           }
           return { ...item, quantity: newQty };
@@ -525,6 +533,9 @@ export const Sales = () => {
         return item;
       })
     );
+    if (warningMessage) {
+      void showAlertDialog(warningMessage);
+    }
   };
 
   const removeFromCart = (productId: string) => {
@@ -586,13 +597,13 @@ export const Sales = () => {
   const handleProductCodeScan = async () => {
     const code = String(scanCode || '').trim();
     if (!code) {
-      alert('Please scan or enter a product code.');
+      await showAlertDialog('Please scan or enter a product code.');
       return;
     }
 
     const matched = findProductByCode(code) || (await fetchProductByCode(code));
     if (!matched) {
-      alert('Product not found for this code. Please check SKU/barcode and try again.');
+      await showAlertDialog('Product not found for this code. Please check SKU/barcode and try again.');
       return;
     }
 
@@ -640,7 +651,7 @@ export const Sales = () => {
     const latestSettings = getGeneralSettings();
     const ok = printInvoice(sale, latestSettings);
     if (!ok) {
-      alert('Unable to open print window. Please allow popups and try again.');
+      void showAlertDialog('Unable to open print window. Please allow popups and try again.');
       return;
     }
     setShowInvoicePrompt(false);
@@ -648,11 +659,11 @@ export const Sales = () => {
 
   const applyMembershipBenefits = async () => {
     if (!customerPhone.trim()) {
-      alert('Enter customer phone to apply membership');
+      await showAlertDialog('Enter customer phone to apply membership');
       return;
     }
     if (cart.length === 0) {
-      alert('Add items before applying membership');
+      await showAlertDialog('Add items before applying membership');
       return;
     }
 
@@ -675,7 +686,7 @@ export const Sales = () => {
       });
       const data = await response.json();
       if (!data.success) {
-        alert(data.error || 'Failed to apply membership benefits');
+        await showAlertDialog(data.error || 'Failed to apply membership benefits');
         return;
       }
       const preview: MembershipPreview = data.data;
@@ -684,7 +695,7 @@ export const Sales = () => {
       setDiscountValue(String(Math.max(0, Number(preview.discountAmount || 0) + Number(preview.redeemValue || 0))));
     } catch (error) {
       console.error('Membership apply error:', error);
-      alert('Failed to apply membership benefits');
+      await showAlertDialog('Failed to apply membership benefits');
     } finally {
       setApplyingMembership(false);
     }
@@ -741,7 +752,7 @@ export const Sales = () => {
 
       const data = await response.json();
       if (!data.success) {
-        alert(toSimpleWarning(data.error || data.message || 'Could not save invoice.'));
+        await showAlertDialog(toSimpleWarning(data.error || data.message || 'Could not save invoice.'));
         return;
       }
 
@@ -812,7 +823,7 @@ export const Sales = () => {
       }
     } catch (error) {
       console.error('Checkout error:', error);
-      alert('Could not process invoice. Please try again.');
+      await showAlertDialog('Could not process invoice. Please try again.');
     } finally {
       setProcessing(false);
     }
@@ -875,19 +886,17 @@ export const Sales = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="mb-5 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white placeholder-gray-500 outline-none focus:border-indigo-400"
           />
-          <div className="mb-4 flex flex-wrap gap-2">
-            {productViewOptions.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => setProductViewMode(option.key)}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                  productViewMode === option.key ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-300'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="mb-4 space-y-2">
+            <CardTabs
+              compact
+              frame={false}
+              ariaLabel="Product view tabs"
+              items={productViewOptions}
+              activeKey={productViewMode}
+              onChange={setProductViewMode}
+              listClassName="flex flex-wrap gap-2 border-b-0 px-0 pt-0"
+            />
+            <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setEnableProductScanner((prev) => !prev)}
@@ -904,6 +913,7 @@ export const Sales = () => {
             >
               Quick Add
             </button>
+            </div>
           </div>
 
           {enableProductScanner && (

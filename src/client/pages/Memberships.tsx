@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CardTabs } from '../components/CardTabs';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showPromptDialog } from '../utils/appDialogs';
 
 interface FacilityOption {
   _id: string;
@@ -549,16 +551,34 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
     try {
       const body: any = { action };
       if (action === 'upgrade' || action === 'downgrade') {
-        const targetPlanId = prompt(`Enter target plan ID for ${action}`);
+        const targetPlanId = await showPromptDialog(`Enter target plan ID for ${action}.`, {
+          title: `${action === 'upgrade' ? 'Upgrade' : 'Downgrade'} Membership`,
+          label: 'Target plan ID',
+          confirmText: 'Continue',
+          required: true,
+        });
         if (!targetPlanId) return;
         body.targetPlanId = targetPlanId.trim();
       }
       if (action === 'extend') {
-        const days = prompt('Extend by how many days?', '30');
+        const days = await showPromptDialog('Extend by how many days?', {
+          title: 'Extend Membership',
+          label: 'Days',
+          defaultValue: '30',
+          inputType: 'number',
+          confirmText: 'Extend',
+          required: true,
+        });
         if (!days) return;
         body.days = Number(days);
       }
-      body.notes = prompt(`Notes for ${action} (optional)`, '') || '';
+      body.notes = (await showPromptDialog(`Notes for ${action} (optional).`, {
+        title: 'Membership Notes',
+        label: 'Notes',
+        defaultValue: '',
+        inputType: 'textarea',
+        confirmText: 'Save',
+      })) || '';
       await fetchApiJson(apiUrl(`/api/memberships/subscriptions/${sub._id}/lifecycle`), {
         method: 'POST',
         headers,
@@ -573,9 +593,28 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
 
   const renewMember = async (sub: Subscription) => {
     try {
-      const renewalType = (prompt('Renewal type: manual / partial / auto', 'manual') || 'manual').toLowerCase();
-      const days = prompt('Days to extend (blank to use plan default)', '');
-      const amountPaid = prompt('Renewal amount paid', '0');
+      const renewalType = ((await showPromptDialog('Renewal type: manual / partial / auto', {
+        title: 'Renew Membership',
+        label: 'Renewal type',
+        defaultValue: 'manual',
+        confirmText: 'Next',
+        required: true,
+      })) || 'manual').toLowerCase();
+      const days = await showPromptDialog('Days to extend (blank to use plan default)', {
+        title: 'Renew Membership',
+        label: 'Days to extend',
+        defaultValue: '',
+        inputType: 'number',
+        confirmText: 'Next',
+      });
+      const amountPaid = await showPromptDialog('Renewal amount paid', {
+        title: 'Renew Membership',
+        label: 'Amount paid',
+        defaultValue: '0',
+        inputType: 'number',
+        confirmText: 'Renew',
+        required: true,
+      });
       await fetchApiJson(apiUrl(`/api/memberships/subscriptions/${sub._id}/renew`), {
         method: 'POST',
         headers,
@@ -595,8 +634,21 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
 
   const adjustPoints = async (sub: Subscription) => {
     try {
-      const action = (prompt('Points action: earned / redeemed / expired / adjusted', 'earned') || 'earned').toLowerCase();
-      const points = Number(prompt('Points value', '0') || 0);
+      const action = ((await showPromptDialog('Points action: earned / redeemed / expired / adjusted', {
+        title: 'Adjust Points',
+        label: 'Points action',
+        defaultValue: 'earned',
+        confirmText: 'Next',
+        required: true,
+      })) || 'earned').toLowerCase();
+      const points = Number((await showPromptDialog('Points value', {
+        title: 'Adjust Points',
+        label: 'Points value',
+        defaultValue: '0',
+        inputType: 'number',
+        confirmText: 'Update Points',
+        required: true,
+      })) || 0);
       if (points <= 0) return;
       await fetchApiJson(apiUrl(`/api/memberships/subscriptions/${sub._id}/points`), {
         method: 'POST',
@@ -772,20 +824,16 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
       )}
 
       {showMemberTabs && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setMemberTab('create')}
-            className={`rounded-md px-3 py-2 text-sm font-semibold ${memberTab === 'create' ? 'bg-indigo-500 text-white' : 'border border-white/20 text-gray-200'}`}
-          >
-            Create Member Subscription
-          </button>
-          <button
-            onClick={() => setMemberTab('list')}
-            className={`rounded-md px-3 py-2 text-sm font-semibold ${memberTab === 'list' ? 'bg-indigo-500 text-white' : 'border border-white/20 text-gray-200'}`}
-          >
-            Member List
-          </button>
-        </div>
+        <CardTabs
+          ariaLabel="Membership tabs"
+          items={[
+            { key: 'create', label: 'Create Member Subscription' },
+            { key: 'list', label: 'Member List' },
+          ]}
+          activeKey={memberTab}
+          onChange={setMemberTab}
+          listClassName="flex flex-wrap gap-2 border-b-0 px-0 pt-0"
+        />
       )}
 
       {(showPlanForm || showMemberForm) && (

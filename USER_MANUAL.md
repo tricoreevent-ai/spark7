@@ -147,13 +147,15 @@ Purpose
 The Accounts module manages financial transactions and records.
 
 Description  
-It supports proper tracking of income, expenses, and settlement activity so the business can maintain financial accuracy.
+It provides a complete accounting workspace with section-wise navigation, operational posting, reconciliation, voucher printing, and financial reporting so the business can maintain clean and auditable financial records.
 
 Key Uses
 
 - Track finances
-- Maintain records
-- Perform settlements
+- Run section-wise accounting operations from one workspace
+- Create invoices, payments, vouchers, assets, periods, and ledgers
+- Perform settlements and reconciliation
+- Generate exports and financial statements
 
 ### 5.7 Admin
 
@@ -426,7 +428,50 @@ Purpose
 Maintains financial records.
 
 Description  
-This page tracks income and expenses and helps maintain the accounting side of the business in a structured way.
+This page is the central accounting workspace. It supports day-to-day posting, control, review, reconciliation, and export workflows from one screen.
+
+### 10.1.1 Navigation and Layout
+
+Navigation path: `Top menu -> Accounts -> Accounting`  
+Inside the accounting page, use the **left sidebar menu** to move between sections without leaving the page.
+
+### 10.1.2 Accounting Console Sections (Left Sidebar)
+
+- `MIS Dashboard`: revenue, expense, profit, and GST summary with recent invoices, payments, and journal entries
+- `Invoices & Payments`: create accounting invoices, record vendor expenses/bills, add invoice payments, and cancel invoices
+- `Vendors / Assets / Periods`: vendor master, fixed asset creation, depreciation posting, and financial period lock/unlock
+- `Salary & Contract`: salary payments, contract payments, and day-book entries
+- `Opening Balances`: opening cash/bank/stock and customer/supplier opening setup with lock control
+- `Expenses & Income`: manual expense/income day-book posting with edit/cancel actions
+- `Vouchers`: receipt voucher, payment voucher, journal voucher, transfer voucher, and voucher print actions
+- `Cash & Bank Book`: cash/bank movements, pending bank reconciliation rows, and CSV statement matching
+- `Chart & Ledger`: chart account creation and account-level ledger drill-down
+- `Financial Reports`: trial balance, profit and loss, balance sheet, and CSV exports
+
+### 10.1.3 Payment Voucher (Reference Layout)
+
+The Payment Voucher form and print template support the following fields:
+
+- `No. / Reference No`
+- `Date`
+- `Name of the account`
+- `Being Payment of`
+- `For the period`
+- `Received by`
+- `Authorized by`
+- `Sign (Received)`
+- `Sign (Authorized)`
+- `Amount`
+- `Payment mode`
+- `Expense category / account head`
+
+### 10.1.4 Recommended Daily Workflow
+
+1. Confirm date range and refresh the active section.
+2. Post transactions (invoice, expense, voucher, salary, contract, or manual entry).
+3. Reconcile bank rows and period controls.
+4. Review ledger and report totals.
+5. Export required CSV statements for audit and reporting.
 
 ### 10.2 Settlements
 

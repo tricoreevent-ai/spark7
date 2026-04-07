@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useCategories } from '../hooks/useCategories';
 import { Table, Column } from '../components/Table';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { showConfirmDialog } from '../utils/appDialogs';
 
 export const Categories: React.FC = () => {
   const { categories, loading, error, refetch } = useCategories();
@@ -40,7 +41,7 @@ export const Categories: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this category?')) return;
+    if (!(await showConfirmDialog('Are you sure you want to delete this category?', { title: 'Delete Category', confirmText: 'Delete' }))) return;
     
     try {
       const token = localStorage.getItem('token');

@@ -8,7 +8,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev:server": "tsx src/server/app.ts",
+    "dev:server": "node scripts/clean-shadow-source-js.cjs && tsx src/server/app.ts",
     "dev:client": "vite --mode client",
     "dev:desktop": "electron src/desktop/main/main.ts",
     "build": "npm run build:web",
@@ -29,7 +29,8 @@
     "start:hostinger": "node dist/app.js",
     "start:prod": "npm run prepare:runtime && node dist/server/start.js",
     "test": "npm run test:accounting",
-    "test:accounting": "node --import tsx --test tests/accounting-rules.test.ts"
+    "test:accounting": "node --import tsx --test tests/accounting-rules.test.ts",
+    "seed:test-transactions": "node --import tsx scripts/reset-and-seed-transactions.ts"
   },
   "keywords": [],
   "author": "",
@@ -42,9 +43,12 @@
     "tsx": "^4.21.0"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.3.9",
     "@tailwindcss/postcss": "^4.2.0",
-    "@types/cors": "^2.8.19",
     "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.9",
@@ -67,7 +71,6 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^7.13.0",
-    "sweetalert2": "^11.26.19",
     "tailwindcss": "^4.2.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",

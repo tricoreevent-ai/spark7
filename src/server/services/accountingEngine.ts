@@ -10,6 +10,7 @@ import { FixedAsset, type IFixedAsset } from '../models/FixedAsset.js';
 import { Vendor, type IVendor } from '../models/Vendor.js';
 import { generateNumber } from './numbering.js';
 import { writeAuditLog } from './audit.js';
+import { writeRecordVersion } from './recordVersion.js';
 import {
   buildBankReconciliationMatches,
   buildDepreciationPostingPlan,
@@ -115,6 +116,7 @@ interface CreateVendorInput {
   phone?: string;
   address?: string;
   createdBy?: string;
+  metadata?: Record<string, any>;
 }
 
 interface RecordExpenseInput {
@@ -251,21 +253,69 @@ const postLedgerEntry = async (input: {
   });
 };
 
-const findExistingAccount = async (definition: SystemAccountDefinition): Promise<IChartAccount | null> =>
+const escapeRegex = (value: string): string => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const isDuplicateKeyError = (error: any): boolean => {
+  if (!error) return false;
+  if (Number(error?.code) === 11000) return true;
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('e11000') || message.includes('duplicate key');
+};
+
+const findSystemAccountByKey = async (key: SystemAccountKey): Promise<IChartAccount | null> =>
+  ChartAccount.findOne({ systemKey: key });
+
+const findAccountByCode = async (accountCode: string): Promise<IChartAccount | null> =>
+  ChartAccount.findOne({ accountCode: String(accountCode || '').trim().toUpperCase() });
+
+const findFallbackAccount = async (definition: SystemAccountDefinition): Promise<IChartAccount | null> =>
   ChartAccount.findOne({
-    $or: [
-      { systemKey: definition.key },
-      { accountCode: definition.code },
-      { accountName: { $regex: `^${definition.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+    $and: [
+      {
+        $or: [
+          { systemKey: definition.key },
+          { systemKey: { $exists: false } },
+          { systemKey: '' },
+        ],
+      },
+      {
+        $or: [
+          { accountCode: definition.code },
+          { accountName: { $regex: `^${escapeRegex(definition.name)}$`, $options: 'i' } },
+        ],
+      },
     ],
   });
+
+const allocateSystemAccountCode = async (preferredCode: string): Promise<string> => {
+  const base = String(preferredCode || '').trim().toUpperCase();
+  if (!base) {
+    return generateNumber('chart_account_system', { prefix: 'SYS-', padTo: 5 });
+  }
+
+  const direct = await findAccountByCode(base);
+  if (!direct) return base;
+
+  if (/^\d+$/.test(base)) {
+    const numeric = Number(base);
+    for (let offset = 1; offset <= 500; offset += 1) {
+      const candidate = String(numeric + offset);
+      const exists = await findAccountByCode(candidate);
+      if (!exists) return candidate;
+    }
+  }
+
+  return generateNumber('chart_account_system', { prefix: 'SYS-', padTo: 5 });
+};
 
 export const ensureAccountingChart = async (createdBy?: string): Promise<Map<string, IChartAccount>> => {
   const resolved = new Map<string, IChartAccount>();
 
   for (const definition of SYSTEM_ACCOUNTS) {
-    const existing = await findExistingAccount(definition);
-    const parentAccountId = definition.parentKey ? resolved.get(definition.parentKey)?._id : undefined;
+    const parentAccount = definition.parentKey
+      ? resolved.get(definition.parentKey) || await findSystemAccountByKey(definition.parentKey)
+      : null;
+    const parentAccountId = parentAccount?._id;
     const payload: Record<string, any> = {
       accountCode: definition.code,
       accountName: definition.name,
@@ -279,30 +329,94 @@ export const ensureAccountingChart = async (createdBy?: string): Promise<Map<str
       openingSide: definition.type === 'liability' ? 'credit' : 'debit',
     };
 
-    let account: IChartAccount | null = existing;
-    if (account) {
-      const needsUpdate =
-        account.systemKey !== definition.key
-        || account.accountCode !== definition.code
-        || account.accountName !== definition.name
-        || String(account.parentAccountId || '') !== String(parentAccountId || '')
-        || account.accountType !== definition.type
-        || account.subType !== (definition.subType || 'general')
-        || !account.isSystem;
-      if (needsUpdate) {
-        account = await ChartAccount.findByIdAndUpdate(
-          account._id,
-          { $set: payload, $setOnInsert: { createdBy } },
-          { new: true, runValidators: true }
-        );
+    let account: IChartAccount | null =
+      await findSystemAccountByKey(definition.key)
+      || await findFallbackAccount(definition);
+
+    try {
+      if (account) {
+        const latestByKey = await findSystemAccountByKey(definition.key);
+        if (latestByKey && String(latestByKey._id) !== String(account._id)) {
+          account = latestByKey;
+          resolved.set(definition.key, account);
+          continue;
+        }
+
+        const conflictByCode = await ChartAccount.findOne({
+          _id: { $ne: account._id },
+          accountCode: definition.code,
+        }).select('_id accountCode');
+
+        const safePayload = {
+          ...payload,
+          accountCode: conflictByCode ? account.accountCode : payload.accountCode,
+        };
+
+        const needsUpdate =
+          account.systemKey !== definition.key
+          || account.accountCode !== safePayload.accountCode
+          || account.accountName !== definition.name
+          || String(account.parentAccountId || '') !== String(parentAccountId || '')
+          || account.accountType !== definition.type
+          || account.subType !== (definition.subType || 'general')
+          || !account.isSystem;
+        if (needsUpdate) {
+          account = await ChartAccount.findByIdAndUpdate(
+            account._id,
+            { $set: safePayload, $setOnInsert: { createdBy } },
+            { new: true, runValidators: true }
+          );
+        }
+      } else {
+        const accountCode = await allocateSystemAccountCode(definition.code);
+        account = await ChartAccount.create({ ...payload, accountCode, createdBy });
       }
-    } else {
-      account = await ChartAccount.create({ ...payload, createdBy });
+    } catch (error: any) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+
+      // Concurrent chart initialization can race on tenantId+systemKey unique index.
+      account = await findSystemAccountByKey(definition.key);
+      if (!account) {
+        const codeMatch = await findAccountByCode(definition.code);
+        if (codeMatch) {
+          try {
+            account = await ChartAccount.findByIdAndUpdate(
+              codeMatch._id,
+              {
+                $set: {
+                  ...payload,
+                  accountCode: codeMatch.accountCode,
+                },
+                $setOnInsert: { createdBy },
+              },
+              { new: true, runValidators: true }
+            );
+          } catch {
+            account = await findSystemAccountByKey(definition.key);
+          }
+        }
+      }
+      if (!account) {
+        const fallbackCode = await allocateSystemAccountCode(definition.code);
+        try {
+          account = await ChartAccount.create({ ...payload, accountCode: fallbackCode, createdBy });
+        } catch {
+          account = await findSystemAccountByKey(definition.key);
+        }
+      }
+      if (!account) {
+        throw new Error(`System chart setup conflict for "${definition.name}". Please refresh and retry.`);
+      }
     }
 
     if (account) {
       resolved.set(definition.key, account);
+      continue;
     }
+
+    throw new Error(`Unable to prepare required system account "${definition.name}"`);
   }
 
   return resolved;
@@ -340,10 +454,32 @@ export const assertPeriodOpen = async (date: Date): Promise<IFinancialPeriod> =>
 
 export const setFinancialPeriodLock = async (month: number, year: number, isLocked: boolean, userId?: string) => {
   const period = await ensureFinancialPeriod(month, year, userId);
+  const before = period.toObject();
   period.isLocked = isLocked;
   period.lockedAt = isLocked ? new Date() : undefined;
   period.lockedBy = isLocked ? userId : undefined;
   await period.save();
+
+  await writeAuditLog({
+    module: 'accounting',
+    action: isLocked ? 'financial_period_locked' : 'financial_period_unlocked',
+    entityType: 'financial_period',
+    entityId: period._id.toString(),
+    referenceNo: period.periodKey,
+    userId,
+    before,
+    after: period.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'financial_period',
+    recordId: period._id.toString(),
+    action: isLocked ? 'LOCK' : 'UNLOCK',
+    changedBy: userId,
+    dataSnapshot: period.toObject(),
+  });
+
   return period;
 };
 
@@ -506,7 +642,18 @@ export const createJournalEntry = async (input: CreateJournalEntryInput): Promis
     entityId: entry._id.toString(),
     referenceNo: entry.entryNumber,
     userId: input.createdBy,
+    metadata: input.metadata,
     after: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'journal_entry',
+    recordId: entry._id.toString(),
+    action: 'CREATE',
+    changedBy: input.createdBy,
+    dataSnapshot: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
+    metadata: input.metadata,
   });
 
   return { entry, lines: inserted as unknown as IJournalLine[] };
@@ -525,7 +672,7 @@ export const createVendor = async (input: CreateVendorInput): Promise<IVendor> =
     createdBy: input.createdBy,
   });
 
-  return Vendor.create({
+  const vendor = await Vendor.create({
     name: input.name,
     contact: input.contact,
     email: input.email,
@@ -535,6 +682,29 @@ export const createVendor = async (input: CreateVendorInput): Promise<IVendor> =
     isActive: true,
     createdBy: input.createdBy,
   });
+
+  await writeAuditLog({
+    module: 'accounting',
+    action: 'vendor_created',
+    entityType: 'vendor',
+    entityId: vendor._id.toString(),
+    referenceNo: vendor.name,
+    userId: input.createdBy,
+    metadata: input.metadata,
+    after: vendor.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'vendor',
+    recordId: vendor._id.toString(),
+    action: 'CREATE',
+    changedBy: input.createdBy,
+    dataSnapshot: vendor.toObject(),
+    metadata: input.metadata,
+  });
+
+  return vendor;
 };
 
 const buildInvoiceStatus = (paidAmount: number, totalAmount: number): IAccountingInvoice['status'] => {
@@ -656,7 +826,28 @@ export const createInvoice = async (input: CreateInvoiceInput): Promise<{
     entityId: invoice._id.toString(),
     referenceNo: invoice.invoiceNumber,
     userId: input.createdBy,
+    metadata: {
+      postingMode: postingPlan.postingMode,
+      sourceReferenceType: input.referenceType || 'manual',
+      sourceReferenceId: input.referenceId,
+      ...input.metadata,
+    },
     after: invoice.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'accounting_invoice',
+    recordId: invoice._id.toString(),
+    action: 'CREATE',
+    changedBy: input.createdBy,
+    dataSnapshot: invoice.toObject(),
+    metadata: {
+      postingMode: postingPlan.postingMode,
+      sourceReferenceType: input.referenceType || 'manual',
+      sourceReferenceId: input.referenceId,
+      ...input.metadata,
+    },
   });
 
   return { invoice, journalEntry: invoiceJournal.entry, payment };
@@ -733,8 +924,24 @@ export const recordPayment = async (input: RecordPaymentInput): Promise<{
       invoiceNumber: invoice.invoiceNumber,
       amount,
       paymentMode: payment.mode,
+      ...input.metadata,
     },
     after: payment.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'accounting_payment',
+    recordId: payment._id.toString(),
+    action: 'CREATE',
+    changedBy: input.createdBy,
+    dataSnapshot: payment.toObject(),
+    metadata: {
+      invoiceNumber: invoice.invoiceNumber,
+      amount,
+      paymentMode: payment.mode,
+      ...input.metadata,
+    },
   });
 
   return { invoice, payment, journalEntry: journal.entry };
@@ -857,6 +1064,24 @@ export const recordExpense = async (input: RecordExpenseInput): Promise<{
       vendorName: vendor?.name,
       amount,
       paidAmount: Math.min(amount, paidAmount),
+      ...input.metadata,
+    },
+    after: expenseEntry.entry.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'journal_entry',
+    recordId: expenseEntry.entry._id.toString(),
+    action: 'CREATE',
+    changedBy: input.createdBy,
+    dataSnapshot: expenseEntry.entry.toObject(),
+    metadata: {
+      vendorId: vendor?._id?.toString(),
+      vendorName: vendor?.name,
+      amount,
+      paidAmount: Math.min(amount, paidAmount),
+      ...input.metadata,
     },
   });
 
@@ -903,6 +1128,7 @@ export const cancelJournalEntry = async (input: {
   journalEntryId: string;
   reason?: string;
   createdBy?: string;
+  metadata?: Record<string, any>;
 }): Promise<{ original: IJournalEntry; reversal: IJournalEntry }> => {
   const original = await JournalEntry.findById(input.journalEntryId);
   if (!original) throw new Error('Journal entry not found');
@@ -919,7 +1145,7 @@ export const cancelJournalEntry = async (input: {
     description: `Reversal of ${original.entryNumber}`,
     paymentMode: 'adjustment',
     createdBy: input.createdBy,
-    metadata: { reversalOf: original._id.toString(), cancellationReason: input.reason },
+    metadata: { reversalOf: original._id.toString(), cancellationReason: input.reason, ...input.metadata },
     lines: lines.map((line) => ({
       accountId: line.accountId,
       debit: Number(line.creditAmount || 0),
@@ -945,10 +1171,39 @@ export const cancelJournalEntry = async (input: {
     metadata: {
       reversalEntryNumber: reversal.entry.entryNumber,
       reason: input.reason,
+      ...input.metadata,
     },
     after: {
       originalEntry: original.toObject(),
       reversalEntry: reversal.entry.toObject(),
+    },
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'journal_entry',
+    recordId: original._id.toString(),
+    action: 'CANCEL',
+    changedBy: input.createdBy,
+    dataSnapshot: original.toObject(),
+    metadata: {
+      reason: input.reason,
+      reversalEntryNumber: reversal.entry.entryNumber,
+      ...input.metadata,
+    },
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'journal_entry',
+    recordId: reversal.entry._id.toString(),
+    action: 'CREATE_REVERSAL',
+    changedBy: input.createdBy,
+    dataSnapshot: reversal.entry.toObject(),
+    metadata: {
+      reversalOf: original._id.toString(),
+      reason: input.reason,
+      ...input.metadata,
     },
   });
 
@@ -959,16 +1214,19 @@ export const cancelInvoice = async (input: {
   invoiceId: string;
   reason?: string;
   createdBy?: string;
+  metadata?: Record<string, any>;
 }) => {
   const invoice = await AccountingInvoice.findById(input.invoiceId);
   if (!invoice) throw new Error('Invoice not found');
   if (invoice.status === 'cancelled') throw new Error('Invoice already cancelled');
+  const before = invoice.toObject();
 
   if (invoice.balanceAmount > 0 && invoice.journalEntryId) {
     await cancelJournalEntry({
       journalEntryId: invoice.journalEntryId.toString(),
       reason: input.reason || `Cancel invoice ${invoice.invoiceNumber}`,
       createdBy: input.createdBy,
+      metadata: input.metadata,
     });
   }
 
@@ -977,6 +1235,34 @@ export const cancelInvoice = async (input: {
   invoice.cancelledBy = input.createdBy;
   invoice.cancellationReason = input.reason;
   await invoice.save();
+
+  await writeAuditLog({
+    module: 'accounting',
+    action: 'invoice_cancelled',
+    entityType: 'accounting_invoice',
+    entityId: invoice._id.toString(),
+    referenceNo: invoice.invoiceNumber,
+    userId: input.createdBy,
+    metadata: {
+      reason: input.reason,
+      ...input.metadata,
+    },
+    before,
+    after: invoice.toObject(),
+  });
+
+  await writeRecordVersion({
+    module: 'accounting',
+    entityType: 'accounting_invoice',
+    recordId: invoice._id.toString(),
+    action: 'CANCEL',
+    changedBy: input.createdBy,
+    dataSnapshot: invoice.toObject(),
+    metadata: {
+      reason: input.reason,
+      ...input.metadata,
+    },
+  });
 
   return invoice;
 };

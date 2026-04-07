@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiUrl, fetchApiJson } from './utils/api';
+import { showAlertDialog } from './utils/appDialogs';
 
 interface InventoryItem {
   _id: string;
@@ -88,7 +89,7 @@ export const Inventory = () => {
       fetchInventory();
     } catch (error) {
       console.error('Error updating stock', error);
-      alert((error as Error)?.message || 'Failed to update stock');
+      await showAlertDialog((error as Error)?.message || 'Failed to update stock');
     }
   };
 

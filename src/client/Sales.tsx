@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useProducts, Product } from '../hooks/useProducts';
 import { formatCurrency } from '../config';
 import { apiUrl } from './utils/api';
+import { showAlertDialog } from './utils/appDialogs';
 
 interface CartItem extends Product {
   cartQuantity: number;
@@ -75,16 +76,16 @@ export const Sales: React.FC = () => {
       });
 
       if (response.ok) {
-        alert('Order completed successfully!');
+        await showAlertDialog('Order completed successfully!', { title: 'Order Complete', severity: 'success' });
         setCart([]);
         refetch(); // Refresh product stock
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to process order');
+        await showAlertDialog(data.error || 'Failed to process order');
       }
     } catch (err) {
       console.error(err);
-      alert('Error processing order');
+      await showAlertDialog('Error processing order');
     } finally {
       setProcessing(false);
     }
