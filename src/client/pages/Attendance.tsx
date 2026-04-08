@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -124,7 +125,10 @@ export const Attendance: React.FC<AttendanceProps> = ({ currentUserRole }) => {
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white sm:text-3xl">Attendance Register</h1>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Attendance Register</h1>
+          <ManualHelpLink anchor="transaction-attendance" />
+        </div>
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-300">Date</label>
           <input

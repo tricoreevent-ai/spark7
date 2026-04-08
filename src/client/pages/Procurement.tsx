@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -510,7 +511,10 @@ export const Procurement: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <form onSubmit={savePurchaseOrder} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-          <h2 className="text-lg font-semibold text-white">Create Purchase Order</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">Create Purchase Order</h2>
+            <ManualHelpLink anchor="transaction-purchase-order" />
+          </div>
           <select className={inputClass} required value={purchaseForm.supplierId} onChange={(e) => setPurchaseForm((prev) => ({ ...prev, supplierId: e.target.value }))}>
             <option value="">Select Supplier</option>
             {suppliers.filter((supplier) => supplier.isActive).map((supplier) => <option key={supplier._id} value={supplier._id}>{supplier.supplierCode} - {supplier.name}</option>)}
@@ -579,7 +583,13 @@ export const Procurement: React.FC = () => {
           {action && selectedOrder && (
             <div className="rounded-xl border border-white/10 bg-white/5 p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="text-lg font-semibold text-white">{action.mode === 'receive' ? 'Receive Stock' : 'Purchase Return'} for {selectedOrder.purchaseNumber}</h2><p className="text-sm text-gray-300">{supplierName(selectedOrder.supplierId)}</p></div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h2 className="text-lg font-semibold text-white">{action.mode === 'receive' ? 'Receive Stock' : 'Purchase Return'} for {selectedOrder.purchaseNumber}</h2>
+                    <ManualHelpLink anchor={action.mode === 'receive' ? 'transaction-receive-stock' : 'transaction-purchase-return'} />
+                  </div>
+                  <p className="text-sm text-gray-300">{supplierName(selectedOrder.supplierId)}</p>
+                </div>
                 <button type="button" onClick={() => setAction(null)} className={ghostButtonClass}>Close</button>
               </div>
 

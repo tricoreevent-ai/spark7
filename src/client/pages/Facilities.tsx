@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -458,7 +459,10 @@ export const Facilities: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <form onSubmit={createBooking} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5 xl:col-span-2">
-          <h2 className="text-lg font-semibold text-white">Create Booking</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">Create Booking</h2>
+            <ManualHelpLink anchor="transaction-facility-booking" />
+          </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>

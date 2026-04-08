@@ -44,6 +44,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [statusUpdatingUserId, setStatusUpdatingUserId] = useState('');
   const formCardRef = useRef<HTMLFormElement | null>(null);
 
   const [form, setForm] = useState({
@@ -300,6 +301,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
     if (!confirmed) return;
 
     try {
+      setStatusUpdatingUserId(user._id);
       await fetchApiJson(apiUrl(`/api/users/${user._id}/status`), {
         method: 'PUT',
         headers,
@@ -313,6 +315,8 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
       }
     } catch (e: any) {
       setError(e.message || 'Failed to update user status');
+    } finally {
+      setStatusUpdatingUserId('');
     }
   };
 
@@ -382,6 +386,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
   };
 
   const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500';
+  const isStatusUpdating = (user: ManagedUser) => statusUpdatingUserId === user._id;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
@@ -558,29 +563,36 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                     </td>
                     <td className="px-5 py-4 text-sm text-slate-300">{user.phoneNumber || 'Not provided'}</td>
                     <td className="px-5 py-4">
-                      <div className="flex min-w-[120px] flex-col items-start gap-2">
-                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                          user.isActive
-                            ? 'border-emerald-400/20 bg-emerald-500/15 text-emerald-100'
-                            : 'border-rose-400/20 bg-rose-500/15 text-rose-100'
+                      <div className="flex min-w-[160px] items-center gap-3">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={user.isActive}
+                          aria-label={`${user.isActive ? 'Deactivate' : 'Activate'} ${`${user.firstName} ${user.lastName}`.trim() || user.email}`}
+                          onClick={() => {
+                            if (!canToggleStatus(user) || isStatusUpdating(user)) return;
+                            void toggleUserStatus(user);
+                          }}
+                          disabled={!canToggleStatus(user) || isStatusUpdating(user)}
+                          title={!canToggleStatus(user) ? getStatusLockReason(user) : `${user.isActive ? 'Deactivate' : 'Activate'} user`}
+                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition focus:outline-none focus:ring-4 ${
+                            user.isActive
+                              ? 'border-indigo-300/20 bg-indigo-500 focus:ring-indigo-500/25'
+                              : 'border-white/10 bg-slate-600 focus:ring-slate-400/20'
+                          } ${isStatusUpdating(user) ? 'animate-pulse' : ''}`}
+                          style={{ cursor: !canToggleStatus(user) ? 'not-allowed' : undefined }}
+                        >
+                          <span
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition ${
+                              user.isActive ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                        <span className={`text-sm font-semibold ${
+                          user.isActive ? 'text-emerald-200' : 'text-rose-200'
                         }`}>
                           {user.isActive ? 'Active' : 'Inactive'}
                         </span>
-                        {canToggleStatus(user) ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleUserStatus(user)}
-                            className={`rounded-lg border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] ${
-                              user.isActive
-                                ? 'border-amber-400/20 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25'
-                                : 'border-emerald-400/20 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25'
-                            }`}
-                          >
-                            {user.isActive ? 'Deactivate' : 'Activate'}
-                          </button>
-                        ) : (
-                          <span className="text-[11px] text-slate-500">{getStatusLockReason(user)}</span>
-                        )}
                       </div>
                     </td>
                     <td className="px-5 py-4">

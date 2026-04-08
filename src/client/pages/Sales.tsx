@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { IProduct } from '@shared/types';
 import {
@@ -1126,7 +1127,10 @@ export const Sales = () => {
 
         <div className={`rounded-lg border border-white/10 bg-white/5 p-5 ${showCatalogPanel ? '' : 'mx-auto w-full max-w-3xl'} ${isMinimalMode ? 'h-full overflow-hidden' : ''}`}>
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold text-white">Current Sale</h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-semibold text-white">Current Sale</h2>
+              <ManualHelpLink anchor="transaction-sales-invoice" />
+            </div>
             <button
               type="button"
               onClick={() => setShowCatalogPanel((prev) => !prev)}

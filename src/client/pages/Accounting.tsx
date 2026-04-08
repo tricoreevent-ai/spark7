@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { CardTabs } from '../components/CardTabs';
 import { ReportDataTable } from '../components/ReportDataTable';
@@ -2359,7 +2360,10 @@ export const Accounting: React.FC = () => {
 
           {invoicesTab === 'invoice_entry' && (
             <form onSubmit={submitInvoice} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <h2 className="text-lg font-semibold text-white">Create Accounting Invoice</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">Create Accounting Invoice</h2>
+                <ManualHelpLink anchor="transaction-accounting-invoice" />
+              </div>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 <input className={inputClass} type="date" value={invoiceForm.invoiceDate} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoiceDate: e.target.value }))} />
                 <input className={inputClass} placeholder="Customer / Party Name" required value={invoiceForm.customerName} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customerName: e.target.value }))} />
@@ -2393,7 +2397,10 @@ export const Accounting: React.FC = () => {
 
           {invoicesTab === 'expense_entry' && (
             <form onSubmit={submitCoreExpense} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <h2 className="text-lg font-semibold text-white">Record Expense / Vendor Bill</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">Record Expense / Vendor Bill</h2>
+                <ManualHelpLink anchor="transaction-expense-vendor-bill" />
+              </div>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 <input className={inputClass} type="date" value={expenseCoreForm.expenseDate} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, expenseDate: e.target.value }))} />
                 <input className={inputClass} placeholder="Description" required value={expenseCoreForm.description} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, description: e.target.value }))} />
@@ -2623,7 +2630,10 @@ export const Accounting: React.FC = () => {
 
           {paymentsTab === 'salary_entry' && (
             <form onSubmit={submitSalary} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <h2 className="text-lg font-semibold text-white">{editingSalaryId ? 'Edit Salary Payment' : 'Salary Payment'}</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">{editingSalaryId ? 'Edit Salary Payment' : 'Salary Payment'}</h2>
+                <ManualHelpLink anchor="transaction-salary-payment" />
+              </div>
               {editingSalaryId && <p className="text-xs text-cyan-300">Edit mode is active. Update details and click Save Changes.</p>}
               <select
                 className={inputClass}
@@ -2688,7 +2698,10 @@ export const Accounting: React.FC = () => {
 
           {paymentsTab === 'contract_entry' && (
             <form onSubmit={submitContract} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <h2 className="text-lg font-semibold text-white">{editingContractId ? 'Edit Contract Payment' : 'Contract Payment'}</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">{editingContractId ? 'Edit Contract Payment' : 'Contract Payment'}</h2>
+                <ManualHelpLink anchor="transaction-contract-payment" />
+              </div>
               {editingContractId && <p className="text-xs text-cyan-300">Edit mode is active. Update the contract payment and save changes with confirmation.</p>}
               <input className={inputClass} placeholder="Contractor Name" required value={contractForm.contractorName} onChange={(e) => setContractForm({ ...contractForm, contractorName: e.target.value })} />
               <input className={inputClass} placeholder="Contract Title" required value={contractForm.contractTitle} onChange={(e) => setContractForm({ ...contractForm, contractTitle: e.target.value })} />
@@ -2819,7 +2832,10 @@ export const Accounting: React.FC = () => {
           />
 
           <form onSubmit={saveOpening} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-            <h2 className="text-lg font-semibold text-white">Opening Balances</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Opening Balances</h2>
+              <ManualHelpLink anchor="transaction-opening-balances" />
+            </div>
             <p className="text-sm text-gray-300">Status: {openingStatus?.isLocked ? 'Locked' : 'Open'}</p>
 
             {openingTab === 'balances' && (
@@ -2872,7 +2888,10 @@ export const Accounting: React.FC = () => {
 
           {expensesTab === 'entry' && (
             <form onSubmit={submitManual} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <h2 className="text-lg font-semibold text-white">{editingDaybookId ? 'Edit Daily Expense/Income Entry' : 'Daily Expense/Income Entry'}</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">{editingDaybookId ? 'Edit Daily Expense/Income Entry' : 'Daily Expense/Income Entry'}</h2>
+                <ManualHelpLink anchor="transaction-daybook-entry" />
+              </div>
               {editingDaybookId && <p className="text-xs text-cyan-300">Edit mode is active. Update the entry and save changes with confirmation.</p>}
               <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                 <select className={inputClass} value={manualForm.entryType} onChange={(e) => setManualForm({ ...manualForm, entryType: e.target.value })}><option value="expense">Expense</option><option value="income">Income</option></select>
@@ -2963,7 +2982,10 @@ export const Accounting: React.FC = () => {
               }}
               className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2"
             >
-              <h3 className="text-white font-semibold">{editingVoucher?.type === 'receipt' ? 'Edit Receipt Voucher' : 'Receipt Voucher (Income)'}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-white font-semibold">{editingVoucher?.type === 'receipt' ? 'Edit Receipt Voucher' : 'Receipt Voucher (Income)'}</h3>
+                <ManualHelpLink anchor="transaction-receipt-voucher" />
+              </div>
               {editingVoucher?.type === 'receipt' && <p className="text-xs text-cyan-300">Edit mode is active. Update the voucher and save changes with confirmation.</p>}
               <div className="grid grid-cols-2 gap-2">
                 <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" required value={receiptForm.amount} onChange={(e) => setReceiptForm({ ...receiptForm, amount: e.target.value })} />
@@ -3019,7 +3041,10 @@ export const Accounting: React.FC = () => {
               }}
               className="max-w-5xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2"
             >
-              <h3 className="text-white font-semibold">{editingVoucher?.type === 'payment' ? 'Edit Payment Voucher' : 'Payment Voucher (Reference Layout)'}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-white font-semibold">{editingVoucher?.type === 'payment' ? 'Edit Payment Voucher' : 'Payment Voucher (Reference Layout)'}</h3>
+                <ManualHelpLink anchor="transaction-payment-voucher" />
+              </div>
               {editingVoucher?.type === 'payment' && <p className="text-xs text-cyan-300">Edit mode is active. Update the voucher and save changes with confirmation.</p>}
               <div className="grid grid-cols-2 gap-2">
                 <input className={inputClass} placeholder="No. / Reference No" value={paymentForm.referenceNo} onChange={(e) => setPaymentForm({ ...paymentForm, referenceNo: e.target.value })} />
@@ -3088,7 +3113,10 @@ export const Accounting: React.FC = () => {
               }}
               className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2"
             >
-              <h3 className="text-white font-semibold">{editingVoucher?.type === 'journal' ? 'Edit Journal Voucher' : 'Journal Voucher'}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-white font-semibold">{editingVoucher?.type === 'journal' ? 'Edit Journal Voucher' : 'Journal Voucher'}</h3>
+                <ManualHelpLink anchor="transaction-journal-voucher" />
+              </div>
               {editingVoucher?.type === 'journal' && <p className="text-xs text-cyan-300">Edit mode is active. Update the journal and save changes with confirmation.</p>}
               <div className="grid grid-cols-3 gap-2">
                 <input className={inputClass} type="date" required value={journalForm.voucherDate} onChange={(e) => setJournalForm({ ...journalForm, voucherDate: e.target.value })} />
@@ -3126,7 +3154,10 @@ export const Accounting: React.FC = () => {
               }}
               className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2"
             >
-              <h3 className="text-white font-semibold">{editingVoucher?.type === 'transfer' ? 'Edit Cash-Bank Transfer' : 'Cash-Bank Transfer'}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-white font-semibold">{editingVoucher?.type === 'transfer' ? 'Edit Cash-Bank Transfer' : 'Cash-Bank Transfer'}</h3>
+                <ManualHelpLink anchor="transaction-cash-bank-transfer" />
+              </div>
               {editingVoucher?.type === 'transfer' && <p className="text-xs text-cyan-300">Edit mode is active. Update the transfer and save changes with confirmation.</p>}
               <div className="grid grid-cols-3 gap-2">
                 <input className={inputClass} type="number" min="0" step="0.01" required placeholder="Amount" value={transferForm.amount} onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })} />
@@ -3321,7 +3352,10 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-white font-semibold">Bank Reconciliation Pending</h3>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className="text-white font-semibold">Bank Reconciliation Pending</h3>
+                    <ManualHelpLink anchor="transaction-bank-reconciliation" />
+                  </div>
                   <p className="text-xs text-gray-400">Select bank ledger rows to mark them as reconciled.</p>
                 </div>
                 <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-gray-300">
@@ -3396,7 +3430,10 @@ export const Accounting: React.FC = () => {
           {booksTab === 'csv_compare' && (
             <div className="max-w-5xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
               <div>
-                <h3 className="text-white font-semibold">CSV Bank Reconciliation</h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="text-white font-semibold">CSV Bank Reconciliation</h3>
+                  <ManualHelpLink anchor="transaction-csv-bank-reconciliation" />
+                </div>
                 <p className="text-xs text-gray-400">Paste a bank statement CSV with at least `Date` and `Amount` columns, then compare it against unreconciled bank ledger rows.</p>
               </div>
               <textarea className={inputClass} rows={6} placeholder="Date,Amount,Description&#10;2026-04-01,2000,UPI receipt" value={bankCsvText} onChange={(e) => setBankCsvText(e.target.value)} />

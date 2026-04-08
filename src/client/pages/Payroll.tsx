@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { jsPDF } from 'jspdf';
@@ -124,6 +125,9 @@ export const Payroll: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Monthly Payroll</h1>
           <p className="text-sm text-gray-300">Generate payroll from attendance, weekly off shifts, and overtime.</p>
+          <div className="mt-2">
+            <ManualHelpLink anchor="transaction-payroll" />
+          </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div>

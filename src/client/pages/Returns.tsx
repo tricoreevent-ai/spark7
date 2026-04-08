@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency, formatDate, APP_CONFIG } from '../config';
 import { Table, Column } from '../components/Table';
 import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
@@ -334,7 +335,10 @@ const Returns: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="sm:flex sm:items-center sm:justify-between mb-8">
-        <h1 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight">Return Management</h1>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight">Return Management</h1>
+          <ManualHelpLink anchor="transaction-returns" />
+        </div>
         <button onClick={exportToCSV} className="mt-4 sm:mt-0 rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-white/20">
           Export CSV
         </button>

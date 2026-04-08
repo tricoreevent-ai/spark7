@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { showPromptDialog } from '../utils/appDialogs';
@@ -840,7 +841,10 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
       <div className={`grid grid-cols-1 gap-5 ${showPlanForm && showMemberForm ? 'xl:grid-cols-2' : ''}`}>
         {showPlanForm && (
         <form onSubmit={savePlan} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-          <h2 className="text-lg font-semibold text-white">{editingPlanId ? 'Edit Plan' : 'Create Plan (Admin)'}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">{editingPlanId ? 'Edit Plan' : 'Create Plan (Admin)'}</h2>
+            <ManualHelpLink anchor="transaction-membership-plan" />
+          </div>
           <div>
             <label className={fieldLabelClass}>Plan Name</label>
             <input title="Unique plan name shown to staff and members." className={inputClass} required placeholder="Plan Name" value={planForm.name} onChange={(e) => setPlanForm((p) => ({ ...p, name: e.target.value }))} />
@@ -943,7 +947,10 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
 
         {showMemberForm && (
         <form onSubmit={saveMember} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-          <h2 className="text-lg font-semibold text-white">{subForm.editId ? 'Edit Member Profile' : 'Create Member Subscription'}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">{subForm.editId ? 'Edit Member Profile' : 'Create Member Subscription'}</h2>
+            <ManualHelpLink anchor="transaction-membership-subscription" />
+          </div>
           <div>
             <label className={fieldLabelClass}>Membership Plan</label>
             <select title="Select the membership plan to assign." className={inputClass} required value={subForm.planId} onChange={(e) => setSubForm((p) => ({ ...p, planId: e.target.value }))} disabled={Boolean(subForm.editId)}>

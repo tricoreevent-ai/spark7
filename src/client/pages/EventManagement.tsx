@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { openPdfDocument, ServerPdfDocument } from '../utils/pdfDocument';
@@ -851,7 +852,10 @@ export const EventManagement: React.FC = () => {
         </div>
 
         <form onSubmit={createEvent} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-4">
-          <h2 className="text-lg font-semibold text-white">Create Event</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">Create Event</h2>
+            <ManualHelpLink anchor="transaction-event-booking" />
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <button

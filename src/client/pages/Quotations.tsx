@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -462,11 +463,14 @@ export const Quotations: React.FC = () => {
               <h2 className="text-lg font-semibold text-white">{form.id ? 'Edit Quotation' : 'Create Quotation'}</h2>
               <p className="text-xs text-gray-400">Offline quote workflow with version history and draft invoice conversion.</p>
             </div>
-            {form.id && (
-              <button type="button" onClick={resetForm} className="rounded-md border border-white/20 px-3 py-2 text-sm text-gray-200">
-                New Quote
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <ManualHelpLink anchor="transaction-quotation" />
+              {form.id && (
+                <button type="button" onClick={resetForm} className="rounded-md border border-white/20 px-3 py-2 text-sm text-gray-200">
+                  New Quote
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

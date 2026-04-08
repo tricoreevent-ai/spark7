@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import sparkDashboardMacbook from '../assets/marketing/spark-dashboard-macbook.png';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
 type PublicPageKey = 'home' | 'about' | 'contact' | 'login';
@@ -17,6 +18,8 @@ type PublicShellProps = {
   description: string;
   primaryAction?: ActionLink;
   secondaryAction?: ActionLink;
+  heroSupplement?: React.ReactNode;
+  heroVariant?: 'default' | 'banner';
   heroRight: React.ReactNode;
   children?: React.ReactNode;
 };
@@ -74,6 +77,24 @@ const workflowSteps = [
   'Run front desk sales, facility bookings, memberships, and event reservations.',
   'Track staff attendance, payroll inputs, and operational follow-up.',
   'Close the loop with accounting, settlements, reports, and printable confirmations.',
+];
+
+const homeHeroDetails = [
+  {
+    title: 'Run bookings and events faster.',
+    description:
+      'Control court schedules, event blocks, advance collection, and customer follow-up from one connected front desk flow.',
+  },
+  {
+    title: 'Keep memberships and staff in sync.',
+    description:
+      'Track renewals, attendance, payroll inputs, and operational follow-up without splitting work across separate tools.',
+  },
+  {
+    title: 'Close the day with financial clarity.',
+    description:
+      'Move from billing to receipts, vouchers, settlements, and reports with a cleaner audit trail for daily review.',
+  },
 ];
 
 const aboutHighlights = [
@@ -134,9 +155,6 @@ const actionClassName = (variant: ActionLink['variant']) =>
   variant === 'secondary'
     ? 'inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10'
     : 'inline-flex items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:from-cyan-400 hover:to-emerald-400';
-
-const shellBadgeClassName =
-  'rounded-full border border-white/10 bg-slate-950/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200';
 
 const whatsappContactUrl = `https://wa.me/${WHATSAPP_PHONE_E164}?text=${encodeURIComponent(
   'Hello Sarva Horizon, I would like to know more about the Sarva sports complex management platform.'
@@ -310,6 +328,8 @@ const PublicShell: React.FC<PublicShellProps> = ({
   description,
   primaryAction,
   secondaryAction,
+  heroSupplement,
+  heroVariant = 'default',
   heroRight,
   children,
 }) => {
@@ -369,36 +389,73 @@ const PublicShell: React.FC<PublicShellProps> = ({
         </header>
 
         <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
-          <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-7 shadow-[0_30px_90px_rgba(2,6,23,0.35)] backdrop-blur-xl sm:p-10">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">{eyebrow}</p>
-              <h1 className="mt-5 max-w-3xl text-4xl font-bold leading-tight text-white sm:text-5xl">
-                {title}
-              </h1>
-              <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">{description}</p>
+          {heroVariant === 'banner' ? (
+            <section className="overflow-hidden rounded-[2.25rem] border border-white/10 bg-white/[0.04] shadow-[0_30px_90px_rgba(2,6,23,0.35)] backdrop-blur-xl">
+              <div className="grid gap-0 lg:grid-cols-[0.88fr_1.12fr] lg:items-stretch">
+                <div className="p-7 sm:p-10 lg:pr-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">{eyebrow}</p>
+                  <h1 className="mt-5 max-w-3xl text-4xl font-bold leading-tight text-white sm:text-5xl">
+                    {title}
+                  </h1>
+                  <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">{description}</p>
 
-              <div className="mt-7 flex flex-wrap gap-3">
-                {primaryAction ? (
-                  <Link to={primaryAction.to} className={actionClassName(primaryAction.variant)}>
-                    {primaryAction.label}
-                  </Link>
-                ) : null}
-                {secondaryAction ? (
-                  <Link to={secondaryAction.to} className={actionClassName(secondaryAction.variant || 'secondary')}>
-                    {secondaryAction.label}
-                  </Link>
+                  <div className="mt-7 flex flex-wrap gap-3">
+                    {primaryAction ? (
+                      <Link to={primaryAction.to} className={actionClassName(primaryAction.variant)}>
+                        {primaryAction.label}
+                      </Link>
+                    ) : null}
+                    {secondaryAction ? (
+                      <Link to={secondaryAction.to} className={actionClassName(secondaryAction.variant || 'secondary')}>
+                        {secondaryAction.label}
+                      </Link>
+                    ) : null}
+                  </div>
+
+                  {heroSupplement ? (
+                    <div className="mt-8 border-t border-white/10 pt-8">
+                      {heroSupplement}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="border-t border-white/10 p-4 lg:border-l lg:border-t-0 lg:p-5">
+                  {heroRight}
+                </div>
+              </div>
+            </section>
+          ) : (
+            <section className="grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-stretch">
+              <div className="h-full rounded-[2rem] border border-white/10 bg-white/[0.04] p-7 shadow-[0_30px_90px_rgba(2,6,23,0.35)] backdrop-blur-xl sm:p-10">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">{eyebrow}</p>
+                <h1 className="mt-5 max-w-3xl text-4xl font-bold leading-tight text-white sm:text-5xl">
+                  {title}
+                </h1>
+                <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">{description}</p>
+
+                <div className="mt-7 flex flex-wrap gap-3">
+                  {primaryAction ? (
+                    <Link to={primaryAction.to} className={actionClassName(primaryAction.variant)}>
+                      {primaryAction.label}
+                    </Link>
+                  ) : null}
+                  {secondaryAction ? (
+                    <Link to={secondaryAction.to} className={actionClassName(secondaryAction.variant || 'secondary')}>
+                      {secondaryAction.label}
+                    </Link>
+                  ) : null}
+                </div>
+
+                {heroSupplement ? (
+                  <div className="mt-8 border-t border-white/10 pt-8">
+                    {heroSupplement}
+                  </div>
                 ) : null}
               </div>
 
-              <div className="mt-8 flex flex-wrap gap-2">
-                <span className={shellBadgeClassName}>Dark Public Portal</span>
-                <span className={shellBadgeClassName}>Client Tenant Login</span>
-                <span className={shellBadgeClassName}>Ideal for Sports Complexes</span>
-              </div>
-            </div>
-
-            <div className="space-y-4">{heroRight}</div>
-          </section>
+              <div className="space-y-4">{heroRight}</div>
+            </section>
+          )}
 
           {children ? <div className="mt-10 space-y-8">{children}</div> : null}
         </main>
@@ -428,6 +485,25 @@ const PublicShell: React.FC<PublicShellProps> = ({
   );
 };
 
+const PublicHomeProductShot: React.FC = () => {
+  return (
+    <div className="relative h-full overflow-hidden rounded-[1.85rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.78),rgba(2,6,23,0.9))] p-3">
+      <div className="mb-3 flex items-center justify-between gap-3 px-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Live product image</p>
+        <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-semibold text-slate-200">
+          Spark Dashboard
+        </span>
+      </div>
+      <img
+        src={sparkDashboardMacbook}
+        alt="Spark dashboard shown on a MacBook Pro"
+        className="h-full w-full rounded-[1.45rem] border border-white/10 object-cover shadow-[0_24px_70px_rgba(2,6,23,0.34)]"
+        loading="eager"
+      />
+    </div>
+  );
+};
+
 export const PublicHomePage: React.FC = () => {
   return (
     <PublicShell
@@ -437,64 +513,44 @@ export const PublicHomePage: React.FC = () => {
       description="Run bookings, events, memberships, product sales, inventory, employee operations, accounts, and administration from one connected application designed for high-activity venues."
       primaryAction={{ label: 'Client Login', to: '/login' }}
       secondaryAction={{ label: 'Explore About', to: '/about', variant: 'secondary' }}
-      heroRight={
-        <>
-          <section className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">What Sarva Covers</p>
-            <div className="mt-4 grid gap-3">
-              {[
-                'Facility booking and slot control',
-                'Event booking with payment tracking',
-                'Membership plans and subscriptions',
-                'Sales, quotations, inventory, and returns',
-                'Employees, attendance, shifts, and payroll',
-                'Accounts, settlements, reports, and admin settings',
-              ].map((item, index) => (
-                <div key={item} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-400/15 text-sm font-bold text-cyan-100">
-                    {index + 1}
-                  </span>
-                  <p className="text-sm leading-6 text-slate-200">{item}</p>
-                </div>
-              ))}
+      heroVariant="banner"
+      heroSupplement={
+        <div className="space-y-5">
+          {homeHeroDetails.map((item, index) => (
+            <div key={item.title} className="flex items-start gap-4">
+              <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-bold text-cyan-100">
+                {index + 1}
+              </span>
+              <div>
+                <p className="text-lg font-semibold text-white">{item.title}</p>
+                <p className="mt-2 max-w-2xl text-base leading-8 text-slate-300">{item.description}</p>
+              </div>
             </div>
-          </section>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">For Teams</p>
-              <p className="mt-3 text-lg font-semibold text-white">Front desk to finance</p>
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                Sales, operations, HR, accounts, and administrators can work from the same connected data flow.
-              </p>
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">For Venues</p>
-              <p className="mt-3 text-lg font-semibold text-white">Single or multi-facility setups</p>
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                Sarva fits sports arenas, coaching venues, turf centers, clubhouses, and mixed sports campuses.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-[2rem] border border-emerald-400/20 bg-emerald-400/10 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Sarva Horizon</p>
-            <p className="mt-3 text-lg font-semibold text-white">{SARVA_HORIZON_ADDRESS}</p>
-            <p className="mt-2 text-sm leading-7 text-slate-200">
-              {APPLICATION_RIGHTS_NOTE} Sarva is presented here as the public application brand for sports complex
-              management.
-            </p>
-          </div>
-        </>
+          ))}
+        </div>
       }
+      heroRight={<PublicHomeProductShot />}
     >
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {homeFeatures.map((feature) => (
-          <article key={feature.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <p className="text-lg font-semibold text-white">{feature.title}</p>
-            <p className="mt-3 text-sm leading-7 text-slate-300">{feature.description}</p>
-          </article>
-        ))}
+      <section className="space-y-5">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Feature details</p>
+            <h2 className="mt-2 text-2xl font-bold text-white">Operational modules that work together in one product</h2>
+          </div>
+          <p className="max-w-2xl text-sm leading-7 text-slate-300">
+            Each feature below supports a real business area, but the value comes from how Sarva keeps them connected
+            inside one daily operating flow.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {homeFeatures.map((feature) => (
+            <article key={feature.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <p className="text-lg font-semibold text-white">{feature.title}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-300">{feature.description}</p>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">

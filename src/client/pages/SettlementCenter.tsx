@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -392,7 +393,10 @@ export const SettlementCenter: React.FC = () => {
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <form onSubmit={saveReceipt} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-              <h2 className="text-lg font-semibold text-white">Create Receipt Voucher</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-white">Create Receipt Voucher</h2>
+                <ManualHelpLink anchor="transaction-settlement-receipt" />
+              </div>
               <input className={inputClass} placeholder="Customer Name" value={receiptForm.customerName} onChange={(e) => setReceiptForm((prev) => ({ ...prev, customerName: e.target.value }))} />
               <input className={inputClass} type="number" min="0" step="0.01" placeholder={`Amount ${allocatedTotal > 0 ? `(allocated ${formatCurrency(allocatedTotal)})` : ''}`} value={receiptForm.amount} onChange={(e) => setReceiptForm((prev) => ({ ...prev, amount: e.target.value }))} />
               <select className={inputClass} value={receiptForm.mode} onChange={(e) => setReceiptForm((prev) => ({ ...prev, mode: e.target.value }))}>
@@ -475,7 +479,10 @@ export const SettlementCenter: React.FC = () => {
       {activeTab === 'credit' && (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
           <form onSubmit={saveCreditNote} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-            <h2 className="text-lg font-semibold text-white">Create Credit Note</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Create Credit Note</h2>
+              <ManualHelpLink anchor="transaction-credit-note" />
+            </div>
             <input className={inputClass} placeholder="Customer Name" value={creditForm.customerName} onChange={(e) => setCreditForm((prev) => ({ ...prev, customerName: e.target.value }))} />
             <input className={inputClass} placeholder="Customer Phone" value={creditForm.customerPhone} onChange={(e) => setCreditForm((prev) => ({ ...prev, customerPhone: e.target.value }))} />
             <input className={inputClass} type="email" placeholder="Customer Email" value={creditForm.customerEmail} onChange={(e) => setCreditForm((prev) => ({ ...prev, customerEmail: e.target.value }))} />
@@ -541,7 +548,10 @@ export const SettlementCenter: React.FC = () => {
       {activeTab === 'dayEnd' && (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
           <form onSubmit={closeDayEnd} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-5">
-            <h2 className="text-lg font-semibold text-white">Close Day</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Close Day</h2>
+              <ManualHelpLink anchor="transaction-day-end-closing" />
+            </div>
             <input className={inputClass} type="date" value={businessDate} onChange={(e) => setBusinessDate(e.target.value)} />
             <input className={inputClass} type="number" min="0" step="0.01" placeholder="Opening Cash" value={dayEndForm.openingCash} onChange={(e) => setDayEndForm((prev) => ({ ...prev, openingCash: e.target.value }))} />
             <input className={inputClass} type="number" min="0" step="0.01" placeholder="Physical Closing Cash" value={dayEndForm.physicalClosingCash} onChange={(e) => setDayEndForm((prev) => ({ ...prev, physicalClosingCash: e.target.value }))} />
