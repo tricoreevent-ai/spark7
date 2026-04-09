@@ -810,8 +810,8 @@ router.post('/campaigns', async (req: AuthenticatedRequest, res: Response) => {
     const brochureDataUrl = String(req.body?.brochureDataUrl || '').trim();
 
     let campaign = campaignId ? await CustomerCampaign.findById(campaignId) : null;
-    if (campaign && campaign.status === 'sent' && action === 'draft') {
-      return res.status(400).json({ success: false, error: 'A sent campaign cannot be edited as a draft.' });
+    if (campaign && campaign.status === 'sent') {
+      campaign = null;
     }
 
     if (!campaign) {

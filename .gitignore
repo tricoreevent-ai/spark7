@@ -28,3 +28,4 @@ installer/
 CLAUDE.md
 src/**/*.js
 src/**/*.js.map
+/git-scripts
