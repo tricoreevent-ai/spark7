@@ -6,6 +6,15 @@ export interface ICustomerPriceOverride {
   unitPrice: number;
 }
 
+export type CustomerCategory = 'individual' | 'group_team' | 'corporate' | 'regular_member' | 'walk_in';
+
+export interface ICustomerPreferences {
+  preferredSport?: string;
+  preferredFacilityId?: string;
+  preferredTimeSlot?: string;
+  preferredShopItems?: string[];
+}
+
 export interface ICustomerContact {
   name: string;
   role?: string;
@@ -30,6 +39,8 @@ export interface ICustomer extends Document {
   name: string;
   phone?: string;
   email?: string;
+  profilePhotoUrl?: string;
+  customerCategory: CustomerCategory;
   gstin?: string;
   address?: string;
   accountType: 'cash' | 'credit';
@@ -42,6 +53,7 @@ export interface ICustomer extends Document {
   pricingTier?: string;
   contacts: ICustomerContact[];
   activityLog: ICustomerActivity[];
+  preferences?: ICustomerPreferences;
   notes?: string;
   createdBy?: string;
   createdAt?: Date;
@@ -94,12 +106,29 @@ const CustomerActivitySchema = new Schema<ICustomerActivity>(
   { _id: false }
 );
 
+const CustomerPreferencesSchema = new Schema<ICustomerPreferences>(
+  {
+    preferredSport: { type: String, trim: true, default: '' },
+    preferredFacilityId: { type: String, trim: true, default: '' },
+    preferredTimeSlot: { type: String, trim: true, default: '' },
+    preferredShopItems: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
 const CustomerSchema = new Schema<ICustomer>(
   {
     customerCode: { type: String, required: true, unique: true, uppercase: true, trim: true, index: true },
     name: { type: String, required: true, trim: true, index: true },
     phone: { type: String, trim: true, index: true },
     email: { type: String, trim: true, lowercase: true, index: true },
+    profilePhotoUrl: { type: String, trim: true, default: '' },
+    customerCategory: {
+      type: String,
+      enum: ['individual', 'group_team', 'corporate', 'regular_member', 'walk_in'],
+      default: 'individual',
+      index: true,
+    },
     gstin: { type: String, trim: true, uppercase: true },
     address: { type: String, trim: true },
     accountType: {
@@ -117,6 +146,7 @@ const CustomerSchema = new Schema<ICustomer>(
     pricingTier: { type: String, trim: true, default: '' },
     contacts: { type: [CustomerContactSchema], default: [] },
     activityLog: { type: [CustomerActivitySchema], default: [] },
+    preferences: { type: CustomerPreferencesSchema, default: () => ({}) },
     notes: { type: String, trim: true },
     createdBy: { type: String, index: true },
   },

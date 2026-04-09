@@ -8,7 +8,10 @@ import { HomeDashboard as ModernHomeDashboard } from './components/HomeDashboard
 import { Inventory } from './Inventory';
 import { AddProduct } from './pages/AddProduct';
 import { Accounting } from './pages/Accounting';
+import { AdminReports } from './pages/AdminReports';
 import { Attendance } from './pages/Attendance';
+import { AttendanceReports } from './pages/AttendanceReports';
+import { EmployeeAttendance } from './pages/EmployeeAttendance';
 import { Categories } from './pages/Categories';
 import { Customers } from './pages/Customers';
 import { EditProduct } from './pages/EditProduct';
@@ -38,7 +41,17 @@ import { UserManagement } from './pages/UserManagement';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { initializeAutoTooltips } from './utils/autoTooltips';
 import { getGeneralSettings, loadGeneralSettingsFromServer, resolveGeneralSettingsAssetUrl } from './utils/generalSettings';
-import { applyAndPersistUiPreferencesLocal, loadUiPreferencesFromServer } from './utils/uiPreferences';
+import {
+  FONT_SCALE_STEP,
+  ResolvedUiPreferences,
+  UI_PREFERENCES_UPDATED_EVENT,
+  applyAndPersistUiPreferencesLocal,
+  clampFontScale,
+  loadUiPreferencesFromServer,
+  normalizeUiPreferences,
+  readUiPreferencesFromStorage,
+  saveUiPreferencesToServer,
+} from './utils/uiPreferences';
 
 const SAVED_CREDENTIALS_KEY = 'sarva_saved_credentials';
 const CREDENTIALS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -54,6 +67,9 @@ type CompanyCreationConfig = {
   enabled: boolean;
   requiresAccessKey: boolean;
 };
+
+const headerIconButtonClass =
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white';
 
 const readSavedCredentials = (): SavedCredentials | null => {
   try {
@@ -98,6 +114,7 @@ const orderedPages: PageKey[] = [
   'sales-dashboard',
   'inventory',
   'sales',
+  'customers',
   'orders',
   'products',
   'returns',
@@ -107,11 +124,14 @@ const orderedPages: PageKey[] = [
   'reports',
   'employees',
   'attendance',
+  'employee-attendance',
   'shifts',
   'payroll',
   'facilities',
+  'event-quotations',
   'memberships',
   'user-management',
+  'admin-reports',
 ];
 
 const withDefaultPermissions = (value?: PermissionMatrix): PermissionMatrix => ({
@@ -275,9 +295,9 @@ const DashboardHome: React.FC<{
       accent: 'from-emerald-500/25 to-emerald-400/10',
     },
     {
-      key: 'sales',
-      title: 'Customers',
-      desc: 'Manage reusable customer profiles by mobile number.',
+      key: 'customers',
+      title: 'Customer CRM',
+      desc: 'Manage customer profiles, enquiries, follow-up, and history in one desk.',
       path: '/customers',
       icon: '🧑',
       category: 'Sales',
@@ -285,7 +305,7 @@ const DashboardHome: React.FC<{
     },
     {
       key: 'products',
-      title: 'Products',
+      title: 'Product Center',
       desc: 'Open the product center for entry, catalog review, and stock alerts.',
       path: '/products',
       icon: '📦',
@@ -347,6 +367,24 @@ const DashboardHome: React.FC<{
       accent: 'from-amber-500/25 to-amber-400/10',
     },
     {
+      key: 'attendance',
+      title: 'Attendance Reports',
+      desc: 'Review employee-wise attendance detail and print monthly sheets.',
+      path: '/attendance/reports',
+      icon: '📋',
+      category: 'People',
+      accent: 'from-amber-500/25 to-amber-400/10',
+    },
+    {
+      key: 'employee-attendance',
+      title: 'Employee Check In',
+      desc: 'Let employees mark their own check-in and check-out using current time and GPS.',
+      path: '/attendance/self',
+      icon: '📍',
+      category: 'People',
+      accent: 'from-amber-500/25 to-amber-400/10',
+    },
+    {
       key: 'shifts',
       title: 'Shifts',
       desc: 'Plan shift schedule and weekly offs.',
@@ -379,6 +417,15 @@ const DashboardHome: React.FC<{
       desc: 'Corporate and organizer events with multiple facilities.',
       path: '/events',
       icon: '📅',
+      category: 'Operations',
+      accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
+    },
+    {
+      key: 'event-quotations',
+      title: 'Event Quotations',
+      desc: 'Prepare and revise event quotations before confirming the booking.',
+      path: '/events/quotations',
+      icon: '📑',
       category: 'Operations',
       accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
     },
@@ -454,9 +501,23 @@ const DashboardHome: React.FC<{
       category: 'Admin',
       accent: 'from-rose-500/25 to-rose-400/10',
     },
+    {
+      key: 'admin-reports',
+      title: 'Admin Reports',
+      desc: 'Review audit logs, login history, and system activity.',
+      path: '/admin/reports',
+      icon: '🗂️',
+      category: 'Admin',
+      accent: 'from-rose-500/25 to-rose-400/10',
+    },
   ];
 
-  const visibleModules = modules.filter((module) => permissions[module.key] || (module.key === 'products' && permissions.sales));
+  const visibleModules = modules.filter((module) => {
+    if (module.key === 'products') return permissions.products || permissions.sales;
+    if (module.key === 'customers') return permissions.customers || permissions.sales;
+    if (module.key === 'event-quotations') return permissions['event-quotations'] || permissions.facilities;
+    return permissions[module.key];
+  });
   const quickActions = visibleModules.slice(0, 5);
   const allowedPagesCount = Object.values(permissions).filter(Boolean).length;
 
@@ -907,6 +968,10 @@ function App() {
   const [user, setUser] = useState<Partial<IUser> | null>(null);
   const [token, setToken] = useState('');
   const [todaySales, setTodaySales] = useState<number | null>(null);
+  const [headerBrandName, setHeaderBrandName] = useState('Sarva');
+  const [headerBrandLogo, setHeaderBrandLogo] = useState('');
+  const [headerUiPreferences, setHeaderUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
+  const headerUiPreferencesRef = useRef<ResolvedUiPreferences>(headerUiPreferences);
   const loginFormRef = useRef<HTMLFormElement | null>(null);
 
   const permissions = useMemo(
@@ -914,6 +979,9 @@ function App() {
     [user]
   );
   const hasProductWorkspaceAccess = permissions.products || permissions.sales;
+  const hasCustomerCrmAccess = permissions.customers || permissions.sales;
+  const hasEventQuotationAccess = permissions['event-quotations'] || permissions.facilities;
+  const hasEventWorkspaceAccess = permissions.facilities || permissions['event-quotations'];
 
   const fallbackPath = useMemo(() => {
     const firstAllowed = orderedPages.find((page) => permissions[page]);
@@ -944,6 +1012,25 @@ function App() {
       syncGeneralSettingsFromServer(activeToken),
       syncUiPreferencesFromServer(),
     ]);
+  };
+
+  const setAndSyncHeaderUiPreferences = (next: ResolvedUiPreferences, persistRemote = true) => {
+    const normalized = applyAndPersistUiPreferencesLocal(next);
+    setHeaderUiPreferences(normalized);
+    headerUiPreferencesRef.current = normalized;
+
+    if (!persistRemote) return;
+
+    void saveUiPreferencesToServer(normalized)
+      .then((saved) => {
+        if (!saved) return;
+        const synced = applyAndPersistUiPreferencesLocal(saved);
+        setHeaderUiPreferences(synced);
+        headerUiPreferencesRef.current = synced;
+      })
+      .catch(() => {
+        // ignore remote save failures
+      });
   };
 
   const clearPendingLoginOtp = () => {
@@ -1055,6 +1142,64 @@ function App() {
   useEffect(() => {
     const cleanup = initializeAutoTooltips();
     return () => cleanup();
+  }, []);
+
+  useEffect(() => {
+    headerUiPreferencesRef.current = headerUiPreferences;
+  }, [headerUiPreferences]);
+
+  useEffect(() => {
+    const refreshHeaderBrand = () => {
+      const settings = getGeneralSettings();
+      const name = settings.business.tradeName || settings.business.legalName || user?.businessName || 'Sarva';
+      const logo = resolveGeneralSettingsAssetUrl(
+        settings.business.reportLogoDataUrl || settings.business.invoiceLogoDataUrl || ''
+      );
+      setHeaderBrandName(name);
+      setHeaderBrandLogo(logo);
+    };
+
+    refreshHeaderBrand();
+    window.addEventListener('storage', refreshHeaderBrand);
+    window.addEventListener('sarva-settings-updated', refreshHeaderBrand as EventListener);
+    return () => {
+      window.removeEventListener('storage', refreshHeaderBrand);
+      window.removeEventListener('sarva-settings-updated', refreshHeaderBrand as EventListener);
+    };
+  }, [user?.businessName]);
+
+  useEffect(() => {
+    const localPreferences = readUiPreferencesFromStorage();
+    const initialPreferences = user?.uiPreferences
+      ? normalizeUiPreferences(user.uiPreferences)
+      : localPreferences;
+    setAndSyncHeaderUiPreferences(initialPreferences, false);
+
+    const loadServerPreferences = async () => {
+      try {
+        const serverPreferences = await loadUiPreferencesFromServer();
+        if (!serverPreferences) return;
+        setAndSyncHeaderUiPreferences(serverPreferences, false);
+      } catch {
+        // ignore preference fetch failures
+      }
+    };
+    void loadServerPreferences();
+  }, [user?._id]);
+
+  useEffect(() => {
+    const onPreferencesUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<ResolvedUiPreferences>).detail;
+      if (!detail) return;
+      const normalized = normalizeUiPreferences(detail);
+      setHeaderUiPreferences(normalized);
+      headerUiPreferencesRef.current = normalized;
+    };
+
+    window.addEventListener(UI_PREFERENCES_UPDATED_EVENT, onPreferencesUpdate as EventListener);
+    return () => {
+      window.removeEventListener(UI_PREFERENCES_UPDATED_EVENT, onPreferencesUpdate as EventListener);
+    };
   }, []);
 
   useEffect(() => {
@@ -1318,6 +1463,20 @@ function App() {
     clearPendingLoginOtp();
   };
 
+  const updateThemeMode = (themeMode: 'dark' | 'light') => {
+    setAndSyncHeaderUiPreferences({
+      ...headerUiPreferencesRef.current,
+      themeMode,
+    });
+  };
+
+  const bumpFontScale = (direction: 1 | -1) => {
+    setAndSyncHeaderUiPreferences({
+      ...headerUiPreferencesRef.current,
+      fontScale: clampFontScale(headerUiPreferencesRef.current.fontScale + direction * FONT_SCALE_STEP),
+    });
+  };
+
   const publicLoginForm = (
     <section className="rounded-[2rem] border border-white/10 bg-slate-900/80 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)] backdrop-blur-xl sm:p-8">
       <div className="flex items-start justify-between gap-4">
@@ -1466,76 +1625,198 @@ function App() {
   return (
     <BrowserRouter>
       {isLoggedIn && user ? (
-        <div className="sarva-shell min-h-screen bg-transparent">
-          <Navbar
-            onLogout={handleLogout}
-            user={user}
-            permissions={permissions}
-            showCompanyCreationMenu={Boolean(companyCreationConfig.enabled && permissions.settings)}
-          />
-
-          <Routes>
-            <Route
-              path="/"
-              element={
-                permissions.dashboard ? (
-                  <ModernHomeDashboard user={user} todaySales={todaySales} permissions={permissions} />
+        <div className="sarva-shell min-h-screen bg-transparent flex flex-col">
+          <header className="hidden lg:flex items-center justify-between gap-4 border-b border-white/8 bg-slate-950/95 px-5 py-3 shadow-[0_18px_42px_rgba(2,6,23,0.18)] backdrop-blur-xl">
+            <div className="min-w-0 flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                {headerBrandLogo ? (
+                  <img src={headerBrandLogo} alt="Brand logo" className="h-7 w-7 object-contain" />
                 ) : (
-                  <Navigate to={fallbackPath} replace />
-                )
-              }
+                  <span className="text-sm font-bold text-white">{String(headerBrandName || 'S').charAt(0).toUpperCase()}</span>
+                )}
+              </div>
+              <p className="truncate text-sm font-semibold text-white">{headerBrandName}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                title="Decrease text size so more content fits on the screen"
+                aria-label="Decrease text size"
+                onClick={() => bumpFontScale(-1)}
+                className={headerIconButtonClass}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12.5 15h3" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Increase text size for easier reading"
+                aria-label="Increase text size"
+                onClick={() => bumpFontScale(1)}
+                className={headerIconButtonClass}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12.5 15h3M14 13.5v3" strokeLinecap="round" />
+                </svg>
+              </button>
+              <a
+                href="/user-manual"
+                title="Open the user manual and screen-by-screen help"
+                aria-label="Open user manual"
+                className={headerIconButtonClass}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <circle cx="10" cy="10" r="7" />
+                  <path d="M8.85 8.05a1.5 1.5 0 0 1 2.52 1.34c-.17.74-.92 1.1-1.37 1.6-.28.31-.41.63-.41 1.26" strokeLinecap="round" />
+                  <circle cx="10" cy="14.3" r=".7" fill="currentColor" stroke="none" />
+                </svg>
+              </a>
+              <button
+                type="button"
+                title="Switch to dark mode"
+                aria-label="Switch to dark mode"
+                onClick={() => updateThemeMode('dark')}
+                className={`${headerIconButtonClass} ${headerUiPreferences.themeMode === 'dark' ? 'border-sky-400/30 bg-sky-500/15 text-white' : ''}`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M13.8 2.8a6.6 6.6 0 1 0 3.4 11.9A7.4 7.4 0 0 1 13.8 2.8Z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Switch to light mode"
+                aria-label="Switch to light mode"
+                onClick={() => updateThemeMode('light')}
+                className={`${headerIconButtonClass} ${headerUiPreferences.themeMode === 'light' ? 'border-amber-400/30 bg-amber-500/15 text-amber-100' : ''}`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <circle cx="10" cy="10" r="3.2" />
+                  <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Logout from the application"
+                aria-label="Logout"
+                onClick={handleLogout}
+                className={`${headerIconButtonClass} border-rose-400/20 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M7.5 3.5h-2A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5h2" strokeLinecap="round" />
+                  <path d="M11.5 6.5 15 10l-3.5 3.5M8 10h7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <div className="min-h-0 flex-1 lg:flex">
+            <Navbar
+              onLogout={handleLogout}
+              user={user}
+              permissions={permissions}
+              showCompanyCreationMenu={Boolean(companyCreationConfig.enabled && permissions.settings)}
             />
 
-            <Route path="/sales-dashboard" element={permissions['sales-dashboard'] ? <SalesDashboard permissions={permissions} /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/inventory" element={permissions.inventory ? <Inventory /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/inventory/procurement" element={permissions.inventory ? <Procurement /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/sales" element={permissions.sales ? <Sales /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/sales/quotes" element={permissions.sales ? <Quotations /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/customers" element={permissions.sales ? <Customers /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/orders" element={permissions.orders ? <Orders /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products" element={hasProductWorkspaceAccess ? <ProductCenter /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/catalog" element={hasProductWorkspaceAccess ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/alerts" element={hasProductWorkspaceAccess ? <ProductAlerts /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/add" element={<Navigate to="/products/entry" replace />} />
-            <Route path="/products/entry" element={hasProductWorkspaceAccess ? <AddProduct /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/products/edit/:id" element={hasProductWorkspaceAccess ? <EditProduct /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/returns" element={permissions.returns ? <Returns /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/categories" element={permissions.categories ? <Categories /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/settings" element={permissions.settings ? <Settings /> : <Navigate to={fallbackPath} replace />} />
-            <Route
-              path="/admin/company-create"
-              element={
-                permissions.settings && companyCreationConfig.enabled ? (
-                  <CompanyCreateAdminPage token={token} requiresAccessKey={companyCreationConfig.requiresAccessKey} />
-                ) : (
-                  <Navigate to={fallbackPath} replace />
-                )
-              }
-            />
-            <Route path="/accounting" element={permissions.accounting ? <Accounting /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/accounting/settlements" element={permissions.accounting ? <SettlementCenter /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/reports" element={permissions.reports ? <Reports /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/help" element={<Navigate to="/user-manual" replace />} />
-            <Route path="/user-manual" element={<HelpCenter />} />
-            <Route path="/employees" element={permissions.employees ? <Employees /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/attendance" element={permissions.attendance ? <Attendance currentUserRole={user.role as string | undefined} /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/shifts" element={permissions.shifts ? <Shifts /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/payroll" element={permissions.payroll ? <Payroll /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/events" element={permissions.facilities ? <EventManagement /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/facilities" element={permissions.facilities ? <Facilities /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/facilities/setup" element={permissions.facilities ? <FacilitySetup /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/memberships" element={permissions.memberships ? <Memberships /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/membership-plans/create" element={permissions.memberships ? <Memberships mode="plan" /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/membership-subscriptions/create" element={permissions.memberships ? <Memberships mode="member-create" /> : <Navigate to={fallbackPath} replace />} />
-            <Route path="/membership-reports" element={permissions.memberships ? <MembershipReports /> : <Navigate to={fallbackPath} replace />} />
-            <Route
-              path="/user-management"
-              element={permissions['user-management'] ? <UserManagement onReloadMe={reloadMe} /> : <Navigate to={fallbackPath} replace />}
-            />
-            <Route path="/forbidden" element={<AccessDenied />} />
-            <Route path="*" element={<Navigate to={fallbackPath} replace />} />
-          </Routes>
-          <GlobalShortcutsPanel />
+            <div className="min-w-0 flex-1">
+              <Routes>
+              <Route
+                path="/"
+                element={
+                  permissions.dashboard ? (
+                    <ModernHomeDashboard user={user} todaySales={todaySales} permissions={permissions} />
+                  ) : (
+                    <Navigate to={fallbackPath} replace />
+                  )
+                }
+              />
+
+              <Route path="/sales-dashboard" element={permissions['sales-dashboard'] ? <SalesDashboard permissions={permissions} /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/inventory" element={permissions.inventory ? <Inventory /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/inventory/procurement" element={permissions.inventory ? <Procurement /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/sales" element={permissions.sales ? <Sales /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/sales/quotes" element={permissions.sales ? <Quotations /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/customers" element={hasCustomerCrmAccess ? <Customers /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/orders" element={permissions.orders ? <Orders /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products" element={hasProductWorkspaceAccess ? <ProductCenter /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products/catalog" element={hasProductWorkspaceAccess ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products/alerts" element={hasProductWorkspaceAccess ? <ProductAlerts /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products/add" element={<Navigate to="/products/entry" replace />} />
+              <Route path="/products/entry" element={hasProductWorkspaceAccess ? <AddProduct /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products/edit/:id" element={hasProductWorkspaceAccess ? <EditProduct /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/returns" element={permissions.returns ? <Returns /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/categories" element={permissions.categories ? <Categories /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/settings" element={permissions.settings ? <Settings /> : <Navigate to={fallbackPath} replace />} />
+              <Route
+                path="/admin/company-create"
+                element={
+                  permissions.settings && companyCreationConfig.enabled ? (
+                    <CompanyCreateAdminPage token={token} requiresAccessKey={companyCreationConfig.requiresAccessKey} />
+                  ) : (
+                    <Navigate to={fallbackPath} replace />
+                  )
+                }
+              />
+              <Route path="/accounting" element={permissions.accounting ? <Accounting /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/accounting/settlements" element={permissions.accounting ? <SettlementCenter /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/reports" element={permissions.reports ? <Reports /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/help" element={<Navigate to="/user-manual" replace />} />
+              <Route path="/user-manual" element={<HelpCenter />} />
+              <Route path="/employees" element={permissions.employees ? <Employees /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/attendance/reports" element={permissions.attendance ? <AttendanceReports /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/attendance" element={permissions.attendance ? <Attendance currentUserRole={user.role as string | undefined} /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/attendance/self" element={permissions['employee-attendance'] ? <EmployeeAttendance /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/shifts" element={permissions.shifts ? <Shifts /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/payroll" element={permissions.payroll ? <Payroll /> : <Navigate to={fallbackPath} replace />} />
+              <Route
+                path="/events"
+                element={
+                  hasEventWorkspaceAccess ? (
+                    <EventManagement
+                      initialView="bookings"
+                      canManageBookings={permissions.facilities}
+                      canManageQuotations={hasEventQuotationAccess}
+                    />
+                  ) : (
+                    <Navigate to={fallbackPath} replace />
+                  )
+                }
+              />
+              <Route
+                path="/events/quotations"
+                element={
+                  hasEventWorkspaceAccess ? (
+                    <EventManagement
+                      initialView="quotations"
+                      canManageBookings={permissions.facilities}
+                      canManageQuotations={hasEventQuotationAccess}
+                    />
+                  ) : (
+                    <Navigate to={fallbackPath} replace />
+                  )
+                }
+              />
+              <Route path="/facilities" element={permissions.facilities ? <Facilities /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/facilities/setup" element={permissions.facilities ? <FacilitySetup /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/memberships" element={permissions.memberships ? <Memberships /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/membership-plans/create" element={permissions.memberships ? <Memberships mode="plan" /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/membership-subscriptions/create" element={permissions.memberships ? <Memberships mode="member-create" /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/membership-reports" element={permissions.memberships ? <MembershipReports /> : <Navigate to={fallbackPath} replace />} />
+              <Route
+                path="/user-management"
+                element={permissions['user-management'] ? <UserManagement onReloadMe={reloadMe} /> : <Navigate to={fallbackPath} replace />}
+              />
+              <Route path="/admin/reports" element={permissions['admin-reports'] ? <AdminReports /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/forbidden" element={<AccessDenied />} />
+              <Route path="*" element={<Navigate to={fallbackPath} replace />} />
+              </Routes>
+              <GlobalShortcutsPanel />
+            </div>
+          </div>
         </div>
       ) : (
         <Routes>

@@ -69,6 +69,11 @@ export interface SecuritySettings {
   emailOtpEnabled: boolean;
   otpExpiryMinutes: number;
   otpCopyRecipients: string;
+  employeeAttendanceGeofenceEnabled: boolean;
+  attendanceLocationName: string;
+  attendanceLatitude: number;
+  attendanceLongitude: number;
+  attendanceRadiusMeters: number;
 }
 
 export interface GeneralSettings {
@@ -139,6 +144,11 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
     emailOtpEnabled: false,
     otpExpiryMinutes: 10,
     otpCopyRecipients: '',
+    employeeAttendanceGeofenceEnabled: false,
+    attendanceLocationName: 'Sports Complex',
+    attendanceLatitude: 0,
+    attendanceLongitude: 0,
+    attendanceRadiusMeters: 150,
   },
 };
 

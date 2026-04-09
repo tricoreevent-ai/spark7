@@ -17,6 +17,12 @@ interface AuditPayload {
   after?: Record<string, any>;
 }
 
+const PRIVATE_IPV4_BLOCKS = [
+  /^10\./,
+  /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[0-1])\./,
+] as const;
+
 const normalizeForKey = (value: string): string =>
   value
     .trim()
@@ -24,6 +30,35 @@ const normalizeForKey = (value: string): string =>
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 64);
+
+export const normalizeIpAddress = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const firstHop = raw
+    .split(',')
+    .map((part) => part.trim())
+    .find(Boolean) || '';
+
+  if (!firstHop) return '';
+
+  const cleaned = firstHop.replace(/^\[|\]$/g, '');
+  if (cleaned === '::1') return '127.0.0.1';
+  if (cleaned.startsWith('::ffff:')) return cleaned.slice(7);
+  return cleaned;
+};
+
+export const describeIpAddress = (value: unknown): string => {
+  const normalized = normalizeIpAddress(value);
+  if (!normalized) return 'Not available';
+  if (normalized === '127.0.0.1' || normalized === 'localhost') {
+    return 'Local device (127.0.0.1)';
+  }
+  if (PRIVATE_IPV4_BLOCKS.some((pattern) => pattern.test(normalized))) {
+    return `Private network (${normalized})`;
+  }
+  return normalized;
+};
 
 export const deriveStoreScope = (
   user?: { _id?: string | { toString: () => string }; businessName?: string; gstin?: string } | null,
@@ -81,8 +116,8 @@ export const writeAuditLog = async (payload: AuditPayload): Promise<void> => {
       scoped = { ...scoped, ...deriveStoreScope(null, payload.userId) };
     }
 
-    const metadataIp = String(payload?.metadata?.ip || payload?.metadata?.ipAddress || '').trim();
-    const ipAddress = String(payload.ipAddress || '').trim() || metadataIp || undefined;
+    const metadataIp = normalizeIpAddress(payload?.metadata?.ip || payload?.metadata?.ipAddress);
+    const ipAddress = normalizeIpAddress(payload.ipAddress) || metadataIp || undefined;
 
     await AuditLog.create({
       ...payload,

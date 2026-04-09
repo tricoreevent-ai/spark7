@@ -1,0 +1,415 @@
+# SPARK AI - Git Quick Reference
+
+## Repository
+**URL:** https://github.com/tricoreevent-ai/spark7
+**Default Branch:** main
+
+---
+
+## 🚀 Quick Start
+
+### Use the Scripts (RECOMMENDED)
+
+**Option 1 - Standard Commit:**
+```
+commit-and-push.bat
+```
+
+**Option 2 - Smart Commit:**
+```
+commit-advanced.bat
+```
+
+**Option 3 - Quick Single-line:**
+```
+git-quick-commit.bat "Your message here"
+```
+
+**Option 4 - PowerShell (Advanced):**
+```powershell
+.\commit.ps1 -Message "Your message"
+.\commit.ps1 -Type feat -Description "New feature"
+```
+
+---
+
+## 📝 Manual Git Commands
+
+### Basic Operations
+```bash
+# Show status
+git status
+
+# View changes
+git diff
+git diff --cached
+
+# Stage files
+git add .
+git add file.txt
+git add src/
+
+# Commit
+git commit -m "Your message"
+
+# Push
+git push origin main
+
+# Pull
+git pull origin main
+```
+
+### Branching
+```bash
+# Create branch
+git checkout -b feature/name
+
+# Switch branch
+git checkout main
+git switch feature/name
+
+# List branches
+git branch
+git branch -r
+
+# Delete branch
+git branch -d feature/name
+```
+
+### History
+```bash
+# View log
+git log
+git log --oneline
+git log --oneline -10
+git log --graph --oneline --all
+
+# View specific commit
+git show commit-hash
+```
+
+### Undoing Changes
+```bash
+# Discard local changes
+git checkout -- file.txt
+
+# Unstage files
+git reset HEAD file.txt
+
+# Amend last commit
+git commit --amend -m "New message"
+
+# Revert commit
+git revert commit-hash
+```
+
+---
+
+## 📋 Commit Types
+
+```
+feat      - New feature
+fix       - Bug fix
+update    - General updates
+refactor  - Code refactoring
+docs      - Documentation
+ui        - UI/Design changes
+test      - Test changes
+ci        - CI/CD changes
+chore     - Maintenance
+perf      - Performance improvements
+```
+
+---
+
+## 💾 Workflow Examples
+
+### Daily Development
+```bash
+# Morning
+git pull origin main
+
+# Work on features
+# [edit files]
+
+# Evening
+commit-and-push.bat
+```
+
+### Feature Branch
+```bash
+# Create feature branch
+git checkout -b feature/user-auth
+
+# Work on feature
+# [edit files]
+
+# Commit with type
+commit-advanced.bat
+# Select: 1 (feat)
+# Input: Implement user authentication
+```
+
+### Bug Fix
+```bash
+git checkout main
+git pull origin main
+git checkout -b fix/login-issue
+
+# Fix bug
+# [edit files]
+
+git-quick-commit.bat "fix: Resolve login timeout issue"
+```
+
+### Quick Changes
+```bash
+# Small change
+git-quick-commit.bat "Update: Fix typo in README"
+```
+
+---
+
+## 🔧 Setup (One-time)
+
+### Configure Git
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your@email.com"
+```
+
+### Set Remote
+```bash
+git remote set-url origin https://github.com/tricoreevent-ai/spark7
+# or
+git remote add origin https://github.com/tricoreevent-ai/spark7
+```
+
+### GitHub Authentication
+```bash
+# Option 1 - SSH
+ssh-keygen -t ed25519 -C "your@email.com"
+# Add public key to GitHub Settings > SSH
+
+# Option 2 - Personal Access Token
+# Use as password when pushing
+```
+
+### Check Setup
+```bash
+git-setup.bat
+```
+
+---
+
+## ⚠️ Common Issues
+
+### Authentication Failed
+```bash
+# Update credentials in Windows Credential Manager
+# Or regenerate GitHub token
+```
+
+### Changes Not Appearing
+```bash
+git status                    # Check status
+git add -A                    # Stage all
+git commit -m "message"       # Commit
+git push origin main          # Push
+```
+
+### Wrong Commit Info
+```bash
+git config user.name          # Check name
+git config user.email         # Check email
+git config --global user.name "name"
+git config --global user.email "email"
+```
+
+### Can't Push
+```bash
+git pull origin main          # Pull first
+git push origin main          # Try push again
+```
+
+---
+
+## 🎯 File Structure
+
+```
+c:\Works\SPARK AI\
+├── commit-and-push.bat        ← Standard commit
+├── commit-advanced.bat        ← Smart commit
+├── git-quick-commit.bat       ← Quick commit
+├── git-setup.bat              ← Setup & diagnosis
+├── commit.ps1                 ← PowerShell version
+├── GIT_COMMIT_GUIDE.md        ← Full guide
+├── GIT_QUICK_REFERENCE.txt    ← This file
+└── src/
+    ├── server/
+    ├── client/
+    ├── desktop/
+    └── shared/
+```
+
+---
+
+## 📊 Typical Commit Sequence
+
+### Per Feature
+```
+1. Create branch
+   git checkout -b feature/xyz
+
+2. Make changes
+   [edit files]
+
+3. Commit regularly
+   commit-advanced.bat (multiple times)
+
+4. Push changes
+   git push origin feature/xyz
+
+5. Create Pull Request on GitHub
+```
+
+### Per Session
+```
+1. Start
+   git pull origin main
+
+2. Work
+   [edit multiple files]
+
+3. Commit batches
+   git add file1 file2
+   git commit -m "feat: Group related changes"
+   
+4. Repeat until done
+   [edit more files]
+   commit-and-push.bat
+
+5. Push all
+   git push origin main
+```
+
+---
+
+## 🎓 Learning Resources
+
+- **Git Docs:** https://git-scm.com/doc
+- **GitHub Help:** https://help.github.com
+- **Interactive Learning:** https://learngitbranching.js.org
+
+---
+
+## 📞 Helpful Commands
+
+### Information
+```bash
+git --version                 # Check git version
+git remote -v                 # Show remotes
+git branch -a                 # Show all branches
+git config --list            # Show configuration
+```
+
+### Cleanup
+```bash
+git gc                        # Cleanup database
+git clean -fd                 # Remove untracked files
+```
+
+### Inspection
+```bash
+git log --author="name"       # Commits by author
+git log --since="2 weeks ago" # Recent commits
+git diff main feature-branch  # Compare branches
+```
+
+---
+
+## 🚨 Emergency Commands
+
+### Undo last commit (not pushed)
+```bash
+git reset --soft HEAD~1
+```
+
+### Discard all changes
+```bash
+git checkout -- .
+```
+
+### View lost commits
+```bash
+git reflog
+```
+
+### Cancel ongoing merge
+```bash
+git merge --abort
+```
+
+---
+
+## ✅ Pre-commit Checklist
+
+- [ ] Git is installed and configured
+- [ ] You're in the correct directory
+- [ ] All files are saved
+- [ ] No syntax errors
+- [ ] Tests pass (if applicable)
+- [ ] `.gitignore` excludes sensitive files
+- [ ] Commit message is clear and descriptive
+- [ ] Remote is set to correct repository
+
+---
+
+## 📌 Pro Tips
+
+1. **Commit often** - Multiple small commits are better than one large commit
+2. **Clear messages** - Write descriptive commit messages
+3. **Use types** - Use feat/fix/update for better organization
+4. **Pull before push** - Always sync before pushing
+5. **Review changes** - Check what you're committing with `git diff`
+6. **Backup locally** - Keep local commits even if push fails
+7. **Branch for features** - Create branches for new features
+8. **Keep history clean** - Squash commits before merging if needed
+
+---
+
+## 🎯 Command Cheat Sheet
+
+| Task | Command |
+|------|---------|
+| Check status | `git status` |
+| Stage files | `git add .` |
+| Commit | `commit-and-push.bat` |
+| Push | `git push origin main` |
+| Pull | `git pull origin main` |
+| View log | `git log --oneline -10` |
+| Create branch | `git checkout -b name` |
+| Switch branch | `git checkout main` |
+| Delete branch | `git branch -d name` |
+| View changes | `git diff` |
+| Undo changes | `git checkout -- .` |
+| View remotes | `git remote -v` |
+| Update remote | `git remote set-url origin URL` |
+
+---
+
+## 📞 Support
+
+**Issues?**
+1. Run `git-setup.bat` for diagnostics
+2. Check `GIT_COMMIT_GUIDE.md` for detailed help
+3. Verify GitHub credentials
+4. Check internet connection
+5. Search GitHub documentation
+
+---
+
+**Repository:** https://github.com/tricoreevent-ai/spark7
+**Last Updated:** 2026-04-09
+
+Happy committing! 🚀

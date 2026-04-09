@@ -2208,7 +2208,6 @@ export const Accounting: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-6">
         <aside className="rounded-xl border border-white/10 bg-white/5 p-3 lg:sticky lg:top-20 lg:h-fit">
-          <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-400">Menu Navigation</p>
           <CardTabs
             frame={false}
             ariaLabel="Accounting menu navigation"

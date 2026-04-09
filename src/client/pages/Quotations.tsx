@@ -3,6 +3,7 @@ import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { consumeCrmConversionDraft } from '../utils/crmDrafts';
 import { showConfirmDialog } from '../utils/appDialogs';
 
 interface QuoteItemFormRow {
@@ -107,6 +108,20 @@ export const Quotations: React.FC = () => {
   const headers = useMemo(() => {
     const token = localStorage.getItem('token') || '';
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }, []);
+
+  useEffect(() => {
+    const draft = consumeCrmConversionDraft('sales-quotation');
+    if (!draft) return;
+    setForm((prev) => ({
+      ...prev,
+      customerId: draft.customerId || '',
+      customerName: draft.customerName || prev.customerName,
+      customerPhone: draft.customerPhone || prev.customerPhone,
+      customerEmail: draft.customerEmail || prev.customerEmail,
+      notes: [prev.notes, draft.notes].filter(Boolean).join('\n').trim(),
+    }));
+    setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into sales quotation.`);
   }, []);
 
   const loadQuotes = useCallback(async () => {

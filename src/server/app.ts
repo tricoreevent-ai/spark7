@@ -19,15 +19,18 @@ import employeeRoutes from './routes/employees.js';
 import attendanceRoutes from './routes/attendance.js';
 import facilityRoutes from './routes/facilities.js';
 import eventRoutes from './routes/events.js';
+import eventQuotationRoutes from './routes/eventQuotations.js';
 import shiftRoutes from './routes/shifts.js';
 import payrollRoutes from './routes/payroll.js';
 import membershipRoutes from './routes/memberships.js';
 import userRoutes from './routes/users.js';
 import rbacRoutes from './routes/rbac.js';
 import customerRoutes from './routes/customers.js';
+import customerCrmRoutes from './routes/customerCrm.js';
 import creditNoteRoutes from './routes/creditNotes.js';
 import quoteRoutes from './routes/quotes.js';
 import reportsRoutes from './routes/reports.js';
+import adminReportsRoutes from './routes/adminReports.js';
 import settlementRoutes from './routes/settlements.js';
 import settingsRoutes from './routes/settings.js';
 import generalSettingsRoutes from './routes/generalSettings.js';
@@ -82,6 +85,7 @@ if (!loadedEnvPath) {
 }
 
 const app: Express = express();
+app.set('trust proxy', true);
 const PORT: number = Number(process.env.PORT) || 3000;
 const DB_RETRY_MS: number = Number(process.env.DB_RETRY_MS) || 15000;
 const clientDistPath = path.join(distRoot, 'client');
@@ -148,6 +152,24 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'Server is running', timestamp: new Date() });
 });
 
+// Compatibility endpoint for older cached clients that still request legacy security alerts.
+app.get('/api/security-alerts', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    message: 'Security alerts are not used in this version.',
+    data: {
+      alerts: [],
+      items: [],
+      total: 0,
+      openCount: 0,
+    },
+    alerts: [],
+    items: [],
+    total: 0,
+    openCount: 0,
+  });
+});
+
 // Database connection
 const connectDB = async (): Promise<boolean> => {
   try {
@@ -196,18 +218,21 @@ app.use('/api/returns', authMiddleware, requirePageAccess('returns'), returnsRou
 app.use('/api/categories', authMiddleware, requireAnyPageAccess(['categories', 'products', 'sales']), categoryRoutes);
 app.use('/api/accounting', authMiddleware, requirePageAccess('accounting'), accountingRoutes);
 app.use('/api/employees', authMiddleware, requirePageAccess('employees'), employeeRoutes);
-app.use('/api/attendance', authMiddleware, requirePageAccess('attendance'), attendanceRoutes);
-app.use('/api/facilities', authMiddleware, requirePageAccess('facilities'), facilityRoutes);
+app.use('/api/attendance', authMiddleware, attendanceRoutes);
+app.use('/api/facilities', authMiddleware, requireAnyPageAccess(['facilities', 'event-quotations']), facilityRoutes);
 app.use('/api/events', authMiddleware, requirePageAccess('facilities'), eventRoutes);
+app.use('/api/events/quotations', authMiddleware, requireAnyPageAccess(['event-quotations', 'facilities']), eventQuotationRoutes);
 app.use('/api/shifts', authMiddleware, requirePageAccess('shifts'), shiftRoutes);
 app.use('/api/payroll', authMiddleware, requirePageAccess('payroll'), payrollRoutes);
 app.use('/api/memberships', authMiddleware, requirePageAccess('memberships'), membershipRoutes);
 app.use('/api/users', authMiddleware, requirePageAccess('user-management'), userRoutes);
 app.use('/api/rbac', authMiddleware, requirePageAccess('user-management'), rbacRoutes);
-app.use('/api/customers', authMiddleware, requirePageAccess('sales'), customerRoutes);
+app.use('/api/customers', authMiddleware, requireAnyPageAccess(['customers', 'sales', 'facilities']), customerRoutes);
+app.use('/api/customer-crm', authMiddleware, requireAnyPageAccess(['customers', 'sales']), customerCrmRoutes);
 app.use('/api/quotes', authMiddleware, requirePageAccess('sales'), quoteRoutes);
 app.use('/api/credit-notes', authMiddleware, requirePageAccess('accounting'), creditNoteRoutes);
 app.use('/api/reports', authMiddleware, requirePageAccess('reports'), reportsRoutes);
+app.use('/api/admin-reports', authMiddleware, requirePageAccess('admin-reports'), adminReportsRoutes);
 app.use('/api/settlements', authMiddleware, requirePageAccess('accounting'), settlementRoutes);
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
 app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);

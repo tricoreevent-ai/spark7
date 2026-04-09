@@ -10,6 +10,12 @@ const clampNumber = (value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, parsed));
 };
 
+const normalizeCoordinate = (value: unknown, fallback: number, min: number, max: number): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+};
+
 const normalizeBackgroundImage = (value: any) => ({
   id: String(value?.id || '').trim(),
   url: String(value?.url || '').trim(),
@@ -45,6 +51,11 @@ export const mergeGeneralSettingsWithDefaults = (settings: any) => ({
     emailOtpEnabled: Boolean(settings?.security?.emailOtpEnabled),
     otpExpiryMinutes: clampNumber(settings?.security?.otpExpiryMinutes, 10, 3, 30),
     otpCopyRecipients: String(settings?.security?.otpCopyRecipients || '').trim(),
+    employeeAttendanceGeofenceEnabled: Boolean(settings?.security?.employeeAttendanceGeofenceEnabled),
+    attendanceLocationName: String(settings?.security?.attendanceLocationName || 'Sports Complex').trim() || 'Sports Complex',
+    attendanceLatitude: normalizeCoordinate(settings?.security?.attendanceLatitude, 0, -90, 90),
+    attendanceLongitude: normalizeCoordinate(settings?.security?.attendanceLongitude, 0, -180, 180),
+    attendanceRadiusMeters: clampNumber(settings?.security?.attendanceRadiusMeters, 150, 25, 5000),
   },
 });
 

@@ -207,11 +207,13 @@ const moduleSummaries: ModuleSummary[] = [
     navigation: 'Top menu > People',
     purpose: 'The People module manages employee data and workforce operations.',
     description:
-      'It centralizes employee information, attendance, shifts, and payroll so the organization can manage staff records and workforce operations with better consistency and accuracy.',
-    keyUses: ['Store employee data', 'Track attendance', 'Manage shifts', 'Process payroll'],
+      'It centralizes employee information, employee self attendance, manual attendance review, shifts, and payroll so the organization can manage staff records and workforce operations with better consistency and accuracy.',
+    keyUses: ['Store employee data', 'Track employee self attendance', 'Review manual attendance', 'Manage shifts', 'Process payroll'],
     links: [
       { label: 'Employees', to: '/employees' },
-      { label: 'Attendance', to: '/attendance' },
+      { label: 'Employee Check In', to: '/attendance/self' },
+      { label: 'Attendance Reports', to: '/attendance/reports' },
+      { label: 'Attendance Register', to: '/attendance' },
       { label: 'Payroll', to: '/payroll' },
     ],
   },
@@ -376,18 +378,52 @@ const menuSections: MenuSection[] = [
         ],
       },
       {
-        id: 'attendance',
-        title: 'Attendance',
-        route: '/attendance',
-        navigation: 'Top menu > People > Attendance',
-        purpose: 'Tracks employee presence.',
+        id: 'employee-attendance',
+        title: 'Employee Check In',
+        route: '/attendance/self',
+        navigation: 'Top menu > People > Employee Check In',
+        purpose: 'Lets employees mark attendance themselves from the sports complex.',
         description:
-          'This page records daily attendance for monitoring, operational review, and payroll support. It helps the organization maintain reliable employee presence data.',
-        keyUses: ['Track attendance', 'Review daily presence', 'Support payroll'],
+          'This page is the self attendance screen. Employees use a mobile device, allow GPS, and tap check in or check out. The system saves the current time automatically and can reject the action if the employee is outside the allowed sports complex area.',
+        keyUses: ['Self check-in', 'Self check-out', 'Current-time capture', 'GPS-based attendance control'],
         links: [
-          { label: 'Open Attendance', to: '/attendance' },
+          { label: 'Open Employee Check In', to: '/attendance/self' },
+          { label: 'Open Attendance Reports', to: '/attendance/reports' },
+          { label: 'Open Attendance Register', to: '/attendance' },
+          { label: 'Open Employees', to: '/employees' },
+        ],
+      },
+      {
+        id: 'attendance',
+        title: 'Attendance Register',
+        route: '/attendance',
+        navigation: 'Top menu > People > Attendance Register',
+        purpose: 'Tracks employee presence through supervisor or admin manual entry.',
+        description:
+          'This page records daily attendance for monitoring, operational review, payroll support, and manual correction. It is meant for supervisors or administrators when an entry must be reviewed or updated manually.',
+        keyUses: ['Track attendance', 'Review daily presence', 'Correct attendance', 'Support payroll'],
+        links: [
+          { label: 'Open Attendance Register', to: '/attendance' },
+          { label: 'Open Attendance Reports', to: '/attendance/reports' },
+          { label: 'Open Employee Check In', to: '/attendance/self' },
           { label: 'Open Employees', to: '/employees' },
           { label: 'Open Shifts', to: '/shifts' },
+        ],
+      },
+      {
+        id: 'attendance-reports',
+        title: 'Attendance Reports',
+        route: '/attendance/reports',
+        navigation: 'Top menu > People > Attendance Reports',
+        purpose: 'Reviews attendance in report format.',
+        description:
+          'This page gives two attendance report styles in one place. The employee-wise detail report shows date-wise check-in, check-out, total worked time, overtime, and map links for the attendance entry location. The monthly attendance sheet shows one full month in one grid with date columns and tick marks for presence, making it easy to print or export.',
+        keyUses: ['Review date-wise attendance detail', 'Check total worked time', 'Open GPS map links', 'Print monthly attendance sheet', 'Export attendance reports'],
+        links: [
+          { label: 'Open Attendance Reports', to: '/attendance/reports' },
+          { label: 'Open Attendance Register', to: '/attendance' },
+          { label: 'Open Employee Check In', to: '/attendance/self' },
+          { label: 'Open Payroll', to: '/payroll' },
         ],
       },
       {
@@ -418,6 +454,7 @@ const menuSections: MenuSection[] = [
           { label: 'Open Payroll', to: '/payroll' },
           { label: 'Open Employees', to: '/employees' },
           { label: 'Open Attendance', to: '/attendance' },
+          { label: 'Open Attendance Reports', to: '/attendance/reports' },
         ],
       },
     ],
@@ -493,11 +530,11 @@ const menuSections: MenuSection[] = [
         id: 'customers',
         title: 'Customers',
         route: '/customers',
-        navigation: 'Top menu > Sales > Customers',
-        purpose: 'Stores customer data.',
+        navigation: 'Sales > Customers',
+        purpose: 'Runs the customer CRM desk.',
         description:
-          'This page keeps customer history, contact details, and interactions in one place. It helps the team manage repeat business, contact follow-up, and better service continuity.',
-        keyUses: ['Store customer data', 'Track customer history', 'Support customer interactions'],
+          'This page combines customer profiles, enquiry follow-up, visit and payment history, repeat-customer review, and customer collection watchlists in one place. It helps the team convert leads faster and serve repeat customers with better context.',
+        keyUses: ['Maintain customer profiles', 'Track enquiries and follow-up', 'Review visit and payment history'],
         links: [
           { label: 'Open Customers', to: '/customers' },
           { label: 'Open Quotations', to: '/sales/quotes' },
@@ -550,8 +587,8 @@ const menuSections: MenuSection[] = [
         navigation: 'Top menu > Operations > Event Booking',
         purpose: 'Handles events.',
         description:
-          'This page manages event registrations, organizer details, facility allocation, schedule planning, and payment tracking. It supports both single-date and multi-date event workflows with printable confirmations.',
-        keyUses: ['Manage registrations', 'Handle event schedules', 'Track event payments'],
+          'This page manages event registrations, organizer details, facility allocation, quotation preparation, schedule planning, and payment tracking. It supports both single-date and multi-date event workflows with printable confirmations.',
+        keyUses: ['Manage registrations', 'Prepare event quotations', 'Handle event schedules', 'Track event payments'],
         links: [
           { label: 'Open Event Booking', to: '/events' },
           { label: 'Open Facility Setup', to: '/facilities/setup' },
@@ -679,8 +716,8 @@ const menuSections: MenuSection[] = [
         navigation: 'Top menu > Admin > Settings',
         purpose: 'Controls system behavior.',
         description:
-          'This page manages application configuration and preferences such as business profile, logos, print settings, mail settings, database tools, and shared operating preferences.',
-        keyUses: ['Manage configuration', 'Control preferences', 'Support system setup'],
+          'This page manages application configuration and preferences such as business profile, logos, print settings, mail settings, database tools, and shared operating preferences. Inside Settings, use the left sidebar menu to move between Appearance, Business Details, Mail Settings, Invoice Configuration, Printing Preferences, Security, and Backup & Restore.',
+        keyUses: ['Manage configuration', 'Control preferences', 'Use the settings sidebar by section', 'Support system setup'],
         links: [
           { label: 'Open Settings', to: '/settings' },
           { label: 'Open Users', to: '/user-management' },
@@ -872,9 +909,9 @@ const reportLogicSections: ReportLogicSection[] = [
       'These figures come from employee setup, daily attendance, overtime, and payroll generation.',
     topics: [
       {
-        name: 'Attendance Summary',
+        name: 'Attendance Detail And Monthly Sheet',
         explanation:
-          'Counts present, half day, leave, absent, and overtime hours from the daily attendance register for each employee.',
+          'The employee-wise detail report reads each saved attendance row and shows the date, employee, status, check-in, check-out, worked time, overtime, and location link. The monthly sheet reads the same attendance rows and places them into a one-month calendar-style grid with a tick mark wherever presence was recorded.',
       },
       {
         name: 'Payroll Output',
@@ -1038,6 +1075,13 @@ const sampleEntrySections: SampleEntryGroup[] = [
     description:
       'These examples help HR and supervisors enter attendance and generate payroll in a consistent way.',
     entries: [
+      {
+        title: 'Employee Check In',
+        sample:
+          'Employee opens the page at the sports complex, allows mobile GPS, taps Check In Now at 09:02, and later taps Check Out Now at 18:11 before leaving.',
+        result:
+          'The system captures both times automatically and the saved day supports attendance summary and payroll review.',
+      },
       {
         title: 'Attendance Entry',
         sample:
@@ -1211,6 +1255,22 @@ const transactionGuideSections: TransactionGuideSection[] = [
           'The help button on this screen opens this manual section directly.',
       },
       {
+        id: 'transaction-event-quotation',
+        title: 'Event Quotation',
+        navigation: 'Top menu > Operations > Event Booking > Event Quotations',
+        route: '/events',
+        whatItDoes:
+          'Use this screen to prepare a professional quotation for one or more sports facilities before the organizer confirms the event booking.',
+        businessLogic:
+          'The screen loads default facility charges from the selected courts or other facilities, lets the user edit every amount, applies discount and GST, and saves the quotation with version history. A revised quote does not remove the old one; the older version stays in history and the latest version becomes the working copy.',
+        practicalExample:
+          'Create a quotation for State Badminton Camp using Full Court 1 and Full Court 2 for 2026-05-10 to 2026-05-12 from 09:00 to 13:00, refresh facility pricing, give 10 percent discount, apply 18 percent GST, edit the default terms, and save the quote before the organizer confirms the dates.',
+        reportFlow:
+          'The quotation stays in event quotation tracking and does not block the facility permanently until the user loads it into the booking form and saves the actual event booking. Once the booking is created from the quotation, the quote is marked as booked and the event moves into calendar and payment follow-up views.',
+        note:
+          'The help button on this screen opens this manual section directly.',
+      },
+      {
         id: 'transaction-sales-invoice',
         title: 'Sales Invoice',
         navigation: 'Top menu > Sales > Sales Dashboard',
@@ -1299,14 +1359,30 @@ const transactionGuideSections: TransactionGuideSection[] = [
           'The help button on this screen opens this manual section directly.',
       },
       {
+        id: 'transaction-employee-attendance',
+        title: 'Employee Check In',
+        navigation: 'Top menu > People > Employee Check In',
+        route: '/attendance/self',
+        whatItDoes:
+          'Use this screen when an employee should mark personal attendance from the sports complex without typing times manually.',
+        businessLogic:
+          'The system records the current time when the employee taps check in or check out. If location restriction is enabled, the employee must allow GPS and remain inside the allowed sports complex area for the action to be accepted.',
+        practicalExample:
+          'On 2026-04-08, Rakesh Kumar arrives at 09:02, opens Employee Check In, allows location access, and taps Check In Now. At 18:11, he opens the page again from the arena and taps Check Out Now.',
+        reportFlow:
+          'The saved check-in and check-out become the attendance record for the day and support attendance summary plus payroll review for the month.',
+        note:
+          'The help button on this screen opens this manual section directly.',
+      },
+      {
         id: 'transaction-attendance',
         title: 'Attendance Register',
-        navigation: 'Top menu > People > Attendance',
+        navigation: 'Top menu > People > Attendance Register',
         route: '/attendance',
         whatItDoes:
-          'Use this screen to mark each employee as present, half day, leave, or absent and to record check-in, check-out, and overtime.',
+          'Use this screen to enter or correct attendance manually for each employee, including status, check-in, check-out, and overtime.',
         businessLogic:
-          'Attendance is the base record for staff presence. Once saved and locked, it becomes the official attendance entry used for payroll and attendance reporting.',
+          'Attendance is the base record for staff presence. Once saved and locked, it becomes the official attendance entry used for payroll and attendance reporting. This manual screen is mainly for supervisor review, corrections, and back-dated entry.',
         practicalExample:
           'For one employee, set Status to Present, Check In to 09:00, Check Out to 18:15, Overtime Hours to 0.5, and Notes to Covered evening shift, then click Save.',
         reportFlow:
@@ -1853,11 +1929,11 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          <div className="columns-1 gap-4 md:columns-2 2xl:columns-3">
             {topicIndexGroups.map((group) => (
-              <article key={group.title} className="rounded-3xl border border-white/10 bg-white/5 p-5">
+              <article key={group.title} className="mb-4 break-inside-avoid rounded-3xl border border-white/10 bg-white/5 p-4">
                 <p className="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-200">{group.title}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   {group.links.map((link) => (
                     <a
                       key={`${group.title}-${link.id}`}
@@ -1885,7 +1961,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid items-start gap-4 lg:grid-cols-2">
             {overviewSections.map((section) => (
               <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <h3 className="text-lg font-semibold text-white">{section.title}</h3>
@@ -1914,7 +1990,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
             </p>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid items-start gap-4 xl:grid-cols-2">
             {moduleSummaries.map((module) => (
               <article key={module.id} id={module.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1978,7 +2054,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
             </p>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="grid items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
             {quickLinks.map((item) => (
               <article key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -2129,7 +2205,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                       </div>
                     </div>
 
-                    <div className="mt-5 grid gap-4 xl:grid-cols-3">
+                    <div className="mt-5 grid items-start gap-4 xl:grid-cols-3">
                       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                         <p className="text-sm font-semibold text-cyan-200">How The Screen Works</p>
                         <p className="mt-3 text-sm leading-6 text-gray-300">{guide.businessLogic}</p>
@@ -2167,7 +2243,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                     ) : null}
 
                     {guide.pastedCsvExample ? (
-                      <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                      <div className="mt-5 grid items-start gap-4 xl:grid-cols-[0.9fr_1.1fr]">
                         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                           <p className="text-sm font-semibold text-cyan-200">Example CSV Paste</p>
                           <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-gray-950/35 p-3 text-sm leading-6 text-gray-200">{guide.pastedCsvExample}</pre>
@@ -2200,7 +2276,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                     {guide.mismatchExamples?.length ? (
                       <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
                         <p className="text-sm font-semibold text-rose-200">Common Mismatch Examples</p>
-                        <div className="mt-3 grid gap-3 xl:grid-cols-3">
+                        <div className="mt-3 grid items-start gap-3 xl:grid-cols-3">
                           {guide.mismatchExamples.map((row) => (
                             <div key={`${guide.id}-${row.issue}`} className="rounded-2xl border border-white/10 bg-gray-950/35 p-4">
                               <p className="text-sm font-semibold text-white">{row.issue}</p>
@@ -2238,7 +2314,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <h3 className="text-xl font-semibold text-white">{section.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
-                <div className="mt-5 grid gap-3 xl:grid-cols-2">
+                <div className="mt-5 grid items-start gap-3 xl:grid-cols-2">
                   {section.topics.map((topic) => (
                     <div key={`${section.id}-${topic.name}`} className="rounded-2xl border border-white/10 bg-gray-950/30 p-4">
                       <p className="text-sm font-semibold text-cyan-200">{topic.name}</p>
@@ -2268,7 +2344,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <h3 className="text-xl font-semibold text-white">{section.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                <div className="mt-5 grid items-start gap-4 xl:grid-cols-2">
                   {section.entries.map((entry) => (
                     <div key={`${section.id}-${entry.title}`} className="rounded-2xl border border-white/10 bg-gray-950/30 p-4">
                       <p className="text-sm font-semibold text-indigo-200">{entry.title}</p>
@@ -2297,7 +2373,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
             </p>
           </div>
 
-          <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="mt-5 grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
             <div className="rounded-3xl border border-white/10 bg-gray-950/30 p-5">
               <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-200">Step By Step Flow</p>
               <ul className="mt-4 space-y-3">

@@ -105,6 +105,22 @@ const ensureOtpMailSettingsReady = async (settings: any) => {
   }
 };
 
+const ensureEmployeeAttendanceLocationReady = (settings: any) => {
+  if (!settings?.security?.employeeAttendanceGeofenceEnabled) return;
+
+  const latitude = Number(settings?.security?.attendanceLatitude);
+  const longitude = Number(settings?.security?.attendanceLongitude);
+  const radiusMeters = Number(settings?.security?.attendanceRadiusMeters);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || (latitude === 0 && longitude === 0)) {
+    throw new Error('Enter a valid sports complex latitude and longitude before enabling employee attendance location restriction.');
+  }
+
+  if (!Number.isFinite(radiusMeters) || radiusMeters < 25) {
+    throw new Error('Attendance radius should be at least 25 meters.');
+  }
+};
+
 const loadActiveUser = async (req: AuthenticatedRequest, res: Response) => {
   if (!req.userId) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -233,6 +249,7 @@ router.put('/', async (req: AuthenticatedRequest, res: Response) => {
     if (normalized.security.emailOtpEnabled) {
       await ensureOtpMailSettingsReady(normalized);
     }
+    ensureEmployeeAttendanceLocationReady(normalized);
 
     const saved = await saveTenantGeneralSettings(req, normalized);
     if (existing && existing.key !== GENERAL_SETTINGS_KEY) {

@@ -2,6 +2,7 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   DEFAULT_ROLES,
   EMPTY_PERMISSIONS,
+  FULL_PERMISSIONS,
   PageKey,
   PAGE_KEYS,
   PermissionMatrix,
@@ -39,10 +40,30 @@ export const normalizePermissions = (value?: Map<string, boolean> | Record<strin
 
 const getDefaultPermissionsForRole = (role: string): PermissionMatrix => {
   const normalizedRole = normalizeRoleName(role);
+  if (normalizedRole === 'super_admin') {
+    return { ...FULL_PERMISSIONS };
+  }
   if (hasOwn(DEFAULT_ROLE_PERMISSIONS, normalizedRole)) {
     return { ...(DEFAULT_ROLE_PERMISSIONS as Record<string, PermissionMatrix>)[normalizedRole] };
   }
   return emptyPermissions();
+};
+
+const mergeRolePermissionsWithDefaults = (
+  role: string,
+  value?: Map<string, boolean> | Record<string, boolean> | null
+): PermissionMatrix => {
+  const defaults = getDefaultPermissionsForRole(role);
+  const source = mapToObject(value);
+  const merged = { ...defaults };
+
+  for (const key of PAGE_KEYS) {
+    if (typeof source[key] === 'boolean') {
+      merged[key] = source[key];
+    }
+  }
+
+  return merged;
 };
 
 export const ensureDefaultRolesAndPermissions = async (): Promise<void> => {
@@ -57,10 +78,11 @@ export const ensureDefaultRolesAndPermissions = async (): Promise<void> => {
       continue;
     }
 
-    const normalizedExisting = normalizePermissions(existing.permissions as unknown as Map<string, boolean>);
+    const rawPermissions = mapToObject(existing.permissions as unknown as Map<string, boolean>);
+    const normalizedExisting = mergeRolePermissionsWithDefaults(role, rawPermissions);
     const needsUpdate =
       !existing.isSystemRole ||
-      PAGE_KEYS.some((key) => typeof (existing.permissions as unknown as Map<string, boolean>)?.get?.(key) !== 'boolean');
+      PAGE_KEYS.some((key) => typeof rawPermissions[key] !== 'boolean');
 
     if (needsUpdate) {
       existing.isSystemRole = true;
@@ -72,6 +94,9 @@ export const ensureDefaultRolesAndPermissions = async (): Promise<void> => {
 
 export const getPermissionsForRole = async (role: string): Promise<PermissionMatrix> => {
   const normalizedRole = normalizeRoleName(role);
+  if (normalizedRole === 'super_admin') {
+    return { ...FULL_PERMISSIONS };
+  }
   const roleDoc = await RolePermission.findOne({ role: normalizedRole });
 
   if (!roleDoc) {
@@ -81,7 +106,7 @@ export const getPermissionsForRole = async (role: string): Promise<PermissionMat
     return emptyPermissions();
   }
 
-  return normalizePermissions(roleDoc.permissions as unknown as Map<string, boolean>);
+  return mergeRolePermissionsWithDefaults(normalizedRole, roleDoc.permissions as unknown as Map<string, boolean>);
 };
 
 export const listRolePermissions = async (): Promise<
@@ -91,7 +116,9 @@ export const listRolePermissions = async (): Promise<
   return docs.map((doc) => ({
     role: doc.role,
     isSystemRole: doc.isSystemRole,
-    permissions: normalizePermissions(doc.permissions as unknown as Map<string, boolean>),
+    permissions: doc.role === 'super_admin'
+      ? { ...FULL_PERMISSIONS }
+      : mergeRolePermissionsWithDefaults(doc.role, doc.permissions as unknown as Map<string, boolean>),
   }));
 };
 

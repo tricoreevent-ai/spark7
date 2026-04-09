@@ -76,14 +76,15 @@ const modules: ModuleCard[] = [
   { key: 'inventory', title: 'Inventory', desc: 'Monitor stock movement and replenishment status.', path: '/inventory', icon: '06', category: 'Catalog', accent: 'from-sky-500/18 via-sky-500/6 to-transparent' },
   { key: 'inventory', title: 'Procurement', desc: 'Manage suppliers, POs, and stock receipts.', path: '/inventory/procurement', icon: '07', category: 'Catalog', accent: 'from-sky-500/18 via-sky-500/6 to-transparent' },
   { key: 'employees', title: 'Employees', desc: 'Maintain employee records and profiles.', path: '/employees', icon: '08', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
-  { key: 'attendance', title: 'Attendance', desc: 'Record attendance and track presence.', path: '/attendance', icon: '09', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
-  { key: 'payroll', title: 'Payroll', desc: 'Generate payroll from attendance and rates.', path: '/payroll', icon: '10', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
-  { key: 'facilities', title: 'Facilities', desc: 'Handle single facility bookings.', path: '/facilities', icon: '11', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
-  { key: 'facilities', title: 'Events', desc: 'Manage event bookings and multi-facility schedules.', path: '/events', icon: '12', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
-  { key: 'memberships', title: 'Memberships', desc: 'Control plans, subscribers, and renewals.', path: '/memberships', icon: '13', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
-  { key: 'accounting', title: 'Accounting', desc: 'Manage invoices, vouchers, and books.', path: '/accounting', icon: '14', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
-  { key: 'settings', title: 'Settings', desc: 'Update business setup and application preferences.', path: '/settings', icon: '15', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
-  { key: 'user-management', title: 'Users', desc: 'Configure users, roles, and access.', path: '/user-management', icon: '16', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
+  { key: 'employee-attendance', title: 'Employee Check In', desc: 'Let employees mark their own attendance using current time and GPS.', path: '/attendance/self', icon: '09', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
+  { key: 'attendance', title: 'Attendance Register', desc: 'Record attendance manually and review staff presence.', path: '/attendance', icon: '10', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
+  { key: 'payroll', title: 'Payroll', desc: 'Generate payroll from attendance and rates.', path: '/payroll', icon: '11', category: 'People', accent: 'from-amber-500/18 via-amber-500/6 to-transparent' },
+  { key: 'facilities', title: 'Facilities', desc: 'Handle single facility bookings.', path: '/facilities', icon: '12', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
+  { key: 'facilities', title: 'Events', desc: 'Manage event bookings and multi-facility schedules.', path: '/events', icon: '13', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
+  { key: 'memberships', title: 'Memberships', desc: 'Control plans, subscribers, and renewals.', path: '/memberships', icon: '14', category: 'Operations', accent: 'from-fuchsia-500/18 via-fuchsia-500/6 to-transparent' },
+  { key: 'accounting', title: 'Accounting', desc: 'Manage invoices, vouchers, and books.', path: '/accounting', icon: '15', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
+  { key: 'settings', title: 'Settings', desc: 'Update business setup and application preferences.', path: '/settings', icon: '16', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
+  { key: 'user-management', title: 'Users', desc: 'Configure users, roles, and access.', path: '/user-management', icon: '17', category: 'Admin', accent: 'from-rose-500/18 via-rose-500/6 to-transparent' },
 ];
 
 const categoryMeta = {

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
@@ -126,8 +127,23 @@ export const Attendance: React.FC<AttendanceProps> = ({ currentUserRole }) => {
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-4">
       <div className="flex items-center justify-between">
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">Attendance Register</h1>
-          <ManualHelpLink anchor="transaction-attendance" />
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Attendance Register (Manual Entry)</h1>
+          <p className="text-sm text-gray-300">Use this screen for supervisor or admin manual attendance entry, corrections, and register review.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <ManualHelpLink anchor="transaction-attendance" />
+            <Link
+              to="/attendance/reports"
+              className="inline-flex items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20"
+            >
+              Open Attendance Reports
+            </Link>
+            <Link
+              to="/attendance/self"
+              className="inline-flex items-center gap-2 rounded-full border border-indigo-400/25 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/20"
+            >
+              Open Employee Check In Page
+            </Link>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-300">Date</label>

@@ -1,0 +1,313 @@
+================================================================================
+  SPARK AI - GIT SCRIPTS QUICK REFERENCE
+================================================================================
+
+Repository: https://github.com/tricoreevent-ai/spark7
+
+================================================================================
+  🚀 QUICK START - PICK ONE
+================================================================================
+
+1. STANDARD COMMIT (Recommended for daily work)
+   Double-click: commit-and-push.bat
+   └─ Enter message (or press Enter for auto)
+   └─ Automatic push
+
+2. ORGANIZED COMMIT (semantic/conventional)
+   Double-click: commit-advanced.bat
+   └─ Select type (1-7)
+   └─ Enter description
+   └─ Automatic push
+
+3. QUICK COMMIT (fast one-liners)
+   git-quick-commit.bat "Your message"
+   └─ Instant commit + push
+
+4. VERIFY SETUP (first time or troubleshoot)
+   Double-click: git-setup.bat
+   └─ Check git installation
+   └─ Verify repository
+   └─ Run diagnostics
+
+================================================================================
+  📝 COMMIT MESSAGE EXAMPLES
+================================================================================
+
+Standard Format:
+  Implemented user login feature
+  Fixed database connection timeout
+  Updated API documentation
+  Improved dashboard performance
+
+Advanced Format (with type):
+  feat: Implemented user login feature
+  fix: Fixed database connection timeout
+  docs: Updated API documentation
+  refactor: Improved dashboard performance
+
+Auto-Generated Format:
+  Update - 2026-04-09 14:30
+  (automatically created with timestamp)
+
+================================================================================
+  🎯 WHEN TO USE EACH SCRIPT
+================================================================================
+
+DAILY WORK:
+  commit-and-push.bat
+  → Default, most common, easiest
+
+FEATURE DEVELOPMENT:
+  commit-advanced.bat
+  → Select "feat" when adding new features
+
+BUG FIXES:
+  commit-quick.bat "fix: Description"
+  → Fast, focused commits
+
+DOCUMENTATION:
+  commit-advanced.bat
+  → Select "docs" for documentation updates
+
+UI/DESIGN CHANGES:
+  commit-advanced.bat
+  → Select "ui" for design work
+
+QUICK EDITS:
+  git-quick-commit.bat "Quick fix"
+  → When you're in a hurry
+
+FIRST TIME/PROBLEMS:
+  git-setup.bat
+  → Verify everything works
+
+================================================================================
+  💻 MANUAL GIT COMMANDS (If not using scripts)
+================================================================================
+
+BASIC OPERATIONS:
+  git status              → See what changed
+  git add -A              → Stage all files
+  git commit -m "msg"     → Create commit
+  git push origin main    → Upload to GitHub
+
+BRANCHING:
+  git branch              → List branches
+  git checkout -b name    → Create new branch
+  git checkout main       → Switch to main
+  git branch -d name      → Delete branch
+
+HISTORY:
+  git log --oneline       → View recent commits
+  git log --oneline -10   → Last 10 commits
+  git show HASH           → View specific commit
+
+PULLING/SYNCING:
+  git pull origin main    → Get latest changes
+  git fetch               → Download updates
+  git merge origin main   → Merge remote branch
+
+UNDOING:
+  git checkout -- file    → Discard file changes
+  git reset HEAD file     → Unstage file
+  git revert HASH         → Undo specific commit
+
+================================================================================
+  🔧 COMMIT TYPES (for advanced.bat)
+================================================================================
+
+1. feat - New feature
+   Example: "Add user authentication system"
+   
+2. fix - Bug fix
+   Example: "Resolve login timeout issue"
+   
+3. update - General updates
+   Example: "Update dependencies and libraries"
+   
+4. refactor - Code improvement
+   Example: "Optimize database queries"
+   
+5. docs - Documentation
+   Example: "Update API documentation"
+   
+6. ui - UI/Design changes
+   Example: "Redesign navigation menu"
+   
+7. custom - Your own type
+   Example: "Your custom message"
+
+================================================================================
+  📊 TYPICAL WORKFLOW
+================================================================================
+
+MORNING:
+  1. git pull origin main        (get latest)
+  2. Make your changes
+  3. commit-and-push.bat         (or any script)
+
+THROUGHOUT DAY:
+  1. Edit files
+  2. commit-and-push.bat
+  3. Repeat...
+
+END OF DAY:
+  1. Final commit-and-push.bat
+  2. Check GitHub (all changes visible)
+
+FEATURE BRANCH:
+  1. git checkout -b feature/name
+  2. Make changes
+  3. commit-advanced.bat (select "feat")
+  4. git push origin feature/name
+  5. Create Pull Request on GitHub
+
+================================================================================
+  ⚠️ COMMON ISSUES & SOLUTIONS
+================================================================================
+
+ISSUES:
+  "Git not found"
+  → Install from https://git-scm.com/download/win
+
+  "Not a git repository"
+  → Make sure you're in: c:\Works\SPARK AI\
+  → Or run: git-setup.bat
+
+  "Authentication failed"
+  → Check GitHub credentials
+  → Regenerate SSH key or Personal Access Token
+  → See: 3-COMPLETE-GUIDE.md
+
+  "Push failed"
+  → Run: git pull origin main (first)
+  → Check internet connection
+  → Run: git-setup.bat (diagnose)
+
+  "Merge conflicts"
+  → Run: git pull origin main (to get latest)
+  → Edit files manually (remove conflict markers)
+  → commit-and-push.bat
+
+================================================================================
+  🔐 SECURITY REMINDERS
+================================================================================
+
+NEVER COMMIT:
+  ✗ .env files with secrets
+  ✗ API keys or tokens
+  ✗ Database passwords
+  ✗ Personal or private data
+  ✗ Credentials or config files
+
+PROTECTION:
+  ✓ .gitignore file prevents most issues
+  ✓ Review changes before committing
+  ✓ Use different branches for experimental code
+  ✓ Keep credentials in .env (not committed)
+
+================================================================================
+  🎯 WORKFLOW PATTERNS
+================================================================================
+
+PATTERN 1: Daily Updates
+  [Edit] → commit-and-push.bat → [Edit] → commit-and-push.bat → [Edit] → DONE
+
+PATTERN 2: Feature Development
+  git checkout -b feature/login
+  [Implement] → commit-advanced.bat (feat) → test → git push → Pull Request
+
+PATTERN 3: Bug Fixes
+  git checkout -b fix/timeout
+  [Fix] → git-quick-commit.bat "fix: timeout" → git push → Pull Request
+
+PATTERN 4: Documentation
+  [Edit docs] → commit-advanced.bat (docs) → git push → DONE
+
+PATTERN 5: Quick Changes
+  [Edit] → git-quick-commit.bat "Save progress" → Continue working
+
+================================================================================
+  💡 PRO TIPS
+================================================================================
+
+TIP 1: Keep commits focused
+  → One feature per commit, not 10 files mixed
+
+TIP 2: Use descriptive messages
+  → "Add login form" better than "Update stuff"
+
+TIP 3: Commit frequently
+  → Multiple small commits better than one giant commit
+
+TIP 4: Push regularly
+  → Don't keep commits local for days
+
+TIP 5: Review before committing
+  → Scripts show changes, review them first
+
+TIP 6: Use branches for experiments
+  → Keep main branch stable
+
+TIP 7: Pull before pushing
+  → Reduces merge conflicts
+
+TIP 8: Check git-setup.bat if problems
+  → Automatic diagnostics help identify issues
+
+================================================================================
+  📞 GETTING HELP
+================================================================================
+
+QUICK LOOKUP:
+  → This file (2-QUICK-REFERENCE.txt)
+  → Answers most common questions
+
+DETAILED HELP:
+  → 3-COMPLETE-GUIDE.md
+  → Full documentation, setup, troubleshooting
+
+STILL STUCK:
+  1. Run: git-setup.bat → 6 (full diagnostic)
+  2. Check: 3-COMPLETE-GUIDE.md (troubleshooting section)
+  3. Verify: git --version (git installed?)
+  4. Try: git status (in terminal, basic check)
+
+================================================================================
+  📚 QUICK COMMAND MAP
+================================================================================
+
+I WANT TO...                         USE THIS COMMAND
+────────────────────────────────────────────────────────
+See what changed                    git status
+Save my changes                     commit-and-push.bat
+Commit with type                    commit-advanced.bat
+Quick one-line commit               git-quick-commit.bat
+Check if git works                  git-setup.bat
+Get latest from GitHub              git pull origin main
+View commit history                 git log --oneline
+Create a new feature branch         git checkout -b feature/name
+Switch to main branch               git checkout main
+Delete a branch                     git branch -d name
+Undo my last commit                 git reset HEAD~1
+See what's in latest commit         git show HEAD
+Push a feature branch               git push origin branch-name
+Merge a branch                      git merge branch-name
+Undo file changes                   git checkout -- file.txt
+
+================================================================================
+  🎉 YOU'RE READY!
+================================================================================
+
+NEXT STEP:
+  1. Double-click any .bat script above
+  2. Follow the prompts
+  3. Watch your code appear on GitHub!
+
+REPOSITORY:
+  https://github.com/tricoreevent-ai/spark7
+
+NEED MORE HELP?
+  → Read: 3-COMPLETE-GUIDE.md (full documentation)
+
+================================================================================

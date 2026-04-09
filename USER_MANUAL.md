@@ -126,18 +126,19 @@ Key Uses
 
 ### 5.4 People
 
-Direct links: [Employees](/employees), [Attendance](/attendance), [Payroll](/payroll)
+Direct links: [Employees](/employees), [Employee Check In](/attendance/self), [Attendance Reports](/attendance/reports), [Attendance Register](/attendance), [Payroll](/payroll)
 
 Purpose  
 The People module manages employee data and workforce operations.
 
 Description  
-It centralizes employee information, attendance records, shift management, and payroll handling so staff operations can be managed accurately.
+It centralizes employee information, self attendance, manual attendance review, shift management, and payroll handling so staff operations can be managed accurately.
 
 Key Uses
 
 - Store employee data
-- Track attendance
+- Track employee self check-in and check-out
+- Track attendance corrections and review
 - Manage shifts
 - Process payroll
 
@@ -283,17 +284,55 @@ Stores employee details.
 Description  
 This page maintains staff records in one place and acts as the base data source for attendance, payroll, and workforce administration.
 
-### 7.2 Attendance
+### 7.2 Employee Check In
 
-Direct link: [Attendance](/attendance)
+Direct link: [Employee Check In](/attendance/self)
 
 Purpose  
-Tracks employee presence.
+Allows an employee to mark attendance personally from the sports complex.
 
 Description  
-This page records daily attendance for monitoring and payroll support. It helps the organization maintain reliable presence data.
+This page is meant for self attendance. The employee opens the page on a mobile device, allows GPS, and taps `Check In Now` when arriving. The system records the current time automatically. When leaving, the employee taps `Check Out Now`, and the system again records the current time automatically. If the administrator has enabled location restriction, the employee must be inside the allowed sports complex radius or the attendance action will not be accepted.
 
-### 7.3 Shifts
+Example  
+Rakesh arrives at the arena on `2026-04-08` at `09:02`. He opens `Employee Check In`, allows location access, and taps `Check In Now`. The system saves `09:02` as check-in. At `18:11`, he opens the same page inside the arena and taps `Check Out Now`. The system saves `18:11` as check-out and locks the day as completed.
+
+How it affects reports  
+The saved check-in and check-out become the day’s attendance record for that employee. The hours then support attendance summary and payroll review for the month.
+
+### 7.3 Attendance Register
+
+Direct link: [Attendance Register](/attendance)
+
+Purpose  
+Tracks employee presence through supervisor or admin manual entry.
+
+Description  
+This page is the manual attendance register. It is used for corrections, back-dated entries, and supervisor-controlled attendance updates. Employees should normally use `Employee Check In`, while this register remains for authorized staff who need to review or adjust entries.
+
+Example  
+On `2026-04-08`, supervisor Meera sees that one employee forgot to check out. She opens `Attendance Register`, selects the date, updates the employee entry to `Present`, `Check In 09:00`, `Check Out 18:10`, and saves the corrected record.
+
+How it affects reports  
+The saved manual entry becomes the attendance record used by attendance summary and payroll calculations.
+
+### 7.4 Attendance Reports
+
+Direct link: [Attendance Reports](/attendance/reports)
+
+Purpose  
+Reviews attendance in report format.
+
+Description  
+This page gives two attendance report styles in one place. The `Employee-wise Detail` report shows date-wise check-in, check-out, total worked time, overtime, and map links for the attendance entry location. The `Monthly Attendance Sheet` shows one full month in one grid with date columns and tick marks for presence so the sheet can be printed or exported easily.
+
+Example  
+For `2026-04-01` to `2026-04-30`, HR opens `Attendance Reports`, keeps the employee filter as `All employees`, and loads the detail report to review every saved check-in and check-out row. Then HR switches to `Monthly Attendance Sheet`, selects `2026-04`, and prints the full month sheet with tick marks for each day of presence.
+
+How it affects reports  
+This page does not create new attendance data. It reads the attendance already saved from `Employee Check In` and `Attendance Register` and presents it in either a detailed row format or a monthly printable sheet format.
+
+### 7.5 Shifts
 
 Direct link: [Shifts](/shifts)
 
@@ -303,7 +342,7 @@ Manages employee schedules.
 Description  
 This page assigns working hours and shift patterns to ensure proper staffing coverage across the arena.
 
-### 7.4 Payroll
+### 7.6 Payroll
 
 Direct link: [Payroll](/payroll)
 
@@ -360,10 +399,16 @@ This page analyzes business performance and helps management understand operatio
 Direct link: [Customers](/customers)
 
 Purpose  
-Stores customer data.
+Runs the customer CRM desk.
 
 Description  
-This page tracks customer history, contact details, and interactions so the business can manage repeat service and follow-up effectively.
+This page combines customer profiles, enquiry follow-up, visit and payment history, repeat-customer review, and collection watchlists in one place.
+
+Example  
+Create a profile for `Rahul Menon`, save his phone, email, preferred badminton slot `06:00 PM to 08:00 PM`, and note that he usually buys shuttle tubes from the sports shop. Later, when he asks about a weekend court block by phone, create an enquiry, assign it to front desk staff, and then open the booking or quotation screen directly from that enquiry.
+
+How it affects reports  
+The page itself does not create sales or booking figures. It collects customer and enquiry information that is then connected to bookings, quotations, invoices, payment follow-up, and CRM summary cards.
 
 ## 9. Operations Menu
 
@@ -395,7 +440,7 @@ Purpose
 Handles events.
 
 Description  
-This page manages registrations, organizer details, schedules, facilities, payments, and printable event confirmations.
+This page manages registrations, organizer details, event quotations, schedules, facilities, payments, and printable event confirmations.
 
 ### 9.4 Create Plan
 
@@ -515,6 +560,17 @@ Controls system behavior.
 Description  
 This page manages application configuration, business details, logos, SMTP settings, print settings, and database-related tools.
 
+Sidebar menu inside Settings  
+Use the left settings menu to move between:
+
+- `Appearance`
+- `Business Details`
+- `Mail Settings`
+- `Invoice Configuration`
+- `Printing Preferences`
+- `Security`
+- `Backup & Restore`
+
 ### 11.2 Users
 
 Direct link: [Users](/user-management)
@@ -545,6 +601,7 @@ This section explains each main transaction screen in plain business language so
 | --- | --- | --- |
 | [Facility Booking](/user-manual#transaction-facility-booking) | Reserves a facility slot for a customer. Example: book `Badminton Court 2` for `Rahul Menon` on `2026-04-10` from `18:00` to `19:00` for `600` and mark it paid. | The booking increases facility usage history, supports occupancy review, and can contribute to booking revenue summaries. |
 | [Event Booking](/user-manual#transaction-event-booking) | Blocks one or more facilities for an event organizer over a defined date and time window. Example: create `Summer Shuttle League` for `Metro Sports Club` from `2026-05-01` to `2026-05-03` with `5000` advance collected. | The event appears in event schedules, advance and balance tracking, and operational event reports. |
+| [Event Quotation](/user-manual#transaction-event-quotation) | Prepares a quotation before the organizer confirms the booking. Example: quote `State Badminton Camp` for `Court 1` and `Court 2`, edit the default rental charges, apply `10%` discount, add `18%` GST, and adjust the standard terms before sending it. | The quote stays in quotation tracking and revision history only. It affects booking and payment views only after the user loads it into the booking form and confirms the actual event booking. |
 | [Sales Invoice](/user-manual#transaction-sales-invoice) | Creates the final customer bill for products sold at the counter or on credit. Example: sell shuttle tubes and grips to `Anjali Nair`, apply `100` discount, choose `UPI`, and post the invoice. | The sale increases sales totals, customer totals, GST summaries, payment-mode summaries, and reduces stock for the items sold. |
 | [Quotation](/user-manual#transaction-quotation) | Prepares a price offer before the customer confirms purchase. Example: send a quotation to `Rising Stars Academy` for jerseys and cones, valid until `2026-04-30`. | Quotations stay in pre-sales tracking and version history. They affect final sales reports only after they are converted into an invoice. |
 | [Returns](/user-manual#transaction-returns) | Records goods coming back from the customer and the related refund or adjustment decision. Example: return `2` shuttle tubes from invoice `INV-260407-00012` because the seal was damaged. | Approved returns reduce net sales impact and update sales return, refund, and customer adjustment reports. |
@@ -555,8 +612,45 @@ This section explains each main transaction screen in plain business language so
 
 | Screen | What the screen does and example | How the saved entry reaches reports |
 | --- | --- | --- |
+| [Employee Check In](/user-manual#transaction-employee-attendance) | Lets the employee mark attendance from the sports complex with current time and GPS. Example: check in at `09:02` when arriving and check out at `18:11` when leaving. | The self attendance entry becomes the day’s attendance record and supports attendance and payroll review. |
 | [Attendance Register](/user-manual#transaction-attendance) | Records employee presence for the day and locks the record after save. Example: mark one staff member `Present`, `Check In 09:00`, `Check Out 18:15`, and `OT 0.5`. | The entry increases attendance totals such as present days, leave days, and overtime hours for payroll and attendance reports. |
+| [Attendance Reports](/user-manual#attendance-reports) | Shows two report styles: date-wise employee detail and one full monthly attendance sheet. Example: review all attendance rows from `2026-04-01` to `2026-04-30` and then print the month sheet. | The page reads saved attendance entries and presents them for review, printing, and export without changing the original attendance data. |
 | [Payroll](/user-manual#transaction-payroll) | Converts the month’s attendance into payable salary figures. Example: generate payroll for `2026-04` after finishing the month’s attendance entries. | The output supports payroll summaries, salary planning, and management review of total payout for the month. |
+
+#### Transaction: Employee Check In
+
+Navigation path: `Top menu -> People -> Employee Check In`
+
+What this screen does  
+This screen lets an employee mark personal attendance without manual typing. The employee uses a mobile phone, turns on GPS, and taps the action button. The system saves the current time automatically.
+
+How check in works  
+When the employee is physically present at the sports complex, they open the page and tap `Check In Now`. The system reads the phone location and compares it with the sports complex location defined in `General Settings -> Security`. If the employee is inside the allowed radius, the system saves the day’s check-in time.
+
+How check out works  
+At the time of leaving, the employee opens the same page again and taps `Check Out Now`. The system again checks the phone location, records the current time, and completes that day’s attendance entry.
+
+Practical example  
+On `2026-04-08`, employee `Rakesh Kumar` reaches the arena at `09:02`. He opens `Employee Check In`, allows location access, and taps `Check In Now`. At `18:11`, while leaving from the same arena, he opens the page again and taps `Check Out Now`. The day is now saved with `Check In 09:02` and `Check Out 18:11`.
+
+What happens if the employee is outside the sports complex  
+If GPS is turned off, permission is denied, or the employee is outside the allowed sports complex radius, the system does not accept the check-in or check-out. This prevents attendance from being marked from home or from another location.
+
+How it affects reports  
+The check-in and check-out become the official attendance entry for that employee. Those times then support attendance summary, present-day counts, and monthly payroll review.
+
+#### Transaction: Attendance Register
+
+Navigation path: `Top menu -> People -> Attendance Register`
+
+What this screen does  
+This is the manual attendance page used by supervisors and administrators. It is meant for corrections, back-dated entries, or bulk review of daily staff attendance.
+
+Practical example  
+If one employee forgot to check out on `2026-04-08`, the supervisor opens the register, selects the date, updates `Check Out` to `18:10`, and saves the corrected row.
+
+How it affects reports  
+The saved or corrected entry becomes the attendance record used by attendance summary and payroll generation.
 
 ### 12.3 Accounting Transactions
 
@@ -692,8 +786,8 @@ This report ranks products by total quantity sold within the selected period. Th
 
 ### 13.4 Attendance And Payroll Figures
 
-`Attendance Summary`  
-This report counts attendance status by employee. `Present Days`, `Half Days`, `Leave Days`, and `Absent Days` come directly from daily attendance entries. `Overtime Hours` is the total overtime saved across those days.
+`Attendance Detail And Monthly Sheet`  
+The employee-wise detail report reads each saved attendance row and shows the date, employee, status, check-in, check-out, worked time, overtime, and location link. The monthly sheet reads the same attendance rows and places them into a one-month calendar-style grid with a tick mark wherever presence was recorded.
 
 `Payroll Output`  
 Payroll is generated from employee master data, attendance entries, weekly offs, and overtime. `Base Pay` comes from salary or rate setup, `Overtime Pay` comes from overtime hours, and `Total Payable` is the amount due for the selected month.
@@ -776,6 +870,10 @@ Result: the booking appears on the facility board, the customer history is updat
 Sample values: `Event Name` Summer Shuttle League, `Organizer Name` Metro Sports Club, `Organization` Metro Sports Club, `Phone` 9895012345, `Email` events@metrosports.in, `Facilities` Court 1 and Court 2, `Date Range` 2026-05-01 to 2026-05-03, `Time` 09:00 to 18:00, `Status` Confirmed, `Total Amount` 18000, `Advance Payment` 5000, `Advance Payment Method` Bank Transfer, `Remarks` Inter-club doubles tournament.  
 Result: the event schedule is blocked in operations, the balance due is tracked, and payments for the event can be collected later.
 
+`Event Quotation`  
+Sample values: `Event Name` State Badminton Camp, `Organizer Name` Kerala Shuttle Academy, `Organization` Kerala Shuttle Academy, `Phone` 9847012345, `Email` academy@example.com, `Facilities` Court 1 and Court 2, `Date Range` 2026-05-10 to 2026-05-12, `Time` 09:00 to 13:00, `Quotation Status` Sent, `Discount Type` Percentage, `Discount` 10, `GST Rate` 18, `Terms` updated to mention sports complex discipline and damage charges. Use `Refresh Facility Pricing` first so the facility rental rows are pre-filled, then edit them if needed.  
+Result: the quotation stays in quotation tracking and revision history only. When the organizer accepts it, the user can load it into the booking form and save the final event booking without retyping the event details.
+
 ### 14.2 Sales Screens
 
 `Sales Invoice`  
@@ -805,6 +903,10 @@ Sample values: renew Sreya Thomas for another month, `Renewal Type` Manual, `Amo
 Result: renewal history is updated, renewal revenue increases, and renewal-rate reports improve.
 
 ### 14.4 People Screens
+
+`Employee Check In`  
+Sample values: employee opens the page at the sports complex, allows mobile GPS, taps `Check In Now` at `09:02`, then taps `Check Out Now` at `18:11` before leaving.  
+Result: the system captures both times automatically and the day becomes available for attendance summary and payroll review.
 
 `Attendance Entry`  
 Sample values for one employee: `Status` Present, `Check In` 09:00, `Check Out` 18:15, `Overtime Hours` 0.5, `Notes` Covered evening shift.  

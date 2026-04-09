@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { EventQuotationBookingDraft, EventQuotationDesk } from '../components/EventQuotationDesk';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { consumeCrmConversionDraft, CrmConversionDraft } from '../utils/crmDrafts';
 import { openPdfDocument, ServerPdfDocument } from '../utils/pdfDocument';
 import { showPromptDialog } from '../utils/appDialogs';
 
@@ -34,6 +36,8 @@ interface EventPayment {
 interface EventBooking {
   _id: string;
   eventNumber?: string;
+  sourceQuotationId?: string;
+  sourceQuotationNumber?: string;
   seriesId?: string;
   seriesTotalDates?: number;
   eventName: string;
@@ -203,20 +207,48 @@ type SelectedOccurrenceRow = {
   occurrence: EventOccurrence;
 };
 
-export const EventManagement: React.FC = () => {
+type EventManagementProps = {
+  initialView?: 'bookings' | 'quotations';
+  canManageBookings?: boolean;
+  canManageQuotations?: boolean;
+};
+
+const resolveInitialView = (
+  requestedView: 'bookings' | 'quotations',
+  canManageBookings: boolean,
+  canManageQuotations: boolean
+): 'bookings' | 'quotations' => {
+  if (requestedView === 'quotations' && canManageQuotations) return 'quotations';
+  if (requestedView === 'bookings' && canManageBookings) return 'bookings';
+  if (canManageQuotations) return 'quotations';
+  return 'bookings';
+};
+
+export const EventManagement: React.FC<EventManagementProps> = ({
+  initialView = 'bookings',
+  canManageBookings = true,
+  canManageQuotations = true,
+}) => {
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [bookings, setBookings] = useState<EventBooking[]>([]);
   const [paymentDueBookings, setPaymentDueBookings] = useState<EventBooking[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(toDateInput(new Date()).slice(0, 7));
   const [selectedDate, setSelectedDate] = useState(toDateInput(new Date()));
   const [loading, setLoading] = useState(false);
+  const [activeView, setActiveView] = useState<'bookings' | 'quotations'>(
+    resolveInitialView(initialView, canManageBookings, canManageQuotations)
+  );
+  const [crmQuotationDraft, setCrmQuotationDraft] = useState<CrmConversionDraft | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const paymentDeskRef = useRef<HTMLDivElement | null>(null);
+  const bookingFormRef = useRef<HTMLFormElement | null>(null);
 
   const [form, setForm] = useState({
     bookingMode: 'single' as BookingMode,
+    sourceQuotationId: '',
+    sourceQuotationNumber: '',
     eventName: '',
     organizerName: '',
     organizationName: '',
@@ -248,6 +280,41 @@ export const EventManagement: React.FC = () => {
     const token = localStorage.getItem('token');
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   }, []);
+
+  useEffect(() => {
+    setActiveView(resolveInitialView(initialView, canManageBookings, canManageQuotations));
+  }, [initialView, canManageBookings, canManageQuotations]);
+
+  useEffect(() => {
+    const draft = consumeCrmConversionDraft('event-booking') || consumeCrmConversionDraft('event-quotation');
+    if (!draft) return;
+    if (draft.target === 'event-booking' && canManageBookings) {
+      setActiveView('bookings');
+      setForm((prev) => ({
+        ...prev,
+        eventName: draft.requestedFacilityName ? `${draft.requestedFacilityName} Booking` : (draft.customerName ? `${draft.customerName} Booking` : prev.eventName),
+        organizerName: draft.customerName || prev.organizerName,
+        contactPhone: draft.customerPhone || prev.contactPhone,
+        contactEmail: draft.customerEmail || prev.contactEmail,
+        facilityIds: draft.requestedFacilityId ? [draft.requestedFacilityId] : prev.facilityIds,
+        eventDate: draft.requestedDate || prev.eventDate,
+        rangeStartDate: draft.requestedDate || prev.rangeStartDate,
+        rangeEndDate: draft.requestedDate || prev.rangeEndDate,
+        startTime: draft.requestedStartTime || prev.startTime,
+        endTime: draft.requestedStartTime ? addHour(draft.requestedStartTime) : prev.endTime,
+        remarks: [prev.remarks, draft.notes].filter(Boolean).join('\n').trim(),
+      }));
+      setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into event booking.`);
+      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (canManageQuotations) {
+      setActiveView('quotations');
+      setCrmQuotationDraft(draft);
+      setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into event quotation.`);
+    }
+  }, [canManageBookings, canManageQuotations]);
 
   const monthDate = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
   const grid = useMemo(() => calendarCells(monthDate), [monthDate]);
@@ -285,22 +352,24 @@ export const EventManagement: React.FC = () => {
     setError('');
 
     try {
-      const start = startOfMonth(selectedMonth);
-      const end = endOfMonth(start);
-      const query = new URLSearchParams({
-        startDate: toDateInput(start),
-        endDate: toDateInput(end),
-      });
+      const requests: Promise<any>[] = [fetchApiJson(apiUrl('/api/facilities'), { headers })];
 
-      const [facilityRes, eventRes, reminderRes] = await Promise.all([
-        fetchApiJson(apiUrl('/api/facilities'), { headers }),
-        fetchApiJson(apiUrl(`/api/events/bookings/list?${query.toString()}`), { headers }),
-        fetchApiJson(apiUrl('/api/events/reminders?days=30'), { headers }),
-      ]);
+      if (canManageBookings) {
+        const start = startOfMonth(selectedMonth);
+        const end = endOfMonth(start);
+        const query = new URLSearchParams({
+          startDate: toDateInput(start),
+          endDate: toDateInput(end),
+        });
+        requests.push(fetchApiJson(apiUrl(`/api/events/bookings/list?${query.toString()}`), { headers }));
+        requests.push(fetchApiJson(apiUrl('/api/events/reminders?days=30'), { headers }));
+      }
+
+      const [facilityRes, eventRes, reminderRes] = await Promise.all(requests);
 
       const nextFacilities = Array.isArray(facilityRes?.data) ? facilityRes.data : [];
-      const nextBookings = Array.isArray(eventRes?.data) ? eventRes.data : [];
-      const nextPaymentDue = Array.isArray(reminderRes?.data?.paymentDue) ? reminderRes.data.paymentDue : [];
+      const nextBookings = canManageBookings && Array.isArray(eventRes?.data) ? eventRes.data : [];
+      const nextPaymentDue = canManageBookings && Array.isArray(reminderRes?.data?.paymentDue) ? reminderRes.data.paymentDue : [];
 
       setFacilities(nextFacilities);
       setBookings(nextBookings);
@@ -314,7 +383,7 @@ export const EventManagement: React.FC = () => {
 
   useEffect(() => {
     void loadData();
-  }, [selectedMonth]);
+  }, [selectedMonth, canManageBookings, canManageQuotations]);
 
   useEffect(() => {
     if (form.bookingMode === 'single') {
@@ -400,6 +469,8 @@ export const EventManagement: React.FC = () => {
         method: 'POST',
         headers,
         body: JSON.stringify({
+          sourceQuotationId: form.sourceQuotationId || undefined,
+          sourceQuotationNumber: form.sourceQuotationNumber || undefined,
           eventName: form.eventName,
           organizerName: form.organizerName,
           organizationName: form.organizationName,
@@ -423,6 +494,8 @@ export const EventManagement: React.FC = () => {
       );
       setForm((prev) => ({
         ...prev,
+        sourceQuotationId: '',
+        sourceQuotationNumber: '',
         eventName: '',
         organizerName: '',
         organizationName: '',
@@ -687,24 +760,90 @@ export const EventManagement: React.FC = () => {
       .slice(0, 6);
   }, [paymentDueBookings]);
 
+  const loadQuotationIntoBookingForm = (draft: EventQuotationBookingDraft) => {
+    if (!canManageBookings) return;
+    setActiveView('bookings');
+    setSelectedDate(draft.eventDate);
+    setSelectedMonth(draft.rangeStartDate.slice(0, 7));
+    setForm((prev) => ({
+      ...prev,
+      sourceQuotationId: draft.sourceQuotationId,
+      sourceQuotationNumber: draft.sourceQuotationNumber,
+      bookingMode: draft.bookingMode,
+      eventName: draft.eventName,
+      organizerName: draft.organizerName,
+      organizationName: draft.organizationName,
+      contactPhone: draft.contactPhone,
+      contactEmail: draft.contactEmail,
+      facilityIds: draft.facilityIds,
+      eventDate: draft.eventDate,
+      rangeStartDate: draft.rangeStartDate,
+      rangeEndDate: draft.rangeEndDate,
+      startTime: draft.startTime,
+      endTime: draft.endTime,
+      totalAmount: draft.totalAmount,
+      advanceAmount: draft.advanceAmount,
+      remarks: draft.remarks,
+    }));
+    window.setTimeout(() => {
+      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
+
   const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white';
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">Event Booking (Corporate / Organizers)</h1>
-          <p className="text-sm text-gray-300">Book one or multiple event dates, track advance and remaining payments, and print/email confirmations.</p>
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Event Management</h1>
+          <p className="text-sm text-gray-300">
+            Manage quotations, multi-date sports events, balance collection, and event confirmations in one flow.
+          </p>
         </div>
-        <div>
+        {activeView === 'bookings' ? (
+          <div>
           <label className="mb-1 block text-xs text-gray-400">Month</label>
           <input type="month" className={inputClass} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
-        </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {canManageBookings && (
+          <button
+            type="button"
+            onClick={() => setActiveView('bookings')}
+            className={`rounded-md px-3 py-2 text-sm font-semibold ${activeView === 'bookings' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
+          >
+            Event Bookings
+          </button>
+        )}
+        {canManageQuotations && (
+          <button
+            type="button"
+            onClick={() => setActiveView('quotations')}
+            className={`rounded-md px-3 py-2 text-sm font-semibold ${activeView === 'quotations' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
+          >
+            Event Quotations
+          </button>
+        )}
       </div>
 
       {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
       {error && <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}
       {loading && <p className="text-sm text-gray-400">Loading...</p>}
+
+      {activeView === 'quotations' ? (
+        <EventQuotationDesk
+          facilities={facilities}
+          onUseQuoteForBooking={loadQuotationIntoBookingForm}
+          allowBookingConversion={canManageBookings}
+          incomingCrmDraft={crmQuotationDraft}
+          onConsumeCrmDraft={() => setCrmQuotationDraft(null)}
+        />
+      ) : (
+        <>
 
       <div ref={paymentDeskRef} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -851,11 +990,24 @@ export const EventManagement: React.FC = () => {
           </div>
         </div>
 
-        <form onSubmit={createEvent} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-4">
+        <form ref={bookingFormRef} onSubmit={createEvent} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-white">Create Event</h2>
             <ManualHelpLink anchor="transaction-event-booking" />
           </div>
+
+          {form.sourceQuotationNumber ? (
+            <div className="rounded border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+              Booking is being created from quotation {form.sourceQuotationNumber}.
+              <button
+                type="button"
+                onClick={() => setForm((prev) => ({ ...prev, sourceQuotationId: '', sourceQuotationNumber: '' }))}
+                className="ml-3 rounded bg-cyan-500/20 px-2 py-1 font-semibold text-cyan-50 hover:bg-cyan-500/30"
+              >
+                Remove Quote Link
+              </button>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -966,6 +1118,7 @@ export const EventManagement: React.FC = () => {
                     <td className="px-2 py-2 text-xs text-gray-200">
                       <p className="text-sm text-white">{booking.eventName}</p>
                       <p>{booking.organizationName || '-'}</p>
+                      {booking.sourceQuotationNumber && <p className="text-[11px] text-cyan-200">Quote {booking.sourceQuotationNumber}</p>}
                       {multiDate && <p className="text-[11px] text-cyan-200">{bookingOccurrenceRows(booking).length} booked dates</p>}
                     </td>
                     <td className="px-2 py-2 text-xs text-gray-300">
@@ -1021,6 +1174,8 @@ export const EventManagement: React.FC = () => {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

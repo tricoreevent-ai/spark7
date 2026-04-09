@@ -9,6 +9,22 @@ export interface IAttendance extends Document {
   status: AttendanceStatus;
   checkIn?: string;
   checkOut?: string;
+  checkInAt?: Date;
+  checkOutAt?: Date;
+  checkInSource?: 'manual' | 'self_service';
+  checkOutSource?: 'manual' | 'self_service';
+  checkInLocation?: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    capturedAt?: Date;
+  };
+  checkOutLocation?: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    capturedAt?: Date;
+  };
   overtimeHours?: number;
   notes?: string;
   createdBy?: string;
@@ -40,6 +56,28 @@ const AttendanceSchema = new Schema<IAttendance>(
     },
     checkIn: { type: String },
     checkOut: { type: String },
+    checkInAt: { type: Date },
+    checkOutAt: { type: Date },
+    checkInSource: {
+      type: String,
+      enum: ['manual', 'self_service'],
+    },
+    checkOutSource: {
+      type: String,
+      enum: ['manual', 'self_service'],
+    },
+    checkInLocation: {
+      latitude: { type: Number },
+      longitude: { type: Number },
+      accuracyMeters: { type: Number, min: 0 },
+      capturedAt: { type: Date },
+    },
+    checkOutLocation: {
+      latitude: { type: Number },
+      longitude: { type: Number },
+      accuracyMeters: { type: Number, min: 0 },
+      capturedAt: { type: Date },
+    },
     overtimeHours: { type: Number, min: 0, default: 0 },
     notes: { type: String, trim: true },
     createdBy: { type: String, index: true },

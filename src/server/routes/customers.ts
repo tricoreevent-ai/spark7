@@ -10,6 +10,25 @@ import { writeAuditLog } from '../services/audit.js';
 const router = Router();
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const normalizeCustomerCategory = (value: any): 'individual' | 'group_team' | 'corporate' | 'regular_member' | 'walk_in' => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'group_team') return 'group_team';
+  if (normalized === 'corporate') return 'corporate';
+  if (normalized === 'regular_member') return 'regular_member';
+  if (normalized === 'walk_in') return 'walk_in';
+  return 'individual';
+};
+const normalizePreferences = (value: any): Record<string, any> => ({
+  preferredSport: String(value?.preferredSport || '').trim(),
+  preferredFacilityId: String(value?.preferredFacilityId || '').trim(),
+  preferredTimeSlot: String(value?.preferredTimeSlot || '').trim(),
+  preferredShopItems: Array.isArray(value?.preferredShopItems)
+    ? value.preferredShopItems.map((item: any) => String(item || '').trim()).filter(Boolean)
+    : String(value?.preferredShopItems || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+});
 const normalizeContacts = (value: any): Array<Record<string, any>> => {
   if (!Array.isArray(value)) return [];
   return value
@@ -53,11 +72,12 @@ const recommendDunningAction = (daysPastDue: number): string => {
 
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { q, accountType, isBlocked, skip = 0, limit } = req.query;
+    const { q, accountType, isBlocked, customerCategory, skip = 0, limit } = req.query;
     const filter: any = {};
 
     if (accountType) filter.accountType = accountType;
     if (isBlocked !== undefined) filter.isBlocked = String(isBlocked) === 'true';
+    if (customerCategory) filter.customerCategory = normalizeCustomerCategory(customerCategory);
     if (q) {
       const phone = normalizePhone(q);
       filter.$or = [
@@ -197,6 +217,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       name,
       phone,
       email,
+      profilePhotoUrl,
+      customerCategory = 'individual',
       gstin,
       address,
       accountType = 'cash',
@@ -207,6 +229,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       priceOverrides = [],
       pricingTier = '',
       contacts = [],
+      preferences = {},
     } = req.body;
 
     if (!name) {
@@ -240,6 +263,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       name,
       phone: normalizedPhone || undefined,
       email: normalizedEmail || undefined,
+      profilePhotoUrl: String(profilePhotoUrl || '').trim(),
+      customerCategory: normalizeCustomerCategory(customerCategory),
       gstin,
       address,
       accountType: String(accountType) === 'credit' ? 'credit' : 'cash',
@@ -251,6 +276,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       priceOverrides: Array.isArray(priceOverrides) ? priceOverrides : [],
       pricingTier: String(pricingTier || '').trim(),
       contacts: normalizeContacts(contacts),
+      preferences: normalizePreferences(preferences),
       createdBy: req.userId,
     });
 
@@ -495,12 +521,15 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       customerCode: req.body.customerCode ? String(req.body.customerCode).toUpperCase() : current.customerCode,
       phone: normalizedPhone || undefined,
       email: normalizedEmail || undefined,
+      profilePhotoUrl: req.body.profilePhotoUrl !== undefined ? String(req.body.profilePhotoUrl || '').trim() : current.profilePhotoUrl,
+      customerCategory: req.body.customerCategory !== undefined ? normalizeCustomerCategory(req.body.customerCategory) : current.customerCategory,
       accountType: req.body.accountType === 'credit' ? 'credit' : req.body.accountType === 'cash' ? 'cash' : current.accountType,
       creditLimit: req.body.creditLimit !== undefined ? Number(req.body.creditLimit) : current.creditLimit,
       creditDays: req.body.creditDays !== undefined ? Number(req.body.creditDays) : current.creditDays,
       priceOverrides: Array.isArray(req.body.priceOverrides) ? req.body.priceOverrides : current.priceOverrides,
       pricingTier: req.body.pricingTier !== undefined ? String(req.body.pricingTier || '').trim() : current.pricingTier,
       contacts: req.body.contacts !== undefined ? normalizeContacts(req.body.contacts) : current.contacts,
+      preferences: req.body.preferences !== undefined ? normalizePreferences(req.body.preferences) : current.preferences,
     };
 
     const customer = await Customer.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });

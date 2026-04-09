@@ -17,6 +17,7 @@ export interface ITenantInfo {
 export interface IUser {
   _id?: string;
   tenantId?: string;
+  employeeId?: string;
   email: string;
   password?: string;
   firstName: string;

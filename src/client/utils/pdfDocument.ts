@@ -15,6 +15,21 @@ const base64ToBlob = (base64: string): Blob => {
   return new Blob([bytes], { type: 'application/pdf' });
 };
 
+export const downloadPdfDocument = (document: ServerPdfDocument): boolean => {
+  if (!document?.pdfBase64) return false;
+
+  const blob = base64ToBlob(document.pdfBase64);
+  const blobUrl = URL.createObjectURL(blob);
+  const link = window.document.createElement('a');
+  link.href = blobUrl;
+  link.download = document.fileName || 'document.pdf';
+  window.document.body.appendChild(link);
+  link.click();
+  window.document.body.removeChild(link);
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  return true;
+};
+
 export const openPdfDocument = (document: ServerPdfDocument, autoPrint = false): boolean => {
   if (!document?.pdfBase64) return false;
 

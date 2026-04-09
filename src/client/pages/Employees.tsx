@@ -9,6 +9,8 @@ interface Employee {
   _id: string;
   employeeCode: string;
   name: string;
+  phone?: string;
+  email?: string;
   designation?: string;
   employmentType: 'salaried' | 'daily' | 'contractor';
   monthlySalary?: number;
@@ -48,6 +50,8 @@ export const Employees: React.FC = () => {
   const [form, setForm] = useState({
     employeeCode: '',
     name: '',
+    phone: '',
+    email: '',
     designation: '',
     employmentType: 'salaried',
     monthlySalary: '',
@@ -79,10 +83,12 @@ export const Employees: React.FC = () => {
 
   const resetForm = () => {
     setEditingId('');
-    setForm({
-      employeeCode: '',
-      name: '',
-      designation: '',
+      setForm({
+        employeeCode: '',
+        name: '',
+        phone: '',
+        email: '',
+        designation: '',
       employmentType: 'salaried',
       monthlySalary: '',
       dailyRate: '',
@@ -123,10 +129,12 @@ export const Employees: React.FC = () => {
     setError('');
     setMessage('');
     setEditingId(employee._id);
-    setForm({
-      employeeCode: employee.employeeCode || '',
-      name: employee.name || '',
-      designation: employee.designation || '',
+      setForm({
+        employeeCode: employee.employeeCode || '',
+        name: employee.name || '',
+        phone: employee.phone || '',
+        email: employee.email || '',
+        designation: employee.designation || '',
       employmentType: employee.employmentType || 'salaried',
       monthlySalary: String(employee.monthlySalary ?? ''),
       dailyRate: String(employee.dailyRate ?? ''),
@@ -184,6 +192,8 @@ export const Employees: React.FC = () => {
           <h2 className="text-lg font-semibold text-white">{editingId ? 'Edit Employee' : 'Add Employee'}</h2>
           <input className={inputClass} placeholder="Employee Code" required value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value.toUpperCase() })} />
           <input className={inputClass} placeholder="Name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input className={inputClass} placeholder="Phone Number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <input className={inputClass} type="email" placeholder="Email ID" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <input className={inputClass} placeholder="Designation" value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
           <select className={selectClass} value={form.employmentType} onChange={(e) => setForm({ ...form, employmentType: e.target.value })}>
             <option value="salaried">Salaried</option>
@@ -228,7 +238,16 @@ export const Employees: React.FC = () => {
                 {employeesPagination.paginatedRows.map((emp) => (
                   <tr key={emp._id}>
                     <td className="px-3 py-2 text-sm text-white">{emp.employeeCode}</td>
-                    <td className="px-3 py-2 text-sm text-white">{emp.name}</td>
+                    <td className="px-3 py-2 text-sm text-white">
+                      <div>
+                        <div>{emp.name}</div>
+                        {(emp.email || emp.phone) && (
+                          <div className="mt-1 text-xs text-gray-400">
+                            {[emp.email, emp.phone].filter(Boolean).join(' • ')}
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-sm text-gray-300 uppercase">{emp.employmentType}</td>
                     <td className="px-3 py-2 text-sm text-gray-300">{emp.designation || '-'}</td>
                     <td className="px-3 py-2 text-sm text-gray-300">

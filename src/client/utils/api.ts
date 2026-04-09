@@ -61,6 +61,24 @@ const snippet = (value: string, max = 160): string => {
   return value.length > max ? `${value.slice(0, max)}...` : value;
 };
 
+const describeRequestTarget = (input: RequestInfo | URL): string => {
+  const raw =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input instanceof Request
+          ? input.url
+          : String(input || '');
+
+  try {
+    const parsed = new URL(raw, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    return parsed.pathname || raw;
+  } catch {
+    return raw;
+  }
+};
+
 export const parseApiResponse = async (response: Response): Promise<ApiJson> => {
   const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
@@ -91,6 +109,20 @@ export const parseApiResponse = async (response: Response): Promise<ApiJson> => 
 };
 
 export const fetchApiJson = async (input: RequestInfo | URL, init?: RequestInit): Promise<ApiJson> => {
-  const response = await fetch(input, init);
+  let response: Response;
+  try {
+    response = await fetch(input, init);
+  } catch (error: any) {
+    const target = describeRequestTarget(input);
+    const browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const localDevelopmentHint =
+      typeof window !== 'undefined' && isLocalHost(window.location.hostname)
+        ? ' For local development, make sure `npm run dev:server` is running on port 3000.'
+        : '';
+    const reason = browserOffline
+      ? 'Your device appears to be offline.'
+      : 'The browser could not reach the application server.';
+    throw new Error(`${reason} Request: ${target}. Please check internet access, the deployed backend, or API routing.${localDevelopmentHint}`);
+  }
   return parseApiResponse(response);
 };

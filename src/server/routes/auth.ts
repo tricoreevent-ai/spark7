@@ -51,6 +51,7 @@ const buildAuthUserResponse = async (user: any) => {
   return {
     _id: user._id.toString(),
     tenantId: user.tenantId,
+    employeeId: user.employeeId ? String(user.employeeId) : undefined,
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,

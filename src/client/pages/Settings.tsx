@@ -55,13 +55,13 @@ type SettingsSectionKey = 'appearance' | 'business' | 'mail' | 'invoice' | 'prin
 type BackupSectionKey = 'utility' | 'take_restore' | 'history';
 
 const settingsTabs: Array<{ key: SettingsSectionKey; label: string }> = [
-  { key: 'appearance', label: 'Appearance' },
   { key: 'business', label: 'Business Details' },
   { key: 'mail', label: 'Mail Settings' },
   { key: 'invoice', label: 'Invoice Configuration' },
   { key: 'printing', label: 'Printing Preferences' },
   { key: 'security', label: 'Security' },
   { key: 'backup', label: 'Backup & Restore' },
+  { key: 'appearance', label: 'Appearance' },
 ];
 
 const backupTabs: Array<{ key: BackupSectionKey; label: string }> = [
@@ -72,7 +72,7 @@ const backupTabs: Array<{ key: BackupSectionKey; label: string }> = [
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<GeneralSettings>(() => getGeneralSettings());
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('mail');
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('business');
   const [backupSection, setBackupSection] = useState<BackupSectionKey>('utility');
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const [uiSettingsMessage, setUiSettingsMessage] = useState('');
@@ -721,15 +721,31 @@ export const Settings: React.FC = () => {
         </div>
       )}
 
-      <CardTabs
-        ariaLabel="General settings tabs"
-        items={settingsTabs}
-        activeKey={settingsSection}
-        onChange={setSettingsSection}
-        className="w-fit max-w-full"
-        listClassName="border-b-0 px-0 pt-0"
-      />
+      <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-white/10 bg-white/5 p-3 lg:sticky lg:top-24 lg:self-start">
+          <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">General Settings</p>
+          <nav className="space-y-1" aria-label="General settings sections">
+            {settingsTabs.map((tab) => {
+              const isActive = settingsSection === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setSettingsSection(tab.key)}
+                  className={`w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                    isActive
+                      ? 'bg-indigo-500 text-white shadow-[0_16px_32px_rgba(99,102,241,0.22)]'
+                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
 
+        <div className="space-y-6">
       <section className={`${sectionCard} ${settingsSection === 'appearance' ? '' : 'hidden'}`}>
         <h2 className="mb-4 text-lg font-semibold text-white">Appearance</h2>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1080,7 +1096,7 @@ export const Settings: React.FC = () => {
       <section className={`${sectionCard} ${settingsSection === 'security' ? '' : 'hidden'}`}>
         <h2 className="mb-2 text-lg font-semibold text-white">Security</h2>
         <p className="text-sm text-gray-400">
-          Add an extra login verification step. When enabled, the application sends a one-time password to the user's email after the password check.
+          Add an extra login verification step and configure GPS-restricted employee attendance from here.
         </p>
 
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
@@ -1127,6 +1143,74 @@ export const Settings: React.FC = () => {
 
         <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
           OTP delivery uses the SMTP configuration in <span className="font-semibold">Mail Settings</span>. Test email delivery there before enabling this option for all users, and enter valid extra OTP copy emails if you want the same OTP sent to another mailbox.
+        </div>
+
+        <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-white">Employee Attendance Location Restriction</h3>
+              <p className="mt-1 text-sm text-gray-400">
+                Restrict employee self check-in and check-out to the sports complex area. Employees must allow mobile GPS when they mark attendance.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-200">
+              <input
+                type="checkbox"
+                checked={settings.security.employeeAttendanceGeofenceEnabled}
+                onChange={(e) => updateSecurity('employeeAttendanceGeofenceEnabled', e.target.checked)}
+              />
+              Enable location restriction
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="xl:col-span-2">
+              <label className="mb-1 block text-sm font-medium text-gray-300">Sports Complex Location Name</label>
+              <input
+                className={inputClass}
+                placeholder="Spark 7 Sports Arena"
+                value={settings.security.attendanceLocationName}
+                onChange={(e) => updateSecurity('attendanceLocationName', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Latitude</label>
+              <input
+                className={inputClass}
+                type="number"
+                step="0.000001"
+                placeholder="12.971599"
+                value={settings.security.attendanceLatitude || ''}
+                onChange={(e) => updateSecurity('attendanceLatitude', Number(e.target.value || 0))}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Longitude</label>
+              <input
+                className={inputClass}
+                type="number"
+                step="0.000001"
+                placeholder="77.594566"
+                value={settings.security.attendanceLongitude || ''}
+                onChange={(e) => updateSecurity('attendanceLongitude', Number(e.target.value || 0))}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Allowed Radius (meters)</label>
+              <input
+                className={inputClass}
+                type="number"
+                min={25}
+                max={5000}
+                value={settings.security.attendanceRadiusMeters}
+                onChange={(e) => updateSecurity('attendanceRadiusMeters', Math.min(5000, Math.max(25, Number(e.target.value || 150))))}
+              />
+            </div>
+          </div>
+
+          <p className="mt-3 text-xs text-gray-400">
+            Recommended use: create a dedicated <span className="font-semibold text-white">employee</span> login role, link that login to the employee master record in Users, and allow only the self attendance page for that role. The manual attendance register remains for supervisors and administrators.
+          </p>
         </div>
       </section>
 
@@ -1321,6 +1405,8 @@ export const Settings: React.FC = () => {
         </div>
         )}
       </section>
+        </div>
+      </div>
     </div>
   );
 };

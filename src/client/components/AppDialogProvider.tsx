@@ -109,6 +109,44 @@ const normalizePromptOptions = (message?: any, options: AppPromptOptions = {}) =
   rows: Number(options.rows || 3),
 });
 
+const clearStaleDialogArtifacts = () => {
+  if (typeof document === 'undefined') return;
+
+  document.querySelectorAll<HTMLElement>('.modal-backdrop, .swal2-container').forEach((node) => {
+    node.remove();
+  });
+
+  document.querySelectorAll<HTMLElement>('.MuiModal-root').forEach((node) => {
+    const hasVisibleDialogPaper = Array.from(node.querySelectorAll<HTMLElement>('.MuiDialog-paper')).some((paper) => {
+      const style = window.getComputedStyle(paper);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    });
+
+    if (!hasVisibleDialogPaper) {
+      node.setAttribute('aria-hidden', 'true');
+      node.style.pointerEvents = 'none';
+      node.style.opacity = '0';
+      node.style.visibility = 'hidden';
+    }
+  });
+
+  document.querySelectorAll<HTMLElement>('.MuiBackdrop-root').forEach((node) => {
+    node.style.pointerEvents = 'none';
+    node.style.opacity = '0';
+    node.style.visibility = 'hidden';
+  });
+
+  const html = document.documentElement;
+  const body = document.body;
+
+  html.style.removeProperty('overflow');
+  html.style.removeProperty('padding-right');
+  body.style.removeProperty('overflow');
+  body.style.removeProperty('padding-right');
+  body.removeAttribute('inert');
+  html.removeAttribute('inert');
+};
+
 export const AppDialogProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [queue, setQueue] = useState<DialogRequest[]>([]);
   const [promptValue, setPromptValue] = useState('');
@@ -176,9 +214,30 @@ export const AppDialogProvider: React.FC<React.PropsWithChildren> = ({ children 
     };
   }, []);
 
+  useEffect(() => {
+    if (current) return;
+
+    const runCleanup = () => clearStaleDialogArtifacts();
+    const timer = window.setTimeout(runCleanup, 120);
+    const handleFocus = () => runCleanup();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') runCleanup();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [current]);
+
   const dismissCurrent = () => {
     setQueue((prev) => prev.slice(1));
     setPromptError('');
+    window.setTimeout(() => clearStaleDialogArtifacts(), 0);
   };
 
   const handleCancel = () => {

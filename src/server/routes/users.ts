@@ -1,5 +1,7 @@
 import { Router, Response } from 'express';
+import mongoose from 'mongoose';
 import { User } from '../models/User.js';
+import { Employee } from '../models/Employee.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { hashPassword } from '../utils/auth.js';
 import { normalizeRoleName, roleExists } from '../services/rbac.js';
@@ -16,6 +18,7 @@ const isProtectedRole = (role: unknown): boolean => protectedRoles.has(normalize
 const sanitizeUser = (user: any) => ({
   _id: user._id.toString(),
   tenantId: user.tenantId,
+  employeeId: user.employeeId ? String(user.employeeId) : undefined,
   email: user.email,
   firstName: user.firstName,
   lastName: user.lastName,
@@ -80,6 +83,7 @@ router.get('/', async (_req: AuthenticatedRequest, res: Response) => {
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
+      employeeId,
       email,
       password,
       firstName,
@@ -113,8 +117,22 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(409).json({ success: false, error: 'User already exists with this email' });
     }
 
+    let resolvedEmployeeId: string | undefined;
+    if (employeeId !== undefined && String(employeeId || '').trim()) {
+      const normalizedEmployeeId = String(employeeId).trim();
+      if (!mongoose.isValidObjectId(normalizedEmployeeId)) {
+        return res.status(400).json({ success: false, error: 'Selected employee was not found' });
+      }
+      const employee = await Employee.findById(normalizedEmployeeId).select('_id');
+      if (!employee) {
+        return res.status(400).json({ success: false, error: 'Selected employee was not found' });
+      }
+      resolvedEmployeeId = employee._id.toString();
+    }
+
     const user = await User.create({
       tenantId: req.tenantId,
+      employeeId: resolvedEmployeeId,
       email: normalizedEmail,
       password: await hashPassword(String(password)),
       firstName: String(firstName).trim(),
@@ -163,6 +181,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const updates: Record<string, any> = {};
     const {
+      employeeId,
       email,
       password,
       firstName,
@@ -180,6 +199,21 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
         return res.status(400).json({ success: false, error: 'Email is required' });
       }
       updates.email = normalizedEmail;
+    }
+    if (employeeId !== undefined) {
+      const normalizedEmployeeId = String(employeeId || '').trim();
+      if (!normalizedEmployeeId) {
+        updates.employeeId = null;
+      } else {
+        if (!mongoose.isValidObjectId(normalizedEmployeeId)) {
+          return res.status(400).json({ success: false, error: 'Selected employee was not found' });
+        }
+        const employee = await Employee.findById(normalizedEmployeeId).select('_id');
+        if (!employee) {
+          return res.status(400).json({ success: false, error: 'Selected employee was not found' });
+        }
+        updates.employeeId = employee._id;
+      }
     }
     if (firstName !== undefined) updates.firstName = String(firstName).trim();
     if (lastName !== undefined) updates.lastName = String(lastName).trim();

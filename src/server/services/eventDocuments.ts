@@ -93,6 +93,39 @@ export type EventPaymentReceiptDocumentInput = {
   generatedAt: Date | string;
 };
 
+export type EventQuotationDocumentInput = {
+  quoteNumber: string;
+  quoteStatus: string;
+  validUntil?: Date | string;
+  eventName: string;
+  organizerName: string;
+  organizationName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  facilities: Array<{ name: string; location?: string; hourlyRate?: number }>;
+  occurrences: EventOccurrenceDocumentRow[];
+  items: Array<{
+    description: string;
+    quantity: number;
+    unitLabel?: string;
+    unitPrice: number;
+    lineTotal: number;
+    notes?: string;
+  }>;
+  subtotal: number;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  discountAmount: number;
+  taxableAmount: number;
+  gstRate: number;
+  gstAmount: number;
+  totalAmount: number;
+  termsAndConditions: string;
+  notes?: string;
+  linkedBookingNumber?: string;
+  generatedAt: Date | string;
+};
+
 type BusinessProfile = {
   legalName: string;
   tradeName: string;
@@ -550,7 +583,13 @@ const drawTable = (
   return nextY + 6;
 };
 
-const drawRemarksBox = (doc: jsPDF, y: number, note?: string, footerNote?: string): number => {
+const drawRemarksBox = (
+  doc: jsPDF,
+  y: number,
+  note?: string,
+  footerNote?: string,
+  title = 'Remarks'
+): number => {
   const parts = [String(note || '').trim(), String(footerNote || '').trim()].filter(Boolean);
   if (!parts.length) return y;
 
@@ -566,7 +605,7 @@ const drawRemarksBox = (doc: jsPDF, y: number, note?: string, footerNote?: strin
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   setTextColor(doc, palette.cardTitle);
-  doc.text('Remarks', PAGE_MARGIN + 4, nextY + 6);
+  doc.text(title, PAGE_MARGIN + 4, nextY + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
@@ -862,6 +901,179 @@ export const buildEventPaymentReceiptDocument = async (input: EventPaymentReceip
     </div>
   `;
   const text = `Event payment receipt\nBooking No: ${input.bookingNumber}\nReceipt No: ${input.receiptNumber}\nEvent: ${input.eventName}\nReceipt Amount: ${formatCurrency(input.payment.amount)}\nBalance: ${formatCurrency(input.balanceAmount)}`;
+
+  return {
+    fileName,
+    subject,
+    html,
+    text,
+    pdfBuffer,
+  };
+};
+
+export const buildEventQuotationDocument = async (input: EventQuotationDocumentInput) => {
+  const business = await loadBusinessProfile();
+  const pdfBuffer = createPdfBuffer((doc, currentBusiness) => {
+    let y = drawDocumentHeader(
+      doc,
+      currentBusiness,
+      'Event Quotation',
+      input.quoteNumber,
+      input.generatedAt
+    );
+
+    y = drawHero(
+      doc,
+      y,
+      safeValue(input.eventName, 'Event Quotation'),
+      `Organizer: ${safeValue(input.organizerName)}${input.organizationName ? ` | Organization: ${safeValue(input.organizationName)}` : ''}`,
+      [input.quoteStatus, input.linkedBookingNumber ? 'Booked' : 'Quotation']
+    );
+
+    y = drawInfoCardsRow(
+      doc,
+      y,
+      {
+        title: 'Quotation Details',
+        rows: [
+          { label: 'Quote No', value: input.quoteNumber },
+          { label: 'Status', value: String(input.quoteStatus || '-').toUpperCase() },
+          { label: 'Valid Until', value: input.validUntil ? formatDate(input.validUntil) : '-' },
+          { label: 'Linked Booking', value: safeValue(input.linkedBookingNumber) },
+          { label: 'Generated On', value: formatDateTime(input.generatedAt) },
+        ],
+      },
+      {
+        title: 'Contact Details',
+        rows: [
+          { label: 'Organizer', value: input.organizerName },
+          { label: 'Organization', value: safeValue(input.organizationName) },
+          { label: 'Phone', value: safeValue(input.contactPhone) },
+          { label: 'Email', value: safeValue(input.contactEmail) },
+          { label: 'Facility Count', value: String(input.facilities?.length || 0) },
+        ],
+      }
+    );
+
+    y = drawTable(
+      doc,
+      y,
+      'Facilities',
+      [
+        { header: '#', width: 0.1, align: 'center' },
+        { header: 'Facility', width: 0.48 },
+        { header: 'Location', width: 0.26 },
+        { header: 'Default Rate / Hr', width: 0.16, align: 'right' },
+      ],
+      input.facilities.map((facility, index) => [
+        String(index + 1).padStart(2, '0'),
+        safeValue(facility.name),
+        safeValue(facility.location),
+        formatCurrency(Number(facility.hourlyRate || 0)),
+      ])
+    );
+
+    y = drawTable(
+      doc,
+      y,
+      'Requested Schedule',
+      [
+        { header: '#', width: 0.1, align: 'center' },
+        { header: 'Event Date', width: 0.22 },
+        { header: 'Time Slot', width: 0.28 },
+        { header: 'Schedule Detail', width: 0.4 },
+      ],
+      input.occurrences.map((row, index) => [
+        String(index + 1).padStart(2, '0'),
+        formatDate(row.startTime),
+        `${formatTime(row.startTime)} - ${formatTime(row.endTime)}`,
+        `${formatDateTime(row.startTime)} to ${formatDateTime(row.endTime)}`,
+      ])
+    );
+
+    y = drawTable(
+      doc,
+      y,
+      'Quotation Items',
+      [
+        { header: '#', width: 0.08, align: 'center' },
+        { header: 'Description', width: 0.4 },
+        { header: 'Qty', width: 0.1, align: 'right' },
+        { header: 'Unit', width: 0.12 },
+        { header: 'Rate', width: 0.14, align: 'right' },
+        { header: 'Amount', width: 0.16, align: 'right' },
+      ],
+      input.items.map((item, index) => [
+        String(index + 1).padStart(2, '0'),
+        safeValue(item.description),
+        round2(Number(item.quantity || 0)).toFixed(2),
+        safeValue(item.unitLabel || 'Unit'),
+        formatCurrency(Number(item.unitPrice || 0)),
+        formatCurrency(Number(item.lineTotal || 0)),
+      ])
+    );
+
+    y = drawTable(
+      doc,
+      y,
+      'Financial Breakdown',
+      [
+        { header: 'Description', width: 0.68 },
+        { header: 'Amount / Value', width: 0.32, align: 'right' },
+      ],
+      [
+        ['Subtotal', formatCurrency(input.subtotal)],
+        [
+          input.discountType === 'percentage'
+            ? `Discount (${round2(Number(input.discountValue || 0)).toFixed(2)}%)`
+            : 'Discount (Fixed)',
+          formatCurrency(input.discountAmount),
+        ],
+        ['Taxable Value', formatCurrency(input.taxableAmount)],
+        [`GST (${round2(Number(input.gstRate || 0)).toFixed(2)}%)`, formatCurrency(input.gstAmount)],
+        ['Grand Total', formatCurrency(input.totalAmount)],
+      ]
+    );
+
+    y = drawRemarksBox(
+      doc,
+      y,
+      input.termsAndConditions,
+      'These terms can be revised before final approval and booking confirmation.',
+      'Terms & Conditions'
+    );
+
+    y = drawRemarksBox(
+      doc,
+      y,
+      input.notes,
+      'Quotation prepared for discussion and booking confirmation.'
+    );
+
+    drawDocumentFooter(
+      doc,
+      y,
+      currentBusiness,
+      'This is a computer-generated quotation from the SPARK AI event management system.'
+    );
+  }, business);
+
+  const fileName = `${sanitizeFileNamePart(input.quoteNumber || input.eventName || 'event-quotation')}.pdf`;
+  const subject = `${businessLabel(business)} Event Quotation - ${input.quoteNumber}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+      <h2 style="margin-bottom:8px">${businessLabel(business)} Event Quotation</h2>
+      <p>Your event quotation is attached as a PDF.</p>
+      <table style="border-collapse:collapse;margin-top:12px">
+        <tr><td style="padding:4px 12px 4px 0"><strong>Quote No</strong></td><td style="padding:4px 0">${input.quoteNumber}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><strong>Event</strong></td><td style="padding:4px 0">${input.eventName}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><strong>Organizer</strong></td><td style="padding:4px 0">${input.organizerName}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><strong>Quotation Total</strong></td><td style="padding:4px 0">${formatCurrency(input.totalAmount)}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><strong>Valid Until</strong></td><td style="padding:4px 0">${input.validUntil ? formatDate(input.validUntil) : '-'}</td></tr>
+      </table>
+    </div>
+  `;
+  const text = `Event quotation\nQuote No: ${input.quoteNumber}\nEvent: ${input.eventName}\nOrganizer: ${input.organizerName}\nQuotation Total: ${formatCurrency(input.totalAmount)}`;
 
   return {
     fileName,

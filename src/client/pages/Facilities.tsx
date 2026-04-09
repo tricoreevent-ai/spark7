@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { consumeCrmConversionDraft, CrmConversionDraft } from '../utils/crmDrafts';
 
 interface Facility {
   _id: string;
@@ -64,6 +65,13 @@ const addOneHour = (time: string): string => {
   const [hours, minutes] = time.split(':').map(Number);
   const next = new Date(2000, 0, 1, hours, minutes, 0, 0);
   next.setHours(next.getHours() + 1);
+  return `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+};
+
+const addHoursToTime = (time: string, hoursToAdd: number): string => {
+  const [hours, minutes] = String(time || '09:00').split(':').map(Number);
+  const next = new Date(2000, 0, 1, hours || 0, minutes || 0, 0, 0);
+  next.setHours(next.getHours() + Math.max(1, Math.floor(hoursToAdd || 1)));
   return `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
 };
 
@@ -137,6 +145,7 @@ export const Facilities: React.FC = () => {
   const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
+  const [crmDraft, setCrmDraft] = useState<CrmConversionDraft | null>(null);
 
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');
@@ -208,6 +217,10 @@ export const Facilities: React.FC = () => {
   }, [bookingForm.bookedUnits, selectedFacilityCapacity]);
 
   useEffect(() => {
+    setCrmDraft(consumeCrmConversionDraft('facility-booking'));
+  }, []);
+
+  useEffect(() => {
     if (selectedFacilityCapacity <= 1 && bookingForm.bookedUnits !== '1') {
       setBookingForm((prev) => ({ ...prev, bookedUnits: '1' }));
       return;
@@ -224,6 +237,28 @@ export const Facilities: React.FC = () => {
       }
     }
   }, [bookingForm.bookedUnits, selectedFacilityCapacity]);
+
+  useEffect(() => {
+    if (!crmDraft || !activeFacilities.length) return;
+    const targetFacilityId = crmDraft.requestedFacilityId && activeFacilities.some((row) => row._id === crmDraft.requestedFacilityId)
+      ? crmDraft.requestedFacilityId
+      : activeFacilities[0]?._id || '';
+    const requestedStartTime = crmDraft.requestedStartTime || '09:00';
+    setBookingForm((prev) => ({
+      ...prev,
+      facilityId: targetFacilityId,
+      customerId: crmDraft.customerId || '',
+      customerPhone: crmDraft.customerPhone || '',
+      customerName: crmDraft.customerName || '',
+      customerEmail: crmDraft.customerEmail || '',
+      bookingDate: crmDraft.requestedDate || prev.bookingDate,
+      startTime: requestedStartTime,
+      endTime: addHoursToTime(requestedStartTime, crmDraft.durationHours || 1),
+      notes: [prev.notes, crmDraft.notes].filter(Boolean).join('\n').trim(),
+    }));
+    setMessage(`CRM enquiry ${crmDraft.enquiryNumber || ''} loaded into facility booking.`);
+    setCrmDraft(null);
+  }, [activeFacilities, crmDraft]);
 
   const autoAmount = useMemo(() => {
     if (!selectedFormFacility || bookingDurationHours <= 0) return 0;

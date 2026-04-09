@@ -2,9 +2,11 @@ import { randomUUID } from 'crypto';
 import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { EventBooking } from '../models/EventBooking.js';
+import { Customer } from '../models/Customer.js';
 import { Facility } from '../models/Facility.js';
 import { FacilityBooking } from '../models/FacilityBooking.js';
 import { AccountingInvoice } from '../models/AccountingInvoice.js';
+import { EventQuotation } from '../models/EventQuotation.js';
 import { generateNumber } from '../services/numbering.js';
 import {
   buildEventConfirmationDocument,
@@ -29,6 +31,7 @@ type NormalizedOccurrence = {
 };
 
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
 
 const derivePaymentStatus = (paidAmount: number, totalAmount: number, refunded = false): PaymentStatus => {
@@ -53,6 +56,74 @@ const applyCancellationRules = (startTime: Date, totalAmount: number, paidAmount
 const normalizePaymentMethod = (value: any): PaymentMethod => {
   const normalized = String(value || '').trim().toLowerCase();
   return (PAYMENT_METHODS as readonly string[]).includes(normalized) ? (normalized as PaymentMethod) : 'cash';
+};
+
+const findOrCreateEventCustomer = async (args: {
+  customerId?: any;
+  organizerName?: any;
+  contactPhone?: any;
+  contactEmail?: any;
+  createdBy?: string;
+}) => {
+  const normalizedPhone = normalizePhone(args.contactPhone);
+  const normalizedEmail = normalizeEmail(args.contactEmail);
+  const normalizedName = String(args.organizerName || '').trim();
+
+  if (args.customerId) {
+    const existingById = await Customer.findById(args.customerId);
+    if (!existingById) throw new Error('Customer not found');
+
+    let changed = false;
+    if (normalizedPhone && existingById.phone !== normalizedPhone) {
+      existingById.phone = normalizedPhone;
+      changed = true;
+    }
+    if (normalizedEmail && existingById.email !== normalizedEmail) {
+      existingById.email = normalizedEmail;
+      changed = true;
+    }
+    if (normalizedName && existingById.name !== normalizedName) {
+      existingById.name = normalizedName;
+      changed = true;
+    }
+    if (changed) await existingById.save();
+    return existingById;
+  }
+
+  if (normalizedPhone) {
+    const existingByPhone = await Customer.findOne({ phone: normalizedPhone }).sort({ updatedAt: -1, createdAt: -1 });
+    if (existingByPhone) {
+      let changed = false;
+      if (normalizedEmail && !existingByPhone.email) {
+        existingByPhone.email = normalizedEmail;
+        changed = true;
+      }
+      if (normalizedName && existingByPhone.name !== normalizedName) {
+        existingByPhone.name = normalizedName;
+        changed = true;
+      }
+      if (changed) await existingByPhone.save();
+      return existingByPhone;
+    }
+  }
+
+  if (!normalizedName) return null;
+
+  const customerCode = await generateNumber('customer_code', { prefix: 'CUST-', padTo: 5 });
+  const customer = await Customer.create({
+    customerCode,
+    name: normalizedName,
+    phone: normalizedPhone || undefined,
+    email: normalizedEmail || undefined,
+    customerCategory: 'individual',
+    accountType: 'cash',
+    creditLimit: 0,
+    creditDays: 0,
+    openingBalance: 0,
+    outstandingBalance: 0,
+    createdBy: args.createdBy,
+  });
+  return customer;
 };
 
 const isValidDate = (value: Date): boolean => !Number.isNaN(value.getTime());
@@ -343,6 +414,7 @@ router.get('/bookings/list', authMiddleware, async (req: AuthenticatedRequest, r
 router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
+      customerId,
       eventName,
       organizerName,
       organizationName,
@@ -361,6 +433,8 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
       reminderAt,
       advancePaymentMethod,
       advanceRemarks,
+      sourceQuotationId,
+      sourceQuotationNumber,
     } = req.body;
 
     const selectedFacilities = Array.isArray(facilityIds) ? facilityIds.map((id) => String(id)) : [];
@@ -408,6 +482,13 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
     const finalPaid = Math.min(finalTotal, Math.max(finalAdvance, Number(paidAmount ?? finalAdvance)));
     const finalBalance = round2(Math.max(0, finalTotal - finalPaid));
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+    const linkedCustomer = await findOrCreateEventCustomer({
+      customerId,
+      organizerName,
+      contactPhone,
+      contactEmail,
+      createdBy: req.userId,
+    });
     const eventNumber = await generateNumber('corporate_event_booking_number', {
       prefix: 'EVT-',
       datePart: true,
@@ -436,6 +517,10 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
 
     const row = await EventBooking.create({
       eventNumber,
+      customerId: linkedCustomer?._id?.toString() || undefined,
+      customerCode: linkedCustomer?.customerCode || undefined,
+      sourceQuotationId: String(sourceQuotationId || '').trim() || undefined,
+      sourceQuotationNumber: String(sourceQuotationNumber || '').trim() || undefined,
       seriesId,
       seriesTotalDates: occurrences.length,
       eventName,
@@ -470,7 +555,7 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
 
     await createInvoice({
       invoiceDate: new Date(),
-      customerName: organizerName,
+      customerName: linkedCustomer?.name || organizerName,
       referenceType: 'event_booking',
       referenceId: row._id.toString(),
       description: `Event booking ${row.eventNumber}`,
@@ -487,6 +572,17 @@ router.post('/bookings', authMiddleware, async (req: AuthenticatedRequest, res: 
         eventName,
       },
     });
+
+    if (sourceQuotationId) {
+      const linkedQuote = await EventQuotation.findById(String(sourceQuotationId));
+      if (linkedQuote) {
+        linkedQuote.quoteStatus = 'booked';
+        linkedQuote.linkedBookingId = row._id.toString();
+        linkedQuote.linkedBookingNumber = row.eventNumber;
+        linkedQuote.updatedBy = req.userId;
+        await linkedQuote.save();
+      }
+    }
 
     const created = await EventBooking.findById(row._id).populate('facilityIds', 'name location hourlyRate');
     res.status(201).json({

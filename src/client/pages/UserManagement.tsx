@@ -7,6 +7,7 @@ import { showConfirmDialog } from '../utils/appDialogs';
 
 interface ManagedUser {
   _id: string;
+  employeeId?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -22,6 +23,12 @@ interface ManagedRole {
   permissions: PermissionMatrix;
 }
 
+interface EmployeeOption {
+  _id: string;
+  employeeCode: string;
+  name: string;
+}
+
 interface ManagedPage {
   key: PageKey;
   title: string;
@@ -31,9 +38,11 @@ interface ManagedPage {
 const cloneEmptyPermissions = (): PermissionMatrix => ({ ...EMPTY_PERMISSIONS });
 
 export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ onReloadMe }) => {
+  const [activeTab, setActiveTab] = useState<'directory' | 'add' | 'roles'>('directory');
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [roles, setRoles] = useState<ManagedRole[]>([]);
   const [pages, setPages] = useState<ManagedPage[]>([]);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentUserRole, setCurrentUserRole] = useState('');
   const [roleDrafts, setRoleDrafts] = useState<Record<string, PermissionMatrix>>({});
@@ -46,6 +55,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
   const [message, setMessage] = useState('');
   const [statusUpdatingUserId, setStatusUpdatingUserId] = useState('');
   const formCardRef = useRef<HTMLFormElement | null>(null);
+  const didInitializeBlankFormRef = useRef(false);
 
   const [form, setForm] = useState({
     email: '',
@@ -54,6 +64,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
     lastName: '',
     phoneNumber: '',
     businessName: '',
+    employeeId: '',
     role: 'receptionist',
     isActive: true,
   });
@@ -123,22 +134,37 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
     setMessage('');
   };
 
+  const buildBlankForm = (preferredRole?: string) => ({
+    email: '',
+    password: '',
+    firstName: '',
+    lastName: '',
+    phoneNumber: '',
+    businessName: '',
+    employeeId: '',
+    role: preferredRole || roles[0]?.role || 'receptionist',
+    isActive: true,
+  });
+
   const loadData = async () => {
     clearBanner();
     try {
-      const [usersResp, rolesResp, pagesResp, meResp] = await Promise.all([
+      const [usersResp, rolesResp, pagesResp, meResp, employeesResp] = await Promise.all([
         fetchApiJson(apiUrl('/api/users'), { headers }),
         fetchApiJson(apiUrl('/api/rbac/roles'), { headers }),
         fetchApiJson(apiUrl('/api/rbac/pages'), { headers }),
         fetchApiJson(apiUrl('/api/auth/me'), { headers }),
+        fetchApiJson(apiUrl('/api/employees'), { headers }).catch(() => ({ data: [] })),
       ]);
 
       const nextUsers: ManagedUser[] = usersResp.data || [];
       const nextRoles: ManagedRole[] = rolesResp.data || [];
       const nextPages: ManagedPage[] = pagesResp.data || [];
+      const nextEmployees: EmployeeOption[] = employeesResp.data || [];
       setUsers(nextUsers);
       setRoles(nextRoles);
       setPages(nextPages);
+      setEmployees(nextEmployees);
       setCurrentUserId(String(meResp?.user?._id || ''));
       setCurrentUserRole(String(meResp?.user?.role || '').toLowerCase());
 
@@ -159,6 +185,12 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
           role: currentRoleExists ? prev.role : nextRoles[0]?.role || 'receptionist',
         };
       });
+
+      if (!didInitializeBlankFormRef.current && !editingUserId) {
+        didInitializeBlankFormRef.current = true;
+        setEditingUserId('');
+        setForm(buildBlankForm(nextRoles[0]?.role || 'receptionist'));
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to load user management data');
     }
@@ -168,18 +200,9 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
     loadData();
   }, []);
 
-  const resetForm = () => {
+  const resetForm = (preferredRole?: string) => {
     setEditingUserId('');
-    setForm({
-      email: '',
-      password: '',
-      firstName: '',
-      lastName: '',
-      phoneNumber: '',
-      businessName: '',
-      role: roles[0]?.role || 'receptionist',
-      isActive: true,
-    });
+    setForm(buildBlankForm(preferredRole));
   };
 
   const saveUser = async (e: React.FormEvent) => {
@@ -208,6 +231,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
         lastName: form.lastName,
         phoneNumber: form.phoneNumber,
         businessName: form.businessName,
+        employeeId: form.employeeId.trim() || undefined,
         role: form.role,
         isActive: form.isActive,
         ...(form.password ? { password: form.password } : {}),
@@ -234,7 +258,9 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
       }
 
       await loadData();
-      await onReloadMe();
+      if (editingUserId === currentUserId) {
+        await onReloadMe();
+      }
       resetForm();
     } catch (e: any) {
       setError(e.message || 'Failed to save user');
@@ -243,6 +269,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
 
   const onEditUser = (user: ManagedUser) => {
     clearBanner();
+    setActiveTab('add');
     setEditingUserId(user._id);
     setForm({
       email: user.email || '',
@@ -251,6 +278,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
       lastName: user.lastName || '',
       phoneNumber: user.phoneNumber || '',
       businessName: user.businessName || '',
+      employeeId: String((user as any).employeeId || ''),
       role: user.role || roles[0]?.role || 'receptionist',
       isActive: Boolean(user.isActive),
     });
@@ -387,6 +415,12 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
 
   const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500';
   const isStatusUpdating = (user: ManagedUser) => statusUpdatingUserId === user._id;
+  const tabButtonClass = (tab: 'directory' | 'add' | 'roles') =>
+    `rounded-lg px-4 py-2 text-sm font-semibold transition ${
+      activeTab === tab
+        ? 'bg-indigo-500 text-white'
+        : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'
+    }`;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
@@ -397,15 +431,76 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
       {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
       {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <form ref={formCardRef} onSubmit={saveUser} className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-3">
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setActiveTab('directory')} className={tabButtonClass('directory')}>
+            User Directory
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              clearBanner();
+              resetForm();
+              setActiveTab('add');
+              window.setTimeout(() => focusForm(), 0);
+            }}
+            className={tabButtonClass('add')}
+          >
+            Add User
+          </button>
+          <button type="button" onClick={() => setActiveTab('roles')} className={tabButtonClass('roles')}>
+            Role Access Configuration
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        {activeTab === 'add' && (
+        <form
+          key={editingUserId || 'new-user-form'}
+          ref={formCardRef}
+          onSubmit={saveUser}
+          autoComplete="off"
+          className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-3"
+        >
           <h2 className="text-lg font-semibold text-white">{editingUserId ? 'Edit User' : 'Add User'}</h2>
-          <input className={inputClass} type="email" placeholder="Email ID (required for login & OTP)" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className={inputClass} type="password" placeholder={editingUserId ? 'New Password (optional)' : 'Password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <input className={inputClass} placeholder="First Name" required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
-          <input className={inputClass} placeholder="Last Name" required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
-          <input className={inputClass} placeholder="Phone Number" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} />
-          <input className={inputClass} placeholder="Business Name" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} />
+          <input type="text" name="prevent-browser-username" autoComplete="username" className="hidden" tabIndex={-1} />
+          <input type="password" name="prevent-browser-password" autoComplete="current-password" className="hidden" tabIndex={-1} />
+          <input
+            className={inputClass}
+            type="email"
+            name="create-user-email"
+            autoComplete="off"
+            placeholder="Email ID (required for login & OTP)"
+            required
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+          <input
+            className={inputClass}
+            type="password"
+            name="create-user-password"
+            autoComplete="new-password"
+            placeholder={editingUserId ? 'New Password (optional)' : 'Password'}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+          <input className={inputClass} name="create-user-first-name" autoComplete="off" placeholder="First Name" required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
+          <input className={inputClass} name="create-user-last-name" autoComplete="off" placeholder="Last Name" required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+          <input className={inputClass} name="create-user-phone" autoComplete="off" placeholder="Phone Number" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} />
+          <input className={inputClass} name="create-user-business" autoComplete="off" placeholder="Business Name" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} />
+
+          <select className={inputClass} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+            <option value="">Employee link (optional)</option>
+            {employees.map((employee) => (
+              <option key={employee._id} value={employee._id}>
+                {employee.employeeCode} - {employee.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-400">
+            Link an employee master record when this user should use self check-in and check-out attendance.
+          </p>
 
           <select className={inputClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             {roles.map((role) => (
@@ -432,18 +527,21 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
             <button className="flex-1 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400">
               {editingUserId ? 'Update User' : 'Create User'}
             </button>
-            {editingUserId && (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
-              >
-                Cancel
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                clearBanner();
+                resetForm();
+              }}
+              className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
+            >
+              Clear
+            </button>
           </div>
         </form>
+        )}
 
+        {activeTab === 'directory' && (
         <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-0 shadow-[0_24px_70px_rgba(2,6,23,0.24)] xl:col-span-2 overflow-hidden">
           <div className="border-b border-white/10 px-5 py-5">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -457,6 +555,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                 type="button"
                 onClick={() => {
                   resetForm();
+                  setActiveTab('add');
                   focusForm();
                 }}
                 className="inline-flex items-center justify-center rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400"
@@ -641,8 +740,9 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
             />
           </div>
         </div>
-      </div>
+        )}
 
+        {activeTab === 'roles' && (
       <div className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-white">Role Access Configuration</h2>
@@ -706,6 +806,8 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
             </div>
           ))}
         </div>
+      </div>
+        )}
       </div>
     </div>
   );

@@ -2,6 +2,10 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IEventBooking extends Document {
   eventNumber?: string;
+  customerId?: string;
+  customerCode?: string;
+  sourceQuotationId?: string;
+  sourceQuotationNumber?: string;
   seriesId?: string;
   seriesTotalDates?: number;
   eventName: string;
@@ -61,6 +65,10 @@ export interface IEventBooking extends Document {
 const EventBookingSchema = new Schema<IEventBooking>(
   {
     eventNumber: { type: String, trim: true, index: true },
+    customerId: { type: String, trim: true, index: true },
+    customerCode: { type: String, trim: true, index: true },
+    sourceQuotationId: { type: String, trim: true, index: true },
+    sourceQuotationNumber: { type: String, trim: true, index: true },
     seriesId: { type: String, trim: true, index: true },
     seriesTotalDates: { type: Number, min: 1, default: 1 },
     eventName: { type: String, required: true, trim: true },

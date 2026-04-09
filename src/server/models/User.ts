@@ -13,6 +13,11 @@ const userSchema = new Schema<IUserDocument>(
       trim: true,
       index: true,
     },
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee',
+      index: true,
+    },
     email: {
       type: String,
       required: true,
