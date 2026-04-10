@@ -167,6 +167,9 @@ $clientLines = Set-Or-AppendEnvKey -Lines $clientLines -Key 'VITE_API_BASE_URL' 
 if (($clientEnvKeysFromCode -contains 'VITE_API_URL') -or (($clientLines | Where-Object { $_ -match '^\s*VITE_API_URL\s*=' }).Count -gt 0)) {
   $clientLines = Set-Or-AppendEnvKey -Lines $clientLines -Key 'VITE_API_URL' -Value $BackendApiBaseUrl
 }
+if (($clientEnvKeysFromCode -contains 'VITE_SITE_URL') -or (($clientLines | Where-Object { $_ -match '^\s*VITE_SITE_URL\s*=' }).Count -gt 0)) {
+  $clientLines = Set-Or-AppendEnvKey -Lines $clientLines -Key 'VITE_SITE_URL' -Value $primaryFrontendOrigin
+}
 
 Save-Lines -Path $ServerEnvPath -Lines $serverLines
 Save-Lines -Path $ClientEnvPath -Lines $clientLines

@@ -17,7 +17,7 @@
     "build:deploy": "build-deploy.bat",
     "build:hostinger": "build-hostinger-deploy.bat",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "vite build --mode client",
+    "build:client": "vite build --mode client && node --import tsx scripts/generate-public-seo.tsx",
     "build:desktop": "tsc src/desktop/main/main.ts --outDir dist/desktop --rootDir src/desktop --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --allowSyntheticDefaultImports",
     "prepare:runtime": "node scripts/prepare-runtime-package.cjs",
     "build:production": "build-separate-deploy.bat",

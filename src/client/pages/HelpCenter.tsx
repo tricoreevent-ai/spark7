@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { PublicSeo } from '../public/PublicSeo';
 import { getGeneralSettings } from '../utils/generalSettings';
 
 type GuideLink = {
@@ -1839,8 +1840,10 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
   }, [location.hash]);
 
   return (
-    <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <>
+      {isPublic ? <PublicSeo routeKey="user-manual" /> : null}
+      <div className="px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl space-y-6">
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
           <div className="grid gap-0 lg:grid-cols-[1.55fr_0.95fr]">
             <div className="bg-gradient-to-br from-indigo-500/20 via-sky-500/10 to-transparent p-6 sm:p-8">
@@ -2418,6 +2421,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
           </ul>
         </section>
       </div>
-    </div>
+      </div>
+    </>
   );
 };

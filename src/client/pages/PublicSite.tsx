@@ -1,7 +1,18 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import sparkDashboardMacbook from '../assets/marketing/spark-dashboard-macbook.png';
+import { PublicSeo } from '../public/PublicSeo';
+import {
+  APPLICATION_RIGHTS_NOTE,
+  PRIMARY_SEO_PHRASE,
+  PRODUCT_BRAND_NAME,
+  RIGHTS_HOLDER_ADDRESS,
+  RIGHTS_HOLDER_NAME,
+  buildWhatsappContactUrl,
+  WHATSAPP_DISPLAY_PHONE,
+} from '../public/publicBrand';
 import { apiUrl, fetchApiJson } from '../utils/api';
+
+const DEFAULT_PUBLIC_MARKETING_IMAGE = new URL('../assets/marketing/spark-dashboard-macbook.png', import.meta.url).href;
 
 type PublicPageKey = 'home' | 'about' | 'contact' | 'login';
 
@@ -14,14 +25,18 @@ type ActionLink = {
 type PublicShellProps = {
   active: PublicPageKey;
   eyebrow: string;
-  title: string;
-  description: string;
+  title: React.ReactNode;
+  description: React.ReactNode;
   primaryAction?: ActionLink;
   secondaryAction?: ActionLink;
   heroSupplement?: React.ReactNode;
   heroVariant?: 'default' | 'banner';
   heroRight: React.ReactNode;
   children?: React.ReactNode;
+};
+
+type PublicHomePageProps = {
+  productImageSrc?: string;
 };
 
 type PublicLoginPageProps = {
@@ -34,39 +49,34 @@ const publicNavItems: Array<{ key: PublicPageKey; label: string; to: string }> =
   { key: 'contact', label: 'Contact', to: '/contact' },
 ];
 
-const SARVA_HORIZON_ADDRESS = 'Sarva Horizon, Lingarajapuram, Bangalore - 560084';
-const APPLICATION_RIGHTS_NOTE = 'Application rights go to Sarva Horizon.';
-const WHATSAPP_DISPLAY_PHONE = '7019572701';
-const WHATSAPP_PHONE_E164 = '917019572701';
-
 const homeFeatures = [
   {
-    title: 'Bookings and Events',
+    title: 'Facility Booking System',
     description:
-      'Manage facility reservations, recurring schedules, event bookings, availability rules, and payment follow-up from one workflow.',
+      'Manage court reservations, recurring schedules, event bookings, availability rules, and payment follow-up from one sports complex workflow.',
   },
   {
-    title: 'Sales and POS',
+    title: 'Online Court Scheduling',
     description:
-      'Handle quotations, orders, returns, customer billing, and product-led front desk transactions with traceable records.',
+      'Keep online court scheduling, front desk follow-up, quotations, and venue availability aligned without separate tools.',
   },
   {
-    title: 'Catalog and Inventory',
+    title: 'Secure Payment Processing',
     description:
-      'Maintain product masters, categories, procurement, stock visibility, and alert-driven replenishment for day-to-day operations.',
+      'Track collections, billing, receipts, and secure payment processing alongside the booking and membership records they belong to.',
   },
   {
-    title: 'Membership Programs',
+    title: 'Membership Management',
     description:
-      'Create plans, issue subscriptions, track renewals, and monitor membership performance for clubs and sports centers.',
+      'Create plans, issue subscriptions, track renewals, and monitor member activity from one connected membership management workspace.',
   },
   {
-    title: 'People and Payroll',
+    title: 'Staff Operations',
     description:
-      'Store employee details, manage shifts, mark attendance, and support payroll preparation from the same platform.',
+      'Store employee details, manage shifts, mark attendance, and support payroll preparation from the same sports facility management software.',
   },
   {
-    title: 'Accounts and Controls',
+    title: 'Reporting and Controls',
     description:
       'Review accounting entries, settlements, reports, user permissions, SMTP setup, and print configuration in one admin-ready system.',
   },
@@ -81,17 +91,17 @@ const workflowSteps = [
 
 const homeHeroDetails = [
   {
-    title: 'Run bookings and events faster.',
+    title: 'Run online court scheduling and facility booking from one flow.',
     description:
-      'Control court schedules, event blocks, advance collection, and customer follow-up from one connected front desk flow.',
+      'Control court schedules, event blocks, advance collection, and customer follow-up from one connected facility booking system.',
   },
   {
-    title: 'Keep memberships and staff in sync.',
+    title: 'Keep membership management and staff operations in sync.',
     description:
       'Track renewals, attendance, payroll inputs, and operational follow-up without splitting work across separate tools.',
   },
   {
-    title: 'Close the day with financial clarity.',
+    title: 'Close the day with secure payments and reporting clarity.',
     description:
       'Move from billing to receipts, vouchers, settlements, and reports with a cleaner audit trail for daily review.',
   },
@@ -99,9 +109,9 @@ const homeHeroDetails = [
 
 const aboutHighlights = [
   {
-    title: 'Built for sports complexes',
+    title: 'Built for high-activity venues',
     description:
-      'Sarva is designed for multi-activity venues such as sports complexes, indoor arenas, clubs, coaching centers, and recreational campuses.',
+      'Sarva is sports facility management software designed for sports complexes, indoor arenas, clubs, coaching centers, and recreational campuses.',
   },
   {
     title: 'Client-ready architecture',
@@ -129,7 +139,7 @@ const contactOptions = [
   {
     title: 'Request a walkthrough',
     description:
-      'Use the Contact page as the first stop for implementation discussions, product walkthroughs, or onboarding planning for a sports facility team.',
+      'Use the Contact page to book a demo, discuss onboarding, and review how the sports complex management platform fits your venue.',
   },
   {
     title: 'Client access',
@@ -139,7 +149,7 @@ const contactOptions = [
   {
     title: 'Training and rollout',
     description:
-      'Sarva works well for front desk, operations, sales, HR, accounts, and administration teams that need a shared system with clear process flow.',
+      `${PRODUCT_BRAND_NAME} works well for front desk, operations, sales, HR, accounts, and administration teams that need a shared system with clear process flow.`,
   },
 ];
 
@@ -156,9 +166,7 @@ const actionClassName = (variant: ActionLink['variant']) =>
     ? 'inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10'
     : 'inline-flex items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:from-cyan-400 hover:to-emerald-400';
 
-const whatsappContactUrl = `https://wa.me/${WHATSAPP_PHONE_E164}?text=${encodeURIComponent(
-  'Hello Sarva Horizon, I would like to know more about the Sarva sports complex management platform.'
-)}`;
+const whatsappContactUrl = buildWhatsappContactUrl();
 
 const PublicContactForm: React.FC = () => {
   const [form, setForm] = React.useState({
@@ -213,7 +221,7 @@ const PublicContactForm: React.FC = () => {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Contact Form</p>
-          <h2 className="mt-3 text-2xl font-bold text-white">Send an enquiry to Sarva Horizon</h2>
+          <h2 className="mt-3 text-2xl font-bold text-white">Send an enquiry to {RIGHTS_HOLDER_NAME}</h2>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
             Share your email, optionally add a mobile number, and tell us what you need. We will use your details to
             follow up on rollout, onboarding, or product questions.
@@ -345,9 +353,9 @@ const PublicShell: React.FC<PublicShellProps> = ({
           <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between gap-4">
               <Link to="/" className="group">
-                <p className="text-2xl font-bold tracking-tight text-white">Sarva</p>
+                <p className="text-2xl font-bold tracking-tight text-white">{PRODUCT_BRAND_NAME}</p>
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-400 transition group-hover:text-slate-200">
-                  Sports Complex Management Platform
+                  {PRIMARY_SEO_PHRASE}
                 </p>
               </Link>
 
@@ -463,8 +471,8 @@ const PublicShell: React.FC<PublicShellProps> = ({
         <footer className="border-t border-white/10 bg-slate-950/80">
           <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-sm text-slate-300 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
             <div className="space-y-1">
-              <p>Sarva helps sports complexes connect bookings, sales, memberships, staff, and finance in one system.</p>
-              <p className="text-xs text-slate-400">{SARVA_HORIZON_ADDRESS}</p>
+              <p>{PRODUCT_BRAND_NAME} helps sports complexes connect bookings, sales, memberships, staff, and finance in one system.</p>
+              <p className="text-xs text-slate-400">{RIGHTS_HOLDER_ADDRESS}</p>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">{APPLICATION_RIGHTS_NOTE}</p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -485,18 +493,18 @@ const PublicShell: React.FC<PublicShellProps> = ({
   );
 };
 
-const PublicHomeProductShot: React.FC = () => {
+const PublicHomeProductShot: React.FC<{ productImageSrc: string }> = ({ productImageSrc }) => {
   return (
     <div className="relative h-full overflow-hidden rounded-[1.85rem] border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.78),rgba(2,6,23,0.9))] p-3">
       <div className="mb-3 flex items-center justify-between gap-3 px-2">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Live product image</p>
         <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-semibold text-slate-200">
-          Spark Dashboard
+          {PRODUCT_BRAND_NAME} Dashboard
         </span>
       </div>
       <img
-        src={sparkDashboardMacbook}
-        alt="Spark dashboard shown on a MacBook Pro"
+        src={productImageSrc}
+        alt={`${PRODUCT_BRAND_NAME} sports complex management platform dashboard showing bookings, memberships, operations, and reporting`}
         className="h-full w-full rounded-[1.45rem] border border-white/10 object-cover shadow-[0_24px_70px_rgba(2,6,23,0.34)]"
         loading="eager"
       />
@@ -504,213 +512,240 @@ const PublicHomeProductShot: React.FC = () => {
   );
 };
 
-export const PublicHomePage: React.FC = () => {
+export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc = DEFAULT_PUBLIC_MARKETING_IMAGE }) => {
   return (
-    <PublicShell
-      active="home"
-      eyebrow="Public Home"
-      title="Sarva is a modern operating platform for sports complex management."
-      description="Run bookings, events, memberships, product sales, inventory, employee operations, accounts, and administration from one connected application designed for high-activity venues."
-      primaryAction={{ label: 'Client Login', to: '/login' }}
-      secondaryAction={{ label: 'Explore About', to: '/about', variant: 'secondary' }}
-      heroVariant="banner"
-      heroSupplement={
-        <div className="space-y-5">
-          {homeHeroDetails.map((item, index) => (
-            <div key={item.title} className="flex items-start gap-4">
-              <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-bold text-cyan-100">
-                {index + 1}
-              </span>
-              <div>
-                <p className="text-lg font-semibold text-white">{item.title}</p>
-                <p className="mt-2 max-w-2xl text-base leading-8 text-slate-300">{item.description}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      }
-      heroRight={<PublicHomeProductShot />}
-    >
-      <section className="space-y-5">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Feature details</p>
-            <h2 className="mt-2 text-2xl font-bold text-white">Operational modules that work together in one product</h2>
-          </div>
-          <p className="max-w-2xl text-sm leading-7 text-slate-300">
-            Each feature below supports a real business area, but the value comes from how Sarva keeps them connected
-            inside one daily operating flow.
-          </p>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {homeFeatures.map((feature) => (
-            <article key={feature.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <p className="text-lg font-semibold text-white">{feature.title}</p>
-              <p className="mt-3 text-sm leading-7 text-slate-300">{feature.description}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Why It Works</p>
-          <h2 className="mt-3 text-2xl font-bold text-white">A single workflow from enquiry to settlement</h2>
-          <p className="mt-4 text-sm leading-7 text-slate-300">
-            Sports complexes often split work between booking registers, accounting sheets, and disconnected software.
-            Sarva brings those steps together so staff can work faster and management can follow the full customer and
-            revenue lifecycle with less manual coordination.
-          </p>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Link
-              to="/contact"
-              className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
-            >
-              Contact Sarva
-            </Link>
-            <Link
-              to="/user-manual"
-              className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
-            >
-              View User Manual
-            </Link>
-          </div>
-        </article>
-
-        <article className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Operating Flow</p>
-          <div className="mt-4 grid gap-3">
-            {workflowSteps.map((step, index) => (
-              <div key={step} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/15 text-sm font-bold text-emerald-100">
+    <>
+      <PublicSeo routeKey="home" imagePath={productImageSrc} />
+      <PublicShell
+        active="home"
+        eyebrow={PRIMARY_SEO_PHRASE}
+        title={
+          <>
+            The All-in-One{' '}
+            <span className="bg-gradient-to-r from-cyan-200 via-white to-emerald-200 bg-clip-text text-transparent">
+              {PRIMARY_SEO_PHRASE}
+            </span>
+          </>
+        }
+        description={
+          <>
+            {PRODUCT_BRAND_NAME} is sports facility management software for active venues that need a facility booking
+            system, online court scheduling, membership management, secure payment processing, staff operations, and
+            reporting in one place.
+          </>
+        }
+        primaryAction={{ label: 'Client Login', to: '/login' }}
+        secondaryAction={{ label: 'Explore About', to: '/about', variant: 'secondary' }}
+        heroVariant="banner"
+        heroSupplement={
+          <div className="space-y-5">
+            {homeHeroDetails.map((item, index) => (
+              <div key={item.title} className="flex items-start gap-4">
+                <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-bold text-cyan-100">
                   {index + 1}
                 </span>
-                <p className="text-sm leading-7 text-slate-200">{step}</p>
+                <div>
+                  <p className="text-lg font-semibold text-white">{item.title}</p>
+                  <p className="mt-2 max-w-2xl text-base leading-8 text-slate-300">{item.description}</p>
+                </div>
               </div>
             ))}
           </div>
-        </article>
-      </section>
-    </PublicShell>
+        }
+        heroRight={<PublicHomeProductShot productImageSrc={productImageSrc} />}
+      >
+        <section className="space-y-5">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Feature details</p>
+              <h2 className="mt-2 text-2xl font-bold text-white">Operational modules that power one connected venue workflow</h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-7 text-slate-300">
+              Each feature below supports a real business area, but the value comes from how {PRODUCT_BRAND_NAME} keeps them connected
+              inside one daily operating flow.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {homeFeatures.map((feature) => (
+              <article key={feature.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
+                <p className="text-lg font-semibold text-white">{feature.title}</p>
+                <p className="mt-3 text-sm leading-7 text-slate-300">{feature.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+          <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Why It Works</p>
+            <h2 className="mt-3 text-2xl font-bold text-white">A single workflow from enquiry to settlement</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-300">
+              Sports complexes often split work between booking registers, accounting sheets, and disconnected software.
+              {PRODUCT_BRAND_NAME} brings those steps together so staff can work faster and management can follow the full customer and
+              revenue lifecycle with less manual coordination.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link
+                to="/contact"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
+              >
+                Contact {PRODUCT_BRAND_NAME}
+              </Link>
+              <Link
+                to="/user-manual"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
+              >
+                View User Manual
+              </Link>
+              <Link
+                to="/about"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
+              >
+                About the Platform
+              </Link>
+            </div>
+          </article>
+
+          <article className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Operating Flow</p>
+            <div className="mt-4 grid gap-3">
+              {workflowSteps.map((step, index) => (
+                <div key={step} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/15 text-sm font-bold text-emerald-100">
+                    {index + 1}
+                  </span>
+                  <p className="text-sm leading-7 text-slate-200">{step}</p>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
+      </PublicShell>
+    </>
   );
 };
 
 export const PublicAboutPage: React.FC = () => {
   return (
-    <PublicShell
-      active="about"
-      eyebrow="About Sarva"
-      title="One application for the business, operations, and administration side of a sports complex."
-      description="Sarva is positioned as the product, while each customer organization operates inside its own client workspace. That keeps the platform brand separate from the businesses using it."
-      primaryAction={{ label: 'View Contact', to: '/contact' }}
-      secondaryAction={{ label: 'Client Login', to: '/login', variant: 'secondary' }}
-      heroRight={
-        <section className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Core Modules</p>
-          <div className="mt-4 grid gap-3">
-            {moduleHighlights.map((module) => (
-              <div key={module.title} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="text-sm font-semibold text-white">{module.title}</p>
-                <p className="mt-1 text-sm leading-6 text-slate-300">{module.detail}</p>
-              </div>
-            ))}
-          </div>
+    <>
+      <PublicSeo routeKey="about" />
+      <PublicShell
+        active="about"
+        eyebrow={`About ${PRODUCT_BRAND_NAME}`}
+        title={`${PRODUCT_BRAND_NAME} brings sports facility management software into one operating layer.`}
+        description={`${PRODUCT_BRAND_NAME} is positioned as the product, while each customer organization operates inside its own client workspace. That keeps the public brand clear while supporting day-to-day venue operations.`}
+        primaryAction={{ label: 'View Contact', to: '/contact' }}
+        secondaryAction={{ label: 'Client Login', to: '/login', variant: 'secondary' }}
+        heroRight={
+          <section className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Core Modules</p>
+            <div className="mt-4 grid gap-3">
+              {moduleHighlights.map((module) => (
+                <div key={module.title} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <p className="text-sm font-semibold text-white">{module.title}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">{module.detail}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        }
+      >
+        <section className="grid gap-4 lg:grid-cols-3">
+          {aboutHighlights.map((item) => (
+            <article key={item.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <p className="text-lg font-semibold text-white">{item.title}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
+            </article>
+          ))}
         </section>
-      }
-    >
-      <section className="grid gap-4 lg:grid-cols-3">
-        {aboutHighlights.map((item) => (
-          <article key={item.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <p className="text-lg font-semibold text-white">{item.title}</p>
-            <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
+
+        <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+          <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Who {PRODUCT_BRAND_NAME} Supports</p>
+            <div className="mt-4 grid gap-3">
+              {[
+                'Front desk teams handling walk-in bookings, sales, and receipts',
+                'Operations teams managing courts, turfs, pools, schedules, and event coordination',
+                'Sales teams preparing quotations, orders, customer follow-up, and product transactions',
+                'HR and payroll teams maintaining employees, attendance, shifts, and payroll records',
+                'Accounts teams responsible for settlements, payment review, and reporting',
+                'Administrators managing permissions, company settings, print, mail, and overall system control',
+              ].map((item) => (
+                <div key={item} className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm leading-7 text-slate-200">
+                  {item}
+                </div>
+              ))}
+            </div>
           </article>
-        ))}
-      </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-        <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Who Sarva Supports</p>
-          <div className="mt-4 grid gap-3">
-            {[
-              'Front desk teams handling walk-in bookings, sales, and receipts',
-              'Operations teams managing courts, turfs, pools, schedules, and event coordination',
-              'Sales teams preparing quotations, orders, customer follow-up, and product transactions',
-              'HR and payroll teams maintaining employees, attendance, shifts, and payroll records',
-              'Accounts teams responsible for settlements, payment review, and reporting',
-              'Administrators managing permissions, company settings, print, mail, and overall system control',
-            ].map((item) => (
-              <div key={item} className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm leading-7 text-slate-200">
-                {item}
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Product Positioning</p>
-          <p className="mt-4 text-sm leading-7 text-slate-300">
-            Sarva should remain the public application identity. Client businesses such as sports centers, clubs, or
-            venue operators use the product inside their own tenant workspace, but the product itself should not be
-            hardcoded with a client name. This public site reflects that separation clearly.
-          </p>
-          <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
-            <p className="text-sm font-semibold text-white">Professional public experience</p>
-            <p className="mt-2 text-sm leading-7 text-slate-300">
-              The new public pages focus on a polished dark theme, direct navigation, clear product explanation, and a
-              dedicated login entry point for customer organizations.
+          <article className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Product Positioning</p>
+            <p className="mt-4 text-sm leading-7 text-slate-300">
+              {PRODUCT_BRAND_NAME} should remain the public application identity. Client businesses such as sports centers, clubs, or
+              venue operators use the product inside their own tenant workspace, but the product itself should not be
+              hardcoded with a client name. This public site reflects that separation clearly.
             </p>
-          </div>
-        </article>
-      </section>
-    </PublicShell>
+            <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
+              <p className="text-sm font-semibold text-white">Professional public experience</p>
+              <p className="mt-2 text-sm leading-7 text-slate-300">
+                The public site explains how one sports complex management platform can support bookings, memberships,
+                staff operations, finance, and administration without splitting work across disconnected systems.
+              </p>
+            </div>
+          </article>
+        </section>
+      </PublicShell>
+    </>
   );
 };
 
 export const PublicContactPage: React.FC = () => {
   return (
-    <PublicShell
-      active="contact"
-      eyebrow="Contact"
-      title="Start a conversation about rollout, onboarding, or client access."
-      description="Use Sarva for sports complexes that need one platform across front desk, operations, memberships, inventory, people, accounts, and admin workflows."
-      primaryAction={{ label: 'Client Login', to: '/login' }}
-      secondaryAction={{ label: 'Read the Manual', to: '/user-manual', variant: 'secondary' }}
-      heroRight={
-        <section className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">How to Engage</p>
-          <div className="mt-4 space-y-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">New implementation</p>
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                Discuss requirements, rollout priorities, and the modules your sports complex needs first.
-              </p>
+    <>
+      <PublicSeo routeKey="contact" />
+      <PublicShell
+        active="contact"
+        eyebrow="Contact"
+        title={`Book a demo of the ${PRODUCT_BRAND_NAME} ${PRIMARY_SEO_PHRASE}.`}
+        description={`Use ${PRODUCT_BRAND_NAME} for sports complexes that need one platform across front desk, operations, memberships, inventory, people, accounts, and admin workflows.`}
+        primaryAction={{ label: 'Client Login', to: '/login' }}
+        secondaryAction={{ label: 'Read the Manual', to: '/user-manual', variant: 'secondary' }}
+        heroRight={
+          <section className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">How to Engage</p>
+            <div className="mt-4 space-y-3">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm font-semibold text-white">New implementation</p>
+                <p className="mt-2 text-sm leading-7 text-slate-300">
+                  Discuss rollout priorities, demo requirements, and the modules your sports complex needs first.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm font-semibold text-white">Existing client team</p>
+                <p className="mt-2 text-sm leading-7 text-slate-300">
+                  Use the login route with your tenant or company identifier to enter your own workspace securely.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+                <p className="text-sm font-semibold text-white">WhatsApp Contact</p>
+                <p className="mt-2 text-sm leading-7 text-slate-200">
+                  Reach {RIGHTS_HOLDER_NAME} directly on WhatsApp at {WHATSAPP_DISPLAY_PHONE} for quick product enquiries.
+                </p>
+                <a href={whatsappContactUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-semibold text-emerald-100 hover:text-white">
+                  Open WhatsApp
+                </a>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm font-semibold text-white">Training and documentation</p>
+                <p className="mt-2 text-sm leading-7 text-slate-300">
+                  The built-in user manual explains every major form, menu, and route with direct hyperlinks.
+                </p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">Existing client team</p>
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                Use the login route with your tenant or company identifier to enter your own workspace securely.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-              <p className="text-sm font-semibold text-white">WhatsApp Contact</p>
-              <p className="mt-2 text-sm leading-7 text-slate-200">
-                Reach Sarva Horizon directly on WhatsApp at {WHATSAPP_DISPLAY_PHONE} for quick product enquiries.
-              </p>
-              <a href={whatsappContactUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-semibold text-emerald-100 hover:text-white">
-                Open WhatsApp
-              </a>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">Training and documentation</p>
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                The built-in user manual explains every major form, menu, and route with direct hyperlinks.
-              </p>
-            </div>
-          </div>
-        </section>
-      }
-    >
+          </section>
+        }
+      >
       <section className="grid gap-4 lg:grid-cols-3">
         {contactOptions.map((item) => (
           <article key={item.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -725,8 +760,8 @@ export const PublicContactPage: React.FC = () => {
       <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <article className="rounded-[2rem] border border-emerald-400/20 bg-emerald-400/10 p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Address</p>
-          <h2 className="mt-3 text-2xl font-bold text-white">Sarva Horizon</h2>
-          <p className="mt-4 text-base leading-8 text-slate-100">{SARVA_HORIZON_ADDRESS}</p>
+          <h2 className="mt-3 text-2xl font-bold text-white">{RIGHTS_HOLDER_NAME}</h2>
+          <p className="mt-4 text-base leading-8 text-slate-100">{RIGHTS_HOLDER_ADDRESS}</p>
           <p className="mt-4 text-base font-semibold text-white">Phone / WhatsApp: {WHATSAPP_DISPLAY_PHONE}</p>
           <p className="mt-5 text-sm leading-7 text-slate-200">{APPLICATION_RIGHTS_NOTE}</p>
         </article>
@@ -735,7 +770,7 @@ export const PublicContactPage: React.FC = () => {
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Contact Note</p>
           <p className="mt-4 text-sm leading-7 text-slate-300">
             Use this public page when sharing the product with new prospects, venue operators, or implementation teams.
-            Existing client organizations can continue through the Login route, while Sarva Horizon remains the
+            Existing client organizations can continue through the Login route, while {RIGHTS_HOLDER_NAME} remains the
             published address and rights holder shown on the public-facing site.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
@@ -757,7 +792,7 @@ export const PublicContactPage: React.FC = () => {
               to="/about"
               className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
             >
-              About Sarva
+              About {PRODUCT_BRAND_NAME}
             </Link>
           </div>
         </article>
@@ -767,7 +802,7 @@ export const PublicContactPage: React.FC = () => {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Need the product overview?</p>
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <p className="max-w-3xl text-sm leading-7 text-slate-300">
-            The Home and About pages explain what Sarva does, while the User Manual goes deeper into each form, page,
+            The Home and About pages explain what {PRODUCT_BRAND_NAME} does, while the User Manual goes deeper into each form, page,
             and module. Existing clients can go straight to Login, and new prospects can start from Contact or About.
           </p>
           <div className="flex flex-wrap gap-3">
@@ -781,26 +816,29 @@ export const PublicContactPage: React.FC = () => {
               to="/about"
               className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
             >
-              About Sarva
+              About {PRODUCT_BRAND_NAME}
             </Link>
           </div>
         </div>
       </section>
-    </PublicShell>
+      </PublicShell>
+    </>
   );
 };
 
 export const PublicLoginPage: React.FC<PublicLoginPageProps> = ({ children }) => {
   return (
-    <PublicShell
-      active="login"
-      eyebrow="Client Access"
-      title="Secure login for client workspaces using Sarva."
-      description="Client organizations sign in with their user credentials and tenant or company identifier to access their own sports complex management workspace."
-      primaryAction={{ label: 'Back to Home', to: '/', variant: 'secondary' }}
-      secondaryAction={{ label: 'Need Product Details?', to: '/about', variant: 'secondary' }}
-      heroRight={children}
-    >
+    <>
+      <PublicSeo routeKey="login" />
+      <PublicShell
+        active="login"
+        eyebrow="Client Access"
+        title={`Secure login for ${PRODUCT_BRAND_NAME} client workspaces.`}
+        description={`Client organizations sign in with their user credentials and tenant or company identifier to access their own ${PRIMARY_SEO_PHRASE.toLowerCase()} workspace.`}
+        primaryAction={{ label: 'Back to Home', to: '/', variant: 'secondary' }}
+        secondaryAction={{ label: 'Need Product Details?', to: '/about', variant: 'secondary' }}
+        heroRight={children}
+      >
       <section className="grid gap-4 lg:grid-cols-3">
         {[
           {
@@ -825,6 +863,7 @@ export const PublicLoginPage: React.FC<PublicLoginPageProps> = ({ children }) =>
           </article>
         ))}
       </section>
-    </PublicShell>
+      </PublicShell>
+    </>
   );
 };

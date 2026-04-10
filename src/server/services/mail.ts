@@ -60,10 +60,26 @@ export const uniqueRecipients = (values: unknown[]): string[] => {
   }, []);
 };
 
-export const mergeMailSettings = (value: any): ResolvedMailSettings => ({
-  ...buildMailDefaults(),
-  ...((value && typeof value === 'object') ? value : {}),
-});
+const resolveStringSetting = (value: unknown, fallback: string): string => {
+  const normalized = String(value || '').trim();
+  return normalized || fallback;
+};
+
+export const mergeMailSettings = (value: any): ResolvedMailSettings => {
+  const defaults = buildMailDefaults();
+  const source = (value && typeof value === 'object') ? value : {};
+
+  return {
+    smtpHost: resolveStringSetting(source.smtpHost, defaults.smtpHost),
+    smtpPort: toNumber(source.smtpPort, defaults.smtpPort),
+    smtpUser: resolveStringSetting(source.smtpUser, defaults.smtpUser),
+    smtpPass: resolveStringSetting(source.smtpPass, defaults.smtpPass),
+    smtpFromEmail: resolveStringSetting(source.smtpFromEmail, defaults.smtpFromEmail),
+    smtpToRecipients: resolveStringSetting(source.smtpToRecipients, defaults.smtpToRecipients),
+    smtpSecure: parseBoolean(source.smtpSecure, defaults.smtpSecure),
+    appName: resolveStringSetting(source.appName, defaults.appName),
+  };
+};
 
 const findGeneralSettingsRow = async () => {
   return AppSetting.findOne({ key: { $in: GENERAL_SETTINGS_KEYS } })
