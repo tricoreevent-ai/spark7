@@ -11,6 +11,9 @@ export interface PrintableEventQuotationItem {
   quantity: number;
   unitLabel?: string;
   unitPrice: number;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  discountAmount: number;
   lineTotal: number;
   notes?: string;
 }
@@ -24,7 +27,7 @@ export interface PrintableEventQuotation {
   organizationName?: string;
   contactPhone?: string;
   contactEmail?: string;
-  facilities: Array<{ name: string; location?: string; hourlyRate?: number }>;
+  facilities: Array<{ name: string; location?: string }>;
   occurrences: PrintableEventQuotationOccurrence[];
   items: PrintableEventQuotationItem[];
   subtotal: number;
@@ -74,6 +77,14 @@ const discountLabel = (quotation: PrintableEventQuotation) =>
     ? `Discount (${Number(quotation.discountValue || 0).toFixed(2)}%)`
     : 'Discount (Fixed)';
 
+const itemDiscountLabel = (item: PrintableEventQuotationItem) => {
+  const discountAmount = Number(item.discountAmount || 0);
+  if (discountAmount <= 0) return '-';
+  return item.discountType === 'percentage'
+    ? `${Number(item.discountValue || 0).toFixed(2)}%`
+    : formatCurrency(Number(item.discountValue || 0));
+};
+
 const sanitizeFileName = (value: string) =>
   String(value || 'quotation')
     .replace(/[^a-z0-9_-]+/gi, '-')
@@ -86,6 +97,130 @@ export const buildEventQuotationHtml = (
   settings: GeneralSettings,
   options?: { forExcel?: boolean }
 ): string => {
+  if (options?.forExcel) {
+    const businessTitle = settings.business.tradeName || settings.business.legalName || 'Sarva';
+    const legalName = settings.business.legalName || businessTitle;
+    const address = businessAddress(settings) || '-';
+    const terms = String(quotation.termsAndConditions || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const noteLines = String(quotation.notes || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const facilityRows = quotation.facilities.length
+      ? quotation.facilities.map((facility, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(facility.name || '-')}</td>
+            <td>${escapeHtml(facility.location || '-')}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="3">No facilities selected.</td></tr>';
+    const occurrenceRows = quotation.occurrences.length
+      ? quotation.occurrences.map((occurrence, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(formatDate(occurrence.startTime))}</td>
+            <td>${escapeHtml(`${formatDateTime(occurrence.startTime)} - ${formatDateTime(occurrence.endTime)}`)}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="3">No schedule added.</td></tr>';
+    const itemRows = quotation.items.length
+      ? quotation.items.map((item, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(item.description || '-')}</td>
+            <td class="num">${Number(item.quantity || 0).toFixed(2)}</td>
+            <td>${escapeHtml(item.unitLabel || 'Unit')}</td>
+            <td class="num">${formatCurrency(Number(item.unitPrice || 0))}</td>
+            <td class="num">${escapeHtml(itemDiscountLabel(item))}</td>
+            <td class="num">${formatCurrency(Number(item.lineTotal || 0))}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="7">No items added.</td></tr>';
+
+    return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head>
+  <meta charset="utf-8" />
+  <meta name="ProgId" content="Excel.Sheet" />
+  <meta name="Generator" content="SPARK AI" />
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; color: #172033; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 14px; }
+    th, td { border: 1px solid #c9d4e4; padding: 6px 8px; vertical-align: top; }
+    th { background: #dbe8f6; font-weight: 700; text-align: left; }
+    .title { font-size: 20px; font-weight: 700; color: #173b68; border: none; padding: 4px 0 10px; }
+    .subtitle { border: none; color: #4b5b73; padding: 2px 0; }
+    .section { font-size: 14px; font-weight: 700; color: #21324b; background: #eef4fc; }
+    .label { width: 24%; font-weight: 600; background: #f7faff; }
+    .num { text-align: right; white-space: nowrap; }
+    .summary-label { font-weight: 600; background: #f7faff; }
+    .grand td { font-weight: 700; background: #e7f0fb; }
+  </style>
+</head>
+<body>
+  <table>
+    <tr><td colspan="4" class="title">Event Quotation</td></tr>
+    <tr><td colspan="4" class="subtitle">${escapeHtml(businessTitle)}</td></tr>
+    <tr><td colspan="4" class="subtitle">${escapeHtml(legalName)}</td></tr>
+    <tr><td colspan="4" class="subtitle">${escapeHtml(address)}</td></tr>
+    <tr><td colspan="4" class="subtitle">${escapeHtml(settings.business.phone || '-')} | ${escapeHtml(settings.business.email || '-')}</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" class="section">Quotation Summary</th></tr>
+    <tr><td class="label">Quote No</td><td>${escapeHtml(quotation.quoteNumber)}</td><td class="label">Status</td><td>${escapeHtml(quotation.quoteStatus || 'Draft')}</td></tr>
+    <tr><td class="label">Valid Until</td><td>${escapeHtml(formatDate(quotation.validUntil))}</td><td class="label">Linked Booking</td><td>${escapeHtml(quotation.linkedBookingNumber || '-')}</td></tr>
+    <tr><td class="label">Event</td><td>${escapeHtml(quotation.eventName || '-')}</td><td class="label">Organizer</td><td>${escapeHtml(quotation.organizerName || '-')}</td></tr>
+    <tr><td class="label">Organization</td><td>${escapeHtml(quotation.organizationName || '-')}</td><td class="label">Facilities</td><td>${quotation.facilities.length}</td></tr>
+    <tr><td class="label">Phone</td><td>${escapeHtml(quotation.contactPhone || '-')}</td><td class="label">Email</td><td>${escapeHtml(quotation.contactEmail || '-')}</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="3" class="section">Facilities</th></tr>
+    <tr><th>#</th><th>Facility</th><th>Location</th></tr>
+    ${facilityRows}
+  </table>
+
+  <table>
+    <tr><th colspan="3" class="section">Requested Schedule</th></tr>
+    <tr><th>#</th><th>Date</th><th>Schedule</th></tr>
+    ${occurrenceRows}
+  </table>
+
+  <table>
+    <tr><th colspan="7" class="section">Quotation Items</th></tr>
+    <tr><th>#</th><th>Description</th><th>Qty</th><th>Unit</th><th>Charge</th><th>Item Discount</th><th>Amount</th></tr>
+    ${itemRows}
+  </table>
+
+  <table>
+    <tr><th colspan="2" class="section">Financial Breakdown</th></tr>
+    <tr><td class="summary-label">Subtotal</td><td class="num">${formatCurrency(Number(quotation.subtotal || 0))}</td></tr>
+    <tr><td class="summary-label">${escapeHtml(discountLabel(quotation))}</td><td class="num">${formatCurrency(Number(quotation.discountAmount || 0))}</td></tr>
+    <tr><td class="summary-label">Taxable Value</td><td class="num">${formatCurrency(Number(quotation.taxableAmount || 0))}</td></tr>
+    <tr><td class="summary-label">GST (${Number(quotation.gstRate || 0).toFixed(2)}%)</td><td class="num">${formatCurrency(Number(quotation.gstAmount || 0))}</td></tr>
+    <tr class="grand"><td>Grand Total</td><td class="num">${formatCurrency(Number(quotation.totalAmount || 0))}</td></tr>
+  </table>
+
+  <table>
+    <tr><th class="section">Terms & Conditions</th></tr>
+    <tr><td>${terms.length ? terms.map((term) => escapeHtml(term)).join('<br/>') : 'No terms added.'}</td></tr>
+  </table>
+
+  ${noteLines.length ? `
+    <table>
+      <tr><th class="section">Additional Notes</th></tr>
+      <tr><td>${noteLines.map((line) => escapeHtml(line)).join('<br/>')}</td></tr>
+    </table>
+  ` : ''}
+</body>
+</html>`;
+  }
+
   const businessTitle = settings.business.tradeName || settings.business.legalName || 'Sarva';
   const legalName = settings.business.legalName || businessTitle;
   const logoUrl = resolveGeneralSettingsAssetUrl(
@@ -106,7 +241,6 @@ export const buildEventQuotationHtml = (
           <td>${index + 1}</td>
           <td>${escapeHtml(facility.name || '-')}</td>
           <td>${escapeHtml(facility.location || '-')}</td>
-          <td class="num">${formatCurrency(Number(facility.hourlyRate || 0))}</td>
         </tr>
       `
     )
@@ -131,6 +265,7 @@ export const buildEventQuotationHtml = (
           <td class="num">${Number(item.quantity || 0).toFixed(2)}</td>
           <td>${escapeHtml(item.unitLabel || 'Unit')}</td>
           <td class="num">${formatCurrency(Number(item.unitPrice || 0))}</td>
+          <td class="num">${escapeHtml(itemDiscountLabel(item))}</td>
           <td class="num">${formatCurrency(Number(item.lineTotal || 0))}</td>
         </tr>
       `
@@ -227,9 +362,9 @@ export const buildEventQuotationHtml = (
         <div class="table-title">Facilities</div>
         <table>
           <thead>
-            <tr><th>#</th><th>Facility</th><th>Location</th><th>Default Rate / Hr</th></tr>
+            <tr><th>#</th><th>Facility</th><th>Location</th></tr>
           </thead>
-          <tbody>${facilityRows || '<tr><td colspan="4">No facilities selected.</td></tr>'}</tbody>
+          <tbody>${facilityRows || '<tr><td colspan="3">No facilities selected.</td></tr>'}</tbody>
         </table>
       </div>
 
@@ -247,9 +382,9 @@ export const buildEventQuotationHtml = (
         <div class="table-title">Quotation Items</div>
         <table>
           <thead>
-            <tr><th>#</th><th>Description</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Amount</th></tr>
+            <tr><th>#</th><th>Description</th><th>Qty</th><th>Unit</th><th>Charge</th><th>Item Discount</th><th>Amount</th></tr>
           </thead>
-          <tbody>${itemRows || '<tr><td colspan="6">No items added.</td></tr>'}</tbody>
+          <tbody>${itemRows || '<tr><td colspan="7">No items added.</td></tr>'}</tbody>
         </table>
       </div>
 

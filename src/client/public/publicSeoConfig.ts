@@ -10,7 +10,7 @@ import {
   WHATSAPP_PHONE_E164,
 } from './publicBrand';
 
-export type PublicSeoRouteKey = 'home' | 'about' | 'contact' | 'login' | 'user-manual';
+export type PublicSeoRouteKey = 'home' | 'products' | 'about' | 'contact' | 'login' | 'user-manual';
 
 type JsonLdRecord = Record<string, unknown>;
 
@@ -150,7 +150,7 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
     path: '/',
     title: `${PRIMARY_SEO_PHRASE} | ${PRODUCT_BRAND_NAME}`,
     description:
-      'Sports Complex Management Platform for bookings, facility scheduling, memberships, secure payments, staff operations, and reporting.',
+      'Sports Complex Management Platform for bookings, facility scheduling, memberships, secure payments, staff operations, reporting, and multi-sport event management.',
     keywords: [
       PRIMARY_SEO_PHRASE,
       'sports facility management software',
@@ -158,23 +158,45 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
       'online court scheduling',
       'membership management',
       'secure payment processing',
+      'sports event management application',
+      'multi sport event management software',
       'Sarva',
     ],
     robots: 'index,follow',
     prerender: true,
     structuredData: buildHomeStructuredData,
   },
+  products: {
+    key: 'products',
+    path: '/products',
+    title: `Sports Software Products | Sarva Horizon`,
+    description:
+      'Explore the Sarva Horizon product line: Sarva Sports Complex Management Platform and Sarva Sports Event Management for bookings, memberships, quotations, payments, and event operations.',
+    keywords: [
+      PRIMARY_SEO_PHRASE,
+      'sports software products',
+      'sports facility management software',
+      'sports event management application',
+      'tournament management software',
+      'event quotation software',
+      'Sarva Horizon',
+      `${PRODUCT_BRAND_NAME} products`,
+    ],
+    robots: 'index,follow',
+    prerender: true,
+  },
   about: {
     key: 'about',
     path: '/about',
     title: `Sports Facility Management Software | ${PRODUCT_BRAND_NAME}`,
     description:
-      'See how Sarva sports facility management software connects bookings, memberships, staff operations, inventory, accounts, and reporting.',
+      'See how Sarva sports facility management software connects bookings, memberships, staff operations, inventory, accounts, reporting, and sports event management.',
     keywords: [
       'sports facility management software',
       PRIMARY_SEO_PHRASE,
       'sports complex software',
       'facility booking system',
+      'sports event management application',
       `${PRODUCT_BRAND_NAME} software`,
     ],
     robots: 'index,follow',

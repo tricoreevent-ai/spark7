@@ -112,6 +112,7 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
       .replace(/\b\w/g, (char) => char.toUpperCase());
 
   const isProtectedManagedRole = (role: string) => ['admin', 'super_admin'].includes(String(role || '').trim().toLowerCase());
+  const isFixedAccessRole = (role: string) => String(role || '').trim().toLowerCase() === 'super_admin';
 
   const getInitials = (user: ManagedUser) => {
     const combined = `${String(user.firstName || '').trim()} ${String(user.lastName || '').trim()}`.trim();
@@ -308,6 +309,9 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
   const canDeleteUser = (user: ManagedUser) =>
     user._id !== currentUserId && !isProtectedManagedRole(user.role);
 
+  const canEditUser = (user: ManagedUser) =>
+    user._id !== currentUserId && !isFixedAccessRole(user.role);
+
   const getStatusLockReason = (user: ManagedUser) => {
     if (user._id === currentUserId) return 'Current session';
     if (isProtectedManagedRole(user.role)) return 'Protected role';
@@ -502,11 +506,21 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
             Link an employee master record when this user should use self check-in and check-out attendance.
           </p>
 
-          <select className={inputClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+          <select
+            className={inputClass}
+            value={form.role}
+            disabled={Boolean(editingUserId) && isFixedAccessRole(form.role)}
+            onChange={(e) => setForm({ ...form, role: e.target.value })}
+          >
             {roles.map((role) => (
               <option key={role.role} value={role.role}>{role.role}</option>
             ))}
           </select>
+          {String(form.role || '').trim().toLowerCase() === 'super_admin' ? (
+            <p className="text-xs text-cyan-300">
+              Super admin always keeps full menu access and is not edited from this screen.
+            </p>
+          ) : null}
 
           <label className="flex items-center gap-2 text-sm text-gray-300">
             <input
@@ -524,7 +538,10 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
           )}
 
           <div className="flex gap-2">
-            <button className="flex-1 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400">
+            <button
+              disabled={Boolean(editingUserId) && isFixedAccessRole(form.role)}
+              className="flex-1 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60"
+            >
               {editingUserId ? 'Update User' : 'Create User'}
             </button>
             <button
@@ -699,6 +716,8 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                         <button
                           type="button"
                           onClick={() => onEditUser(user)}
+                          disabled={!canEditUser(user)}
+                          title={!canEditUser(user) ? (user._id === currentUserId ? 'Current session' : 'Super admin is fixed with full access') : 'Edit user'}
                           className="rounded-lg border border-indigo-400/20 bg-indigo-500/15 px-3 py-2 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/25"
                         >
                           Edit
@@ -769,12 +788,19 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold text-white">{role.role}</h3>
-                  <p className="text-xs text-gray-400">{role.isSystemRole ? 'System role' : 'Custom role'}</p>
+                  <p className="text-xs text-gray-400">
+                    {isFixedAccessRole(role.role)
+                      ? 'System role with fixed full access'
+                      : role.isSystemRole
+                        ? 'System role'
+                        : 'Custom role'}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => saveRolePermissions(role.role)}
+                    disabled={isFixedAccessRole(role.role)}
                     className="rounded-md bg-emerald-500/20 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30"
                   >
                     Save Permissions
@@ -797,12 +823,18 @@ export const UserManagement: React.FC<{ onReloadMe: () => Promise<void> }> = ({ 
                     <input
                       type="checkbox"
                       checked={Boolean(roleDrafts[role.role]?.[page.key])}
+                      disabled={isFixedAccessRole(role.role)}
                       onChange={(e) => toggleRolePage(role.role, page.key, e.target.checked)}
                     />
                     <span>{page.title}</span>
                   </label>
                 ))}
               </div>
+              {isFixedAccessRole(role.role) ? (
+                <p className="text-xs text-cyan-300">
+                  Super admin is always granted every menu and permission automatically.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>

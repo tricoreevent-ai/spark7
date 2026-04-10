@@ -24,6 +24,9 @@ export interface IEventQuotationItem {
   quantity: number;
   unitLabel?: string;
   unitPrice: number;
+  discountType: EventQuotationDiscountType;
+  discountValue: number;
+  discountAmount: number;
   lineTotal: number;
   notes?: string;
 }
@@ -88,6 +91,13 @@ const EventQuotationItemSchema = new Schema<IEventQuotationItem>(
     quantity: { type: Number, required: true, min: 0 },
     unitLabel: { type: String, trim: true },
     unitPrice: { type: Number, required: true, min: 0 },
+    discountType: {
+      type: String,
+      enum: ['percentage', 'fixed'],
+      default: 'percentage',
+    },
+    discountValue: { type: Number, min: 0, default: 0 },
+    discountAmount: { type: Number, min: 0, default: 0 },
     lineTotal: { type: Number, required: true, min: 0, default: 0 },
     notes: { type: String, trim: true },
   },

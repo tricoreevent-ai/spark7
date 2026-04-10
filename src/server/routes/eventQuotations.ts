@@ -6,6 +6,7 @@ import { Facility } from '../models/Facility.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
 import { buildEventQuotationDocument } from '../services/eventDocuments.js';
+import { parseRecipients, sendConfiguredMail } from '../services/mail.js';
 
 const router = Router();
 
@@ -99,6 +100,9 @@ type NormalizedItem = {
   quantity: number;
   unitLabel?: string;
   unitPrice: number;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  discountAmount: number;
   lineTotal: number;
   notes?: string;
 };
@@ -106,6 +110,14 @@ type NormalizedItem = {
 const isValidDate = (value: Date): boolean => !Number.isNaN(value.getTime());
 
 const occurrenceDateKey = (value: Date) => value.toISOString().slice(0, 10);
+const toIdString = (value: any): string => {
+  if (!value) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object' && value !== null && '_id' in value) {
+    return String((value as any)._id || '').trim();
+  }
+  return String(value || '').trim();
+};
 
 const normalizeQuoteStatus = (value: any) => {
   const normalized = String(value || 'draft').trim().toLowerCase();
@@ -158,9 +170,6 @@ const validateOccurrences = (occurrences: NormalizedOccurrence[]) => {
   });
 };
 
-const durationHours = (occurrence: NormalizedOccurrence) =>
-  Math.max(0, (occurrence.endTime.getTime() - occurrence.startTime.getTime()) / (1000 * 60 * 60));
-
 const reserveUniqueEventQuoteNumber = async (): Promise<string> => {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const candidate = await generateNumber('event_quote_number', {
@@ -174,61 +183,75 @@ const reserveUniqueEventQuoteNumber = async (): Promise<string> => {
   throw new Error('Unable to create a unique event quotation number. Please try again.');
 };
 
-const buildDefaultFacilityItems = (
-  facilities: Array<{ _id: string; name: string; hourlyRate?: number }>,
-  occurrences: NormalizedOccurrence[]
-): NormalizedItem[] => {
-  const totalHours = round2(
-    occurrences.reduce((sum, occurrence) => sum + durationHours(occurrence), 0)
+const extractRequestedFacilityIds = (rawItems: any[], rawFacilityIds: any): string[] => {
+  const itemIds = Array.from(
+    new Set(
+      (Array.isArray(rawItems) ? rawItems : [])
+        .map((item) => toIdString(item?.facilityId))
+        .filter(Boolean)
+    )
   );
-
-  return facilities.map((facility) => {
-    const unitPrice = round2(Number(facility.hourlyRate || 0));
-    const lineTotal = round2(totalHours * unitPrice);
-    return {
-      itemType: 'facility',
-      facilityId: String(facility._id),
-      description: facility.name,
-      quantity: totalHours,
-      unitLabel: 'Hours',
-      unitPrice,
-      lineTotal,
-      notes: '',
-    };
-  });
+  if (itemIds.length) {
+    return itemIds;
+  }
+  return Array.from(
+    new Set(
+      (Array.isArray(rawFacilityIds) ? rawFacilityIds : [])
+        .map((value) => toIdString(value))
+        .filter(Boolean)
+    )
+  );
 };
 
 const normalizeItems = (
   rawItems: any[],
-  facilities: Array<{ _id: string; name: string; hourlyRate?: number }>,
-  occurrences: NormalizedOccurrence[]
+  facilities: Array<{ _id: string; name: string; hourlyRate?: number }>
 ): NormalizedItem[] => {
-  const preparedItems = Array.isArray(rawItems) && rawItems.length > 0
-    ? rawItems
-    : buildDefaultFacilityItems(facilities, occurrences);
+  const preparedItems = Array.isArray(rawItems) ? rawItems : [];
+  const facilityMap = new Map(facilities.map((facility) => [String(facility._id), facility]));
 
   const normalized = preparedItems
     .map((item: any) => {
-      const itemType =
+      const facilityId = toIdString(item?.facilityId) || undefined;
+      const facility = facilityId ? facilityMap.get(facilityId) : undefined;
+      if (facilityId && !facility) {
+        throw new Error('One or more selected facilities are invalid');
+      }
+
+      const normalizedItemType =
         String(item?.itemType || '').trim().toLowerCase() === 'service'
           ? 'service'
           : String(item?.itemType || '').trim().toLowerCase() === 'custom'
             ? 'custom'
             : 'facility';
-      const description = String(item?.description || '').trim();
+      const itemType = facilityId ? 'facility' : normalizedItemType;
+      if (itemType === 'facility' && !facilityId) {
+        throw new Error('Select a facility for each facility quotation item');
+      }
+
+      const description = String(item?.description || '').trim() || String(facility?.name || '').trim();
       const quantity = Math.max(0, Number(item?.quantity || 0));
       const unitPrice = Math.max(0, Number(item?.unitPrice || 0));
+      const discountType = normalizeDiscountType(item?.discountType);
+      const discountValue = Math.max(0, Number(item?.discountValue || 0));
       if (!description || quantity <= 0) {
         return null;
       }
+      const grossAmount = round2(quantity * unitPrice);
+      const discountAmount = discountType === 'percentage'
+        ? round2((grossAmount * Math.min(discountValue, 100)) / 100)
+        : round2(Math.min(discountValue, grossAmount));
       return {
         itemType,
-        facilityId: item?.facilityId ? String(item.facilityId) : undefined,
+        facilityId,
         description,
         quantity: round2(quantity),
         unitLabel: String(item?.unitLabel || '').trim() || undefined,
         unitPrice: round2(unitPrice),
-        lineTotal: round2(quantity * unitPrice),
+        discountType,
+        discountValue: round2(discountValue),
+        discountAmount,
+        lineTotal: round2(Math.max(0, grossAmount - discountAmount)),
         notes: String(item?.notes || '').trim() || undefined,
       } as NormalizedItem;
     })
@@ -273,9 +296,58 @@ const populatedQuote = (id: string) =>
     .populate('facilityIds', 'name location hourlyRate')
     .populate('items.facilityId', 'name location hourlyRate');
 
-const buildDocumentResponse = (fileName: string, pdfBuffer: Buffer) => ({
+const attemptQuotationDocumentEmail = async (args: {
+  email?: string;
+  subject: string;
+  text: string;
+  html: string;
+  fileName: string;
+  pdfBuffer: Buffer;
+}) => {
+  const recipients = parseRecipients(args.email);
+  if (!recipients.length) {
+    return { emailed: false, emailedTo: '', emailError: 'Recipient email address is required.' };
+  }
+
+  try {
+    await sendConfiguredMail({
+      recipients,
+      subject: args.subject,
+      text: args.text,
+      html: args.html,
+      attachments: [
+        {
+          filename: args.fileName,
+          content: args.pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    return {
+      emailed: true,
+      emailedTo: recipients.join(', '),
+      emailError: '',
+    };
+  } catch (error: any) {
+    return {
+      emailed: false,
+      emailedTo: recipients.join(', '),
+      emailError: error.message || 'Failed to email quotation document',
+    };
+  }
+};
+
+const buildDocumentResponse = (
+  fileName: string,
+  pdfBuffer: Buffer,
+  emailResult?: { emailed: boolean; emailedTo: string; emailError: string }
+) => ({
   fileName,
   pdfBase64: pdfBuffer.toString('base64'),
+  emailed: emailResult?.emailed,
+  emailedTo: emailResult?.emailedTo,
+  emailError: emailResult?.emailError,
 });
 
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
@@ -320,25 +392,31 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
 
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const selectedFacilityIds = Array.isArray(req.body?.facilityIds)
-      ? req.body.facilityIds.map((id: any) => String(id))
-      : [];
+    const requestedFacilityIds = extractRequestedFacilityIds(req.body?.items, req.body?.facilityIds);
     const occurrences = normalizeOccurrences(req.body);
     validateOccurrences(occurrences);
 
-    if (!selectedFacilityIds.length || !String(req.body?.eventName || '').trim() || !String(req.body?.organizerName || '').trim()) {
+    if (!String(req.body?.eventName || '').trim() || !String(req.body?.organizerName || '').trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Event name, organizer name, facilities, and at least one date are required',
+        error: 'Event name, organizer name, and at least one date are required',
       });
     }
 
-    const facilities = await Facility.find({ _id: { $in: selectedFacilityIds } }).select('name location hourlyRate active');
-    if (facilities.length !== selectedFacilityIds.length) {
+    const facilities = requestedFacilityIds.length
+      ? await Facility.find({ _id: { $in: requestedFacilityIds } }).select('name location hourlyRate active')
+      : [];
+    if (facilities.length !== requestedFacilityIds.length) {
       return res.status(400).json({ success: false, error: 'One or more selected facilities are invalid' });
     }
 
-    const items = normalizeItems(req.body?.items, facilities as any, occurrences);
+    const items = normalizeItems(req.body?.items, facilities as any);
+    const selectedFacilityIds = Array.from(
+      new Set(items.map((item) => item.facilityId).filter((value): value is string => Boolean(value)))
+    );
+    if (!selectedFacilityIds.length) {
+      return res.status(400).json({ success: false, error: 'Add at least one facility line item to the quotation' });
+    }
     const discountType = normalizeDiscountType(req.body?.discountType);
     const totals = buildTotals(items, discountType, req.body?.discountValue, req.body?.gstRate);
     const quoteNumber = await reserveUniqueEventQuoteNumber();
@@ -432,25 +510,31 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, error: 'Replaced quotation cannot be edited. Edit the latest version instead.' });
     }
 
-    const selectedFacilityIds = Array.isArray(req.body?.facilityIds)
-      ? req.body.facilityIds.map((id: any) => String(id))
-      : [];
+    const requestedFacilityIds = extractRequestedFacilityIds(req.body?.items, req.body?.facilityIds);
     const occurrences = normalizeOccurrences(req.body);
     validateOccurrences(occurrences);
 
-    if (!selectedFacilityIds.length || !String(req.body?.eventName || '').trim() || !String(req.body?.organizerName || '').trim()) {
+    if (!String(req.body?.eventName || '').trim() || !String(req.body?.organizerName || '').trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Event name, organizer name, facilities, and at least one date are required',
+        error: 'Event name, organizer name, and at least one date are required',
       });
     }
 
-    const facilities = await Facility.find({ _id: { $in: selectedFacilityIds } }).select('name location hourlyRate active');
-    if (facilities.length !== selectedFacilityIds.length) {
+    const facilities = requestedFacilityIds.length
+      ? await Facility.find({ _id: { $in: requestedFacilityIds } }).select('name location hourlyRate active')
+      : [];
+    if (facilities.length !== requestedFacilityIds.length) {
       return res.status(400).json({ success: false, error: 'One or more selected facilities are invalid' });
     }
 
-    const items = normalizeItems(req.body?.items, facilities as any, occurrences);
+    const items = normalizeItems(req.body?.items, facilities as any);
+    const selectedFacilityIds = Array.from(
+      new Set(items.map((item) => item.facilityId).filter((value): value is string => Boolean(value)))
+    );
+    if (!selectedFacilityIds.length) {
+      return res.status(400).json({ success: false, error: 'Add at least one facility line item to the quotation' });
+    }
     const discountType = normalizeDiscountType(req.body?.discountType);
     const totals = buildTotals(items, discountType, req.body?.discountValue, req.body?.gstRate);
     const validUntilDate = req.body?.validUntil ? new Date(req.body.validUntil) : undefined;
@@ -595,7 +679,6 @@ router.post('/:id/document', async (req: AuthenticatedRequest, res: Response) =>
         ? quote.facilityIds.map((facility: any) => ({
             name: String(facility?.name || ''),
             location: String(facility?.location || ''),
-            hourlyRate: Number(facility?.hourlyRate || 0),
           }))
         : [],
       items: Array.isArray(quote.items)
@@ -604,6 +687,9 @@ router.post('/:id/document', async (req: AuthenticatedRequest, res: Response) =>
             quantity: Number(item?.quantity || 0),
             unitLabel: String(item?.unitLabel || ''),
             unitPrice: Number(item?.unitPrice || 0),
+            discountType: normalizeDiscountType(item?.discountType),
+            discountValue: Number(item?.discountValue || 0),
+            discountAmount: Number(item?.discountAmount || 0),
             lineTotal: Number(item?.lineTotal || 0),
             notes: String(item?.notes || ''),
           }))
@@ -629,6 +715,82 @@ router.post('/:id/document', async (req: AuthenticatedRequest, res: Response) =>
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to prepare event quotation document' });
+  }
+});
+
+router.post('/:id/send-mail', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const quote = await populatedQuote(String(req.params.id));
+    if (!quote) return res.status(404).json({ success: false, error: 'Event quotation not found' });
+
+    const recipientEmail = normalizeEmail(req.body?.email || quote.contactEmail || '');
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, error: 'Recipient email address is required' });
+    }
+
+    const document = await buildEventQuotationDocument({
+      quoteNumber: quote.quoteNumber,
+      quoteStatus: quote.quoteStatus,
+      validUntil: quote.validUntil,
+      eventName: quote.eventName,
+      organizerName: quote.organizerName,
+      organizationName: quote.organizationName,
+      contactPhone: quote.contactPhone,
+      contactEmail: quote.contactEmail,
+      occurrences: Array.isArray(quote.occurrences) ? quote.occurrences : [],
+      facilities: Array.isArray(quote.facilityIds)
+        ? quote.facilityIds.map((facility: any) => ({
+            name: String(facility?.name || ''),
+            location: String(facility?.location || ''),
+          }))
+        : [],
+      items: Array.isArray(quote.items)
+        ? quote.items.map((item: any) => ({
+            description: String(item?.description || ''),
+            quantity: Number(item?.quantity || 0),
+            unitLabel: String(item?.unitLabel || ''),
+            unitPrice: Number(item?.unitPrice || 0),
+            discountType: normalizeDiscountType(item?.discountType),
+            discountValue: Number(item?.discountValue || 0),
+            discountAmount: Number(item?.discountAmount || 0),
+            lineTotal: Number(item?.lineTotal || 0),
+            notes: String(item?.notes || ''),
+          }))
+        : [],
+      subtotal: Number(quote.subtotal || 0),
+      discountType: quote.discountType,
+      discountValue: Number(quote.discountValue || 0),
+      discountAmount: Number(quote.discountAmount || 0),
+      taxableAmount: Number(quote.taxableAmount || 0),
+      gstRate: Number(quote.gstRate || 0),
+      gstAmount: Number(quote.gstAmount || 0),
+      totalAmount: Number(quote.totalAmount || 0),
+      termsAndConditions: quote.termsAndConditions,
+      notes: quote.notes,
+      linkedBookingNumber: quote.linkedBookingNumber,
+      generatedAt: new Date(),
+    });
+
+    const emailResult = await attemptQuotationDocumentEmail({
+      email: recipientEmail,
+      subject: document.subject,
+      text: document.text,
+      html: document.html,
+      fileName: document.fileName,
+      pdfBuffer: document.pdfBuffer,
+    });
+
+    res.json({
+      success: true,
+      data: buildDocumentResponse(document.fileName, document.pdfBuffer, emailResult),
+      message: emailResult.emailed
+        ? `Event quotation emailed to ${emailResult.emailedTo}`
+        : emailResult.emailError
+          ? `Quotation prepared. Email failed: ${emailResult.emailError}`
+          : 'Quotation prepared',
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to email event quotation' });
   }
 });
 

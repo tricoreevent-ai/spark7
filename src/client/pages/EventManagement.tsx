@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { EventQuotationBookingDraft, EventQuotationDesk } from '../components/EventQuotationDesk';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
@@ -69,7 +70,7 @@ interface PaymentDeskState {
   printAsConfirmation: boolean;
 }
 
-type BookingMode = 'single' | 'range';
+type BookingMode = 'single' | 'multiple';
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: 'cash', label: 'Cash' },
@@ -117,6 +118,28 @@ const displayDate = (isoValue: string): string =>
     year: 'numeric',
   });
 
+const ORDERED_WEEKDAY_VALUES = [1, 2, 3, 4, 5, 6, 0] as const;
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+] as const;
+const WEEKEND_WEEKDAYS = [6, 0] as number[];
+const WORKWEEK_WEEKDAYS = [1, 2, 3, 4, 5] as number[];
+
+const normalizeDateList = (values: string[]): string[] =>
+  Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+
 const startOfMonth = (monthValue: string): Date => {
   const [year, month] = String(monthValue).split('-').map(Number);
   return new Date(year || new Date().getFullYear(), (month || 1) - 1, 1, 0, 0, 0, 0);
@@ -161,6 +184,11 @@ const enumerateDates = (startDate: string, endDate: string): string[] => {
   }
   return dates;
 };
+
+const sortWeekdaySelection = (values: number[]): number[] =>
+  Array.from(new Set(values.filter((value) => ORDERED_WEEKDAY_VALUES.includes(value as any)))).sort(
+    (left, right) => ORDERED_WEEKDAY_VALUES.indexOf(left as any) - ORDERED_WEEKDAY_VALUES.indexOf(right as any)
+  );
 
 const bookingOccurrenceRows = (booking: EventBooking): EventOccurrence[] => {
   if (Array.isArray(booking.occurrences) && booking.occurrences.length > 0) {
@@ -213,15 +241,9 @@ type EventManagementProps = {
   canManageQuotations?: boolean;
 };
 
-const resolveInitialView = (
-  requestedView: 'bookings' | 'quotations',
-  canManageBookings: boolean,
-  canManageQuotations: boolean
-): 'bookings' | 'quotations' => {
-  if (requestedView === 'quotations' && canManageQuotations) return 'quotations';
-  if (requestedView === 'bookings' && canManageBookings) return 'bookings';
-  if (canManageQuotations) return 'quotations';
-  return 'bookings';
+type EventManagementLocationState = {
+  quoteBookingDraft?: EventQuotationBookingDraft;
+  quoteBookingNotice?: string;
 };
 
 export const EventManagement: React.FC<EventManagementProps> = ({
@@ -229,15 +251,15 @@ export const EventManagement: React.FC<EventManagementProps> = ({
   canManageBookings = true,
   canManageQuotations = true,
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isQuotationPage = initialView === 'quotations';
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [bookings, setBookings] = useState<EventBooking[]>([]);
   const [paymentDueBookings, setPaymentDueBookings] = useState<EventBooking[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(toDateInput(new Date()).slice(0, 7));
   const [selectedDate, setSelectedDate] = useState(toDateInput(new Date()));
   const [loading, setLoading] = useState(false);
-  const [activeView, setActiveView] = useState<'bookings' | 'quotations'>(
-    resolveInitialView(initialView, canManageBookings, canManageQuotations)
-  );
   const [crmQuotationDraft, setCrmQuotationDraft] = useState<CrmConversionDraft | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -256,8 +278,11 @@ export const EventManagement: React.FC<EventManagementProps> = ({
     contactEmail: '',
     facilityIds: [] as string[],
     eventDate: toDateInput(new Date()),
+    occurrenceDates: [toDateInput(new Date())] as string[],
+    dateEntry: toDateInput(new Date()),
     rangeStartDate: toDateInput(new Date()),
-    rangeEndDate: toDateInput(new Date()),
+    rangeEndDate: toDateInput(new Date(new Date().getTime() + (13 * 24 * 60 * 60 * 1000))),
+    rangeWeekdays: [...WEEKEND_WEEKDAYS] as number[],
     startTime: '10:00',
     endTime: '11:00',
     status: 'pending',
@@ -281,51 +306,98 @@ export const EventManagement: React.FC<EventManagementProps> = ({
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   }, []);
 
-  useEffect(() => {
-    setActiveView(resolveInitialView(initialView, canManageBookings, canManageQuotations));
-  }, [initialView, canManageBookings, canManageQuotations]);
+  const applyBookingDraft = (draft: EventQuotationBookingDraft, notice?: string) => {
+    if (!canManageBookings) return;
+    const occurrenceDates = normalizeDateList(draft.occurrenceDates || [draft.eventDate]);
+    const firstDate = occurrenceDates[0] || draft.eventDate || toDateInput(new Date());
+    setSelectedDate(firstDate);
+    setSelectedMonth(firstDate.slice(0, 7));
+    setForm((prev) => ({
+      ...prev,
+      sourceQuotationId: draft.sourceQuotationId,
+      sourceQuotationNumber: draft.sourceQuotationNumber,
+      bookingMode: draft.bookingMode,
+      eventName: draft.eventName,
+      organizerName: draft.organizerName,
+      organizationName: draft.organizationName,
+      contactPhone: draft.contactPhone,
+      contactEmail: draft.contactEmail,
+      facilityIds: draft.facilityIds,
+      eventDate: firstDate,
+      occurrenceDates,
+      dateEntry: firstDate,
+      rangeStartDate: firstDate,
+      rangeEndDate: occurrenceDates[occurrenceDates.length - 1] || firstDate,
+      startTime: draft.startTime,
+      endTime: draft.endTime,
+      totalAmount: draft.totalAmount,
+      advanceAmount: draft.advanceAmount,
+      remarks: draft.remarks,
+    }));
+    setError('');
+    setMessage(notice || `Quotation ${draft.sourceQuotationNumber} loaded into the booking form.`);
+    window.setTimeout(() => {
+      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
 
   useEffect(() => {
-    const draft = consumeCrmConversionDraft('event-booking') || consumeCrmConversionDraft('event-quotation');
-    if (!draft) return;
-    if (draft.target === 'event-booking' && canManageBookings) {
-      setActiveView('bookings');
-      setForm((prev) => ({
-        ...prev,
-        eventName: draft.requestedFacilityName ? `${draft.requestedFacilityName} Booking` : (draft.customerName ? `${draft.customerName} Booking` : prev.eventName),
-        organizerName: draft.customerName || prev.organizerName,
-        contactPhone: draft.customerPhone || prev.contactPhone,
-        contactEmail: draft.customerEmail || prev.contactEmail,
-        facilityIds: draft.requestedFacilityId ? [draft.requestedFacilityId] : prev.facilityIds,
-        eventDate: draft.requestedDate || prev.eventDate,
-        rangeStartDate: draft.requestedDate || prev.rangeStartDate,
-        rangeEndDate: draft.requestedDate || prev.rangeEndDate,
-        startTime: draft.requestedStartTime || prev.startTime,
-        endTime: draft.requestedStartTime ? addHour(draft.requestedStartTime) : prev.endTime,
-        remarks: [prev.remarks, draft.notes].filter(Boolean).join('\n').trim(),
-      }));
-      setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into event booking.`);
-      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (isQuotationPage) {
+      if (!canManageQuotations) return;
+      const draft = consumeCrmConversionDraft('event-quotation');
+      if (!draft) return;
+      setCrmQuotationDraft(draft);
       return;
     }
 
-    if (canManageQuotations) {
-      setActiveView('quotations');
-      setCrmQuotationDraft(draft);
-      setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into event quotation.`);
-    }
-  }, [canManageBookings, canManageQuotations]);
+    if (!canManageBookings) return;
+    const draft = consumeCrmConversionDraft('event-booking');
+    if (!draft) return;
+
+    const requestedDate = draft.requestedDate || toDateInput(new Date());
+    setSelectedDate(requestedDate);
+    setSelectedMonth(requestedDate.slice(0, 7));
+    setForm((prev) => ({
+      ...prev,
+      eventName: draft.requestedFacilityName ? `${draft.requestedFacilityName} Booking` : (draft.customerName ? `${draft.customerName} Booking` : prev.eventName),
+      organizerName: draft.customerName || prev.organizerName,
+      contactPhone: draft.customerPhone || prev.contactPhone,
+      contactEmail: draft.customerEmail || prev.contactEmail,
+      facilityIds: draft.requestedFacilityId ? [draft.requestedFacilityId] : prev.facilityIds,
+      eventDate: requestedDate,
+      occurrenceDates: [requestedDate],
+      dateEntry: requestedDate,
+      rangeStartDate: requestedDate,
+      rangeEndDate: requestedDate,
+      startTime: draft.requestedStartTime || prev.startTime,
+      endTime: draft.requestedStartTime ? addHour(draft.requestedStartTime) : prev.endTime,
+      remarks: [prev.remarks, draft.notes].filter(Boolean).join('\n').trim(),
+    }));
+    setMessage(`CRM enquiry ${draft.enquiryNumber || ''} loaded into event booking.`);
+    setError('');
+    window.setTimeout(() => {
+      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }, [canManageBookings, canManageQuotations, isQuotationPage]);
+
+  useEffect(() => {
+    if (isQuotationPage || !canManageBookings) return;
+    const state = (location.state as EventManagementLocationState | null) || null;
+    if (!state?.quoteBookingDraft) return;
+    applyBookingDraft(state.quoteBookingDraft, state.quoteBookingNotice);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [canManageBookings, isQuotationPage, location.pathname, location.state, navigate]);
 
   const monthDate = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
   const grid = useMemo(() => calendarCells(monthDate), [monthDate]);
   const activeFacilities = useMemo(() => facilities.filter((facility) => facility.active), [facilities]);
 
   const bookingDatesPreview = useMemo(() => {
-    if (form.bookingMode === 'range') {
-      return enumerateDates(form.rangeStartDate, form.rangeEndDate);
+    if (form.bookingMode === 'multiple') {
+      return normalizeDateList(form.occurrenceDates);
     }
     return form.eventDate ? [form.eventDate] : [];
-  }, [form.bookingMode, form.eventDate, form.rangeEndDate, form.rangeStartDate]);
+  }, [form.bookingMode, form.eventDate, form.occurrenceDates]);
 
   const durationHours = useMemo(() => {
     const [sh, sm] = form.startTime.split(':').map(Number);
@@ -390,8 +462,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({
       setForm((prev) => ({
         ...prev,
         eventDate: selectedDate,
-        rangeStartDate: prev.rangeStartDate || selectedDate,
-        rangeEndDate: prev.rangeEndDate || selectedDate,
+        dateEntry: prev.dateEntry || selectedDate,
       }));
     }
   }, [selectedDate]);
@@ -415,6 +486,73 @@ export const EventManagement: React.FC<EventManagementProps> = ({
           : [...prev.facilityIds, facilityId],
       };
     });
+  };
+
+  const addBookingDate = () => {
+    const nextDate = String(form.dateEntry || '').trim();
+    if (!nextDate) {
+      setError('Choose a date before adding it to the booking');
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      occurrenceDates: normalizeDateList([...prev.occurrenceDates, nextDate]),
+      dateEntry: nextDate,
+    }));
+    setError('');
+  };
+
+  const removeBookingDate = (dateValue: string) => {
+    setForm((prev) => ({
+      ...prev,
+      occurrenceDates: normalizeDateList(prev.occurrenceDates.filter((value) => value !== dateValue)),
+    }));
+  };
+
+  const toggleRangeWeekday = (weekday: number) => {
+    setForm((prev) => ({
+      ...prev,
+      rangeWeekdays: sortWeekdaySelection(
+        prev.rangeWeekdays.includes(weekday)
+          ? prev.rangeWeekdays.filter((value) => value !== weekday)
+          : [...prev.rangeWeekdays, weekday]
+      ),
+    }));
+  };
+
+  const applyRangePreset = (weekdays: number[]) => {
+    setForm((prev) => ({
+      ...prev,
+      rangeWeekdays: sortWeekdaySelection(weekdays),
+    }));
+  };
+
+  const addBookingDatesFromRange = () => {
+    if (!form.rangeStartDate || !form.rangeEndDate) {
+      setError('Choose both range dates before adding recurring booking dates');
+      return;
+    }
+    if (!form.rangeWeekdays.length) {
+      setError('Select at least one weekday for the recurring booking pattern');
+      return;
+    }
+
+    const matchedDates = enumerateDates(form.rangeStartDate, form.rangeEndDate).filter((dateValue) =>
+      form.rangeWeekdays.includes(new Date(`${dateValue}T00:00:00`).getDay())
+    );
+
+    if (!matchedDates.length) {
+      setError('No matching booking dates were found in the selected range');
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      occurrenceDates: normalizeDateList([...prev.occurrenceDates, ...matchedDates]),
+      dateEntry: matchedDates[matchedDates.length - 1] || prev.dateEntry,
+    }));
+    setError('');
+    setMessage(`${matchedDates.length} recurring booking date${matchedDates.length === 1 ? '' : 's'} added.`);
   };
 
   const focusPaymentDesk = (booking: EventBooking) => {
@@ -762,79 +900,25 @@ export const EventManagement: React.FC<EventManagementProps> = ({
 
   const loadQuotationIntoBookingForm = (draft: EventQuotationBookingDraft) => {
     if (!canManageBookings) return;
-    setActiveView('bookings');
-    setSelectedDate(draft.eventDate);
-    setSelectedMonth(draft.rangeStartDate.slice(0, 7));
-    setForm((prev) => ({
-      ...prev,
-      sourceQuotationId: draft.sourceQuotationId,
-      sourceQuotationNumber: draft.sourceQuotationNumber,
-      bookingMode: draft.bookingMode,
-      eventName: draft.eventName,
-      organizerName: draft.organizerName,
-      organizationName: draft.organizationName,
-      contactPhone: draft.contactPhone,
-      contactEmail: draft.contactEmail,
-      facilityIds: draft.facilityIds,
-      eventDate: draft.eventDate,
-      rangeStartDate: draft.rangeStartDate,
-      rangeEndDate: draft.rangeEndDate,
-      startTime: draft.startTime,
-      endTime: draft.endTime,
-      totalAmount: draft.totalAmount,
-      advanceAmount: draft.advanceAmount,
-      remarks: draft.remarks,
-    }));
-    window.setTimeout(() => {
-      bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 80);
+    if (isQuotationPage) {
+      navigate('/events', {
+        state: {
+          quoteBookingDraft: draft,
+          quoteBookingNotice: `Quotation ${draft.sourceQuotationNumber} loaded into the booking form.`,
+        } satisfies EventManagementLocationState,
+      });
+      return;
+    }
+    applyBookingDraft(draft);
   };
 
   const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white';
 
-  return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">Event Management</h1>
-          <p className="text-sm text-gray-300">
-            Manage quotations, multi-date sports events, balance collection, and event confirmations in one flow.
-          </p>
-        </div>
-        {activeView === 'bookings' ? (
-          <div>
-          <label className="mb-1 block text-xs text-gray-400">Month</label>
-          <input type="month" className={inputClass} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
-          </div>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {canManageBookings && (
-          <button
-            type="button"
-            onClick={() => setActiveView('bookings')}
-            className={`rounded-md px-3 py-2 text-sm font-semibold ${activeView === 'bookings' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
-          >
-            Event Bookings
-          </button>
-        )}
-        {canManageQuotations && (
-          <button
-            type="button"
-            onClick={() => setActiveView('quotations')}
-            className={`rounded-md px-3 py-2 text-sm font-semibold ${activeView === 'quotations' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
-          >
-            Event Quotations
-          </button>
-        )}
-      </div>
-
-      {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
-      {error && <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}
-      {loading && <p className="text-sm text-gray-400">Loading...</p>}
-
-      {activeView === 'quotations' ? (
+  if (isQuotationPage) {
+    return (
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        {error && <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}
+        {loading && <p className="text-sm text-gray-400">Loading...</p>}
         <EventQuotationDesk
           facilities={facilities}
           onUseQuoteForBooking={loadQuotationIntoBookingForm}
@@ -842,8 +926,28 @@ export const EventManagement: React.FC<EventManagementProps> = ({
           incomingCrmDraft={crmQuotationDraft}
           onConsumeCrmDraft={() => setCrmQuotationDraft(null)}
         />
-      ) : (
-        <>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Event Bookings</h1>
+          <p className="text-sm text-gray-300">
+            Manage multi-date sports events, balance collection, and booking confirmations without switching views.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-gray-400">Month</label>
+          <input type="month" className={inputClass} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+        </div>
+      </div>
+
+      {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
+      {error && <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}
+      {loading && <p className="text-sm text-gray-400">Loading...</p>}
 
       <div ref={paymentDeskRef} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1019,10 +1123,10 @@ export const EventManagement: React.FC<EventManagementProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setForm((prev) => ({ ...prev, bookingMode: 'range', rangeStartDate: prev.rangeStartDate || selectedDate, rangeEndDate: prev.rangeEndDate || selectedDate }))}
-              className={`rounded-md px-3 py-2 text-sm font-semibold ${form.bookingMode === 'range' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
+              onClick={() => setForm((prev) => ({ ...prev, bookingMode: 'multiple', occurrenceDates: normalizeDateList(prev.occurrenceDates.length ? prev.occurrenceDates : [prev.eventDate || selectedDate]), dateEntry: prev.dateEntry || selectedDate }))}
+              className={`rounded-md px-3 py-2 text-sm font-semibold ${form.bookingMode === 'multiple' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
             >
-              Date Range
+              Multiple Dates
             </button>
           </div>
 
@@ -1050,9 +1154,69 @@ export const EventManagement: React.FC<EventManagementProps> = ({
           {form.bookingMode === 'single' ? (
             <input className={inputClass} type="date" value={form.eventDate} onChange={(e) => setForm((prev) => ({ ...prev, eventDate: e.target.value }))} />
           ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <input className={inputClass} type="date" value={form.rangeStartDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeStartDate: e.target.value, rangeEndDate: prev.rangeEndDate < e.target.value ? e.target.value : prev.rangeEndDate }))} />
-              <input className={inputClass} type="date" value={form.rangeEndDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeEndDate: e.target.value }))} />
+            <div className="space-y-3 rounded border border-white/10 bg-black/20 p-3">
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[0.75fr_1.25fr]">
+                <div className="rounded border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Manual Add</p>
+                  <p className="mt-1 text-xs text-gray-400">Use this when the customer gives you exact event dates one by one.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input className={`${inputClass} max-w-[220px]`} type="date" value={form.dateEntry} onChange={(e) => setForm((prev) => ({ ...prev, dateEntry: e.target.value }))} />
+                    <button type="button" onClick={addBookingDate} className="rounded bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30">
+                      Add Date
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Recurring Helper</p>
+                  <p className="mt-1 text-xs text-gray-400">Useful for two weekends, every Saturday, or any repeated event day pattern.</p>
+                  <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <input className={inputClass} type="date" value={form.rangeStartDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeStartDate: e.target.value }))} />
+                    <input className={inputClass} type="date" value={form.rangeEndDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeEndDate: e.target.value }))} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {WEEKDAY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => toggleRangeWeekday(option.value)}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          form.rangeWeekdays.includes(option.value)
+                            ? 'bg-indigo-500 text-white'
+                            : 'border border-white/10 bg-black/20 text-gray-300 hover:bg-white/10'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => applyRangePreset(WEEKEND_WEEKDAYS)} className="rounded border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20">
+                      Weekends
+                    </button>
+                    <button type="button" onClick={() => applyRangePreset(WORKWEEK_WEEKDAYS)} className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
+                      Weekdays
+                    </button>
+                    <button type="button" onClick={() => applyRangePreset([...ORDERED_WEEKDAY_VALUES])} className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
+                      Every Day
+                    </button>
+                    <button type="button" onClick={addBookingDatesFromRange} className="rounded bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30">
+                      Add Matching Dates
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {bookingDatesPreview.map((dateValue) => (
+                  <span key={dateValue} className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                    {displayDate(`${dateValue}T00:00:00`)}
+                    <button type="button" onClick={() => removeBookingDate(dateValue)} className="rounded-full bg-black/20 px-1.5 py-0.5 text-[10px] text-cyan-50 hover:bg-black/40">
+                      X
+                    </button>
+                  </span>
+                ))}
+                {!bookingDatesPreview.length ? <p className="text-xs text-gray-400">No dates added yet.</p> : null}
+              </div>
             </div>
           )}
 
@@ -1174,8 +1338,6 @@ export const EventManagement: React.FC<EventManagementProps> = ({
           </table>
         </div>
       </div>
-        </>
-      )}
     </div>
   );
 };

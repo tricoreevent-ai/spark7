@@ -194,6 +194,8 @@ interface HistoryPayload {
   }>;
 }
 
+type CustomerCrmTab = 'profiles' | 'enquiries' | 'campaigns' | 'reports';
+
 const normalizePhone = (value: string): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500';
 const buttonClass = 'rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60';
@@ -230,9 +232,59 @@ const categoryLabel = (value?: string) =>
 
 const relativeDate = (value?: string) => (value ? new Date(value).toLocaleString('en-IN') : '-');
 
-export const CustomerCrmDesk: React.FC = () => {
+const customerCrmTabPath = (tab: CustomerCrmTab): string => {
+  if (tab === 'enquiries') return '/customers/enquiries';
+  if (tab === 'campaigns') return '/customers/campaigns';
+  if (tab === 'reports') return '/customers/reports';
+  return '/customers/profiles';
+};
+
+const CRM_CAPABILITY_CARDS = [
+  {
+    title: 'Member And Lead Management',
+    description: 'Use customer profiles and lead enquiries as the central CRM source for contact details, preferences, activity timeline, linked memberships, and follow-up ownership.',
+    sourceLabel: 'Single source',
+    sourceValue: 'Customer Profiles + CRM Enquiries',
+    actionLabel: 'Open CRM',
+    path: '/customers/profiles',
+  },
+  {
+    title: 'Scheduling And Booking',
+    description: 'Run facility and event booking from the booking pages, with availability checks, confirmations, reminders, and conversion from enquiries into bookings or quotations.',
+    sourceLabel: 'Single source',
+    sourceValue: 'Facility Booking + Event Bookings',
+    actionLabel: 'Open Bookings',
+    path: '/facilities',
+  },
+  {
+    title: 'Membership And Payments',
+    description: 'Manage plan tiers, passes, discounts, renewals, reminder automation, POS member benefits, and subscription lifecycle from the memberships workspace.',
+    sourceLabel: 'Single source',
+    sourceValue: 'Memberships',
+    actionLabel: 'Open Memberships',
+    path: '/memberships',
+  },
+  {
+    title: 'Communication And Engagement',
+    description: 'Segment customers, save campaign drafts, send professional email campaigns, and keep follow-up activity inside the CRM instead of separate contact lists.',
+    sourceLabel: 'Single source',
+    sourceValue: 'CRM Campaigns + Customer Activity',
+    actionLabel: 'Open Campaigns',
+    path: '/customers/campaigns',
+  },
+  {
+    title: 'Reporting And Analytics',
+    description: 'Review conversion, retention signals, revenue trends, popular facilities, time slots, overdue follow-up, and collection cases without duplicating reports across modules.',
+    sourceLabel: 'Single source',
+    sourceValue: 'CRM Reports + Membership Reports',
+    actionLabel: 'Open Reports',
+    path: '/customers/reports',
+  },
+] as const;
+
+export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ initialTab = 'profiles' }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'profiles' | 'enquiries' | 'campaigns' | 'reports'>('profiles');
+  const [activeTab, setActiveTab] = useState<CustomerCrmTab>(initialTab);
   const [rows, setRows] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMoreRows, setLoadingMoreRows] = useState(false);
@@ -318,6 +370,15 @@ export const CustomerCrmDesk: React.FC = () => {
     notes: '',
     lostReason: '',
   });
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  const openTab = (tab: CustomerCrmTab) => {
+    setActiveTab(tab);
+    navigate(customerCrmTabPath(tab));
+  };
 
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');
@@ -493,7 +554,7 @@ export const CustomerCrmDesk: React.FC = () => {
   };
 
   const editCustomer = (row: CustomerRow) => {
-    setActiveTab('profiles');
+    openTab('profiles');
     setForm({
       id: row._id,
       name: row.name || '',
@@ -736,7 +797,7 @@ export const CustomerCrmDesk: React.FC = () => {
   };
 
   const editEnquiry = (row: EnquiryRow) => {
-    setActiveTab('enquiries');
+    openTab('enquiries');
     setEnquiryForm({
       id: row._id,
       customerName: row.customerName || '',
@@ -884,7 +945,8 @@ export const CustomerCrmDesk: React.FC = () => {
           <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">Customer Relationship Desk</h1>
           <p className="mt-2 max-w-3xl text-sm text-gray-300">
             Sarva already handles bookings, memberships, sales, and collections. This desk adds the customer profile,
-            enquiry follow-up, and CRM summary layer that fits those existing modules.
+            website and walk-in lead capture, enquiry follow-up, and CRM summary layer that fits those existing modules
+            without duplicate tracking.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -914,7 +976,7 @@ export const CustomerCrmDesk: React.FC = () => {
         ].map(([key, label]) => (
           <button
             key={key}
-            onClick={() => setActiveTab(key as 'profiles' | 'enquiries' | 'campaigns' | 'reports')}
+            onClick={() => openTab(key as CustomerCrmTab)}
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
               activeTab === key ? 'bg-indigo-500 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'
             }`}
@@ -1302,7 +1364,7 @@ export const CustomerCrmDesk: React.FC = () => {
             onFilterPayloadChange={setDirectoryFilters}
             onEditCustomer={editCustomer}
             onToggleBlock={toggleBlock}
-            onOpenCampaigns={() => setActiveTab('campaigns')}
+            onOpenCampaigns={() => openTab('campaigns')}
           />
         </>
       )}
@@ -1487,6 +1549,40 @@ export const CustomerCrmDesk: React.FC = () => {
 
       {activeTab === 'reports' && (
         <div className="space-y-5">
+          <div className={panelClass}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className={sectionTitleClass}>Sports Facility CRM Coverage</p>
+                <h2 className="mt-2 text-xl font-semibold text-white">One module per job, without duplicate tracking sheets</h2>
+                <p className="mt-2 max-w-3xl text-sm text-gray-400">
+                  These CRM capabilities are already mapped to the right workspace so teams can avoid re-entering the same member,
+                  lead, booking, and communication details in different places.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {CRM_CAPABILITY_CARDS.map((card) => (
+                <div key={card.title} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{card.title}</p>
+                      <p className="mt-2 text-sm text-gray-300">{card.description}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(card.path)}
+                      className="rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100"
+                    >
+                      {card.actionLabel}
+                    </button>
+                  </div>
+                  <p className="mt-3 text-xs uppercase tracking-[0.2em] text-gray-500">{card.sourceLabel}</p>
+                  <p className="mt-1 text-sm text-cyan-100">{card.sourceValue}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Customers</p><p className="mt-2 text-2xl font-semibold text-white">{dashboard?.summary.totalCustomers || 0}</p><p className="mt-1 text-xs text-gray-400">Total CRM profiles.</p></div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-xs uppercase tracking-[0.24em] text-emerald-200">Active Members</p><p className="mt-2 text-2xl font-semibold text-white">{dashboard?.summary.activeMembers || 0}</p><p className="mt-1 text-xs text-gray-400">Live membership records.</p></div>

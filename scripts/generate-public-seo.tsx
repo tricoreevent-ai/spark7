@@ -6,7 +6,7 @@ import { config as loadDotenv } from 'dotenv';
 import { renderToString } from 'react-dom/server';
 import { StaticRouter } from 'react-router';
 import { PublicLoginCard } from '../src/client/components/PublicLoginCard';
-import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicLoginPage } from '../src/client/pages/PublicSite';
+import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicLoginPage, PublicProductsPage } from '../src/client/pages/PublicSite';
 import {
   PUBLIC_SEO_HEAD_MARKER_END,
   PUBLIC_SEO_HEAD_MARKER_START,
@@ -90,6 +90,8 @@ const renderPublicRoute = (routeKey: PublicSeoRouteKey, marketingImagePublicPath
   const element =
     routeKey === 'home' ? (
       <PublicHomePage productImageSrc={marketingImagePublicPath} />
+    ) : routeKey === 'products' ? (
+      <PublicProductsPage />
     ) : routeKey === 'about' ? (
       <PublicAboutPage />
     ) : routeKey === 'contact' ? (

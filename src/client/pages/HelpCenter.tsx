@@ -154,6 +154,18 @@ const overviewSections: OverviewSection[] = [
       'Sales handles customers and transactions, People manages employees and payroll, Accounts tracks finance, and management reviews reports.',
     ],
   },
+  {
+    id: 'latest-highlights',
+    title: 'Latest Feature Highlights',
+    description:
+      'Recent Sarva updates improve customer CRM, event quotations, memberships, and the public product website experience.',
+    bullets: [
+      'Customer CRM now separates profiles, enquiries, campaigns, and reports for cleaner follow-up and review.',
+      'Event quotations now support revision history, PDF preview, professional print output, mail sending, and booking conversion.',
+      'Membership workflows cover plan setup, subscription issue, active-member review, renewals, and membership reporting.',
+      'The public Sarva website now includes Home, Products, About, Contact, Login, and the public User Manual.',
+    ],
+  },
 ];
 
 const moduleSummaries: ModuleSummary[] = [
@@ -529,17 +541,18 @@ const menuSections: MenuSection[] = [
       },
       {
         id: 'customers',
-        title: 'Customers',
-        route: '/customers',
-        navigation: 'Sales > Customers',
+        title: 'Customers and CRM',
+        route: '/customers/profiles',
+        navigation: 'Sales > Customers > Profiles / Enquiries / Campaigns / Reports',
         purpose: 'Runs the customer CRM desk.',
         description:
-          'This page combines customer profiles, enquiry follow-up, visit and payment history, repeat-customer review, and customer collection watchlists in one place. It helps the team convert leads faster and serve repeat customers with better context.',
-        keyUses: ['Maintain customer profiles', 'Track enquiries and follow-up', 'Review visit and payment history'],
+          'This page combines customer profiles, enquiry follow-up, campaigns, visit and payment history, repeat-customer review, and customer collection watchlists in one place. It helps the team convert leads faster and serve repeat customers with better context.',
+        keyUses: ['Maintain customer profiles', 'Track enquiries and follow-up', 'Run campaigns', 'Review CRM reports'],
         links: [
-          { label: 'Open Customers', to: '/customers' },
+          { label: 'Open Customer Profiles', to: '/customers/profiles' },
+          { label: 'Open Customer Enquiries', to: '/customers/enquiries' },
+          { label: 'Open Customer Reports', to: '/customers/reports' },
           { label: 'Open Quotations', to: '/sales/quotes' },
-          { label: 'Open Sales Orders', to: '/orders' },
         ],
       },
     ],
@@ -588,10 +601,11 @@ const menuSections: MenuSection[] = [
         navigation: 'Top menu > Operations > Event Booking',
         purpose: 'Handles events.',
         description:
-          'This page manages event registrations, organizer details, facility allocation, quotation preparation, schedule planning, and payment tracking. It supports both single-date and multi-date event workflows with printable confirmations.',
-        keyUses: ['Manage registrations', 'Prepare event quotations', 'Handle event schedules', 'Track event payments'],
+          'This page manages event registrations, organizer details, facility allocation, quotation preparation, schedule planning, payment tracking, and printable event confirmations. It supports both single-date and multi-date event workflows, while the linked quotation flow now supports preview, print, email, and booking conversion.',
+        keyUses: ['Manage registrations', 'Prepare event quotations', 'Preview, print, or mail quotations', 'Track event payments'],
         links: [
           { label: 'Open Event Booking', to: '/events' },
+          { label: 'Open Event Quotations Topic', to: '/user-manual#transaction-event-quotation' },
           { label: 'Open Facility Setup', to: '/facilities/setup' },
           { label: 'Open Settings', to: '/settings' },
         ],
@@ -1263,9 +1277,9 @@ const transactionGuideSections: TransactionGuideSection[] = [
         whatItDoes:
           'Use this screen to prepare a professional quotation for one or more sports facilities before the organizer confirms the event booking.',
         businessLogic:
-          'The screen loads default facility charges from the selected courts or other facilities, lets the user edit every amount, applies discount and GST, and saves the quotation with version history. A revised quote does not remove the old one; the older version stays in history and the latest version becomes the working copy.',
+          'The screen loads default facility charges from the selected courts or other facilities, lets the user edit every amount, applies discount and GST, and saves the quotation with version history. Users can preview the PDF, print it, or send it by email directly from the quotation flow. A revised quote does not remove the old one; the older version stays in history and the latest version becomes the working copy.',
         practicalExample:
-          'Create a quotation for State Badminton Camp using Full Court 1 and Full Court 2 for 2026-05-10 to 2026-05-12 from 09:00 to 13:00, refresh facility pricing, give 10 percent discount, apply 18 percent GST, edit the default terms, and save the quote before the organizer confirms the dates.',
+          'Create a quotation for State Badminton Camp using Full Court 1 and Full Court 2 for 2026-05-10 to 2026-05-12 from 09:00 to 13:00, refresh facility pricing, give 10 percent discount, apply 18 percent GST, edit the default terms, save the quote, preview the PDF, and then send it by email to the organizer before the dates are confirmed.',
         reportFlow:
           'The quotation stays in event quotation tracking and does not block the facility permanently until the user loads it into the booking form and saves the actual event booking. Once the booking is created from the quotation, the quote is marked as booked and the event moves into calendar and payment follow-up views.',
         note:

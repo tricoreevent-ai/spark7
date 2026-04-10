@@ -169,7 +169,9 @@ export const updateRolePermissions = async (
     throw new Error('Role name is required');
   }
 
-  const mergedPermissions = normalizePermissions(permissions as Record<string, boolean>);
+  const mergedPermissions = normalizedRole === 'super_admin'
+    ? { ...FULL_PERMISSIONS }
+    : normalizePermissions(permissions as Record<string, boolean>);
   const roleDoc = await RolePermission.findOneAndUpdate(
     { role: normalizedRole },
     {

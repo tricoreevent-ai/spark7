@@ -37,7 +37,10 @@ const menuItems = [
   { key: 'sales' as PageKey, name: 'Quotations', path: '/sales/quotes', category: 'Sales' as MenuCategory, icon: '🧾' },
   { key: 'returns' as PageKey, name: 'Returns', path: '/returns', category: 'Sales' as MenuCategory, icon: '↩️' },
   { key: 'reports' as PageKey, name: 'Reports', path: '/reports', category: 'Sales' as MenuCategory, icon: '📈' },
-  { key: 'customers' as PageKey, name: 'Customer CRM', path: '/customers', category: 'Sales' as MenuCategory, icon: '🧑' },
+  { key: 'customers' as PageKey, name: 'Customer Profiles', path: '/customers/profiles', category: 'Sales' as MenuCategory, icon: '🧑' },
+  { key: 'customers' as PageKey, name: 'CRM Enquiries', path: '/customers/enquiries', category: 'Sales' as MenuCategory, icon: '📞' },
+  { key: 'customers' as PageKey, name: 'CRM Campaigns', path: '/customers/campaigns', category: 'Sales' as MenuCategory, icon: '📣' },
+  { key: 'customers' as PageKey, name: 'CRM Reports', path: '/customers/reports', category: 'Sales' as MenuCategory, icon: '📊' },
   { key: 'products' as PageKey, name: 'Product Center', path: '/products', category: 'Catalog' as MenuCategory, icon: '📦' },
   { key: 'products' as PageKey, name: 'Product Entry', path: '/products/entry', category: 'Catalog' as MenuCategory, icon: '➕' },
   { key: 'products' as PageKey, name: 'Product Catalog', path: '/products/catalog', category: 'Catalog' as MenuCategory, icon: '🗃️' },
@@ -97,6 +100,12 @@ const menuSearchTooltip =
 
 const mobileHeaderIconButtonClass =
   'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white';
+const mobileHeaderButtonGroupClass =
+  'inline-flex items-stretch overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]';
+const mobileHeaderButtonGroupItemClass =
+  'inline-flex h-8 w-8 items-center justify-center text-slate-200 transition hover:bg-white/10 hover:text-white';
+const mobileHeaderUserLabelClass =
+  'flex h-8 max-w-[132px] items-center gap-1.5 px-2.5 text-xs font-semibold text-slate-100';
 
 export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, showCompanyCreationMenu = false }) => {
   const location = useLocation();
@@ -193,6 +202,10 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
   }, [menuSearchQuery, searchableMenuItems]);
 
   const workspaceLabel = activeItem?.name || activeCategory || 'Workspace';
+  const headerUserName =
+    [String(user?.firstName || '').trim(), String(user?.lastName || '').trim()].filter(Boolean).join(' ').trim() ||
+    String(user?.email || '').trim() ||
+    'User';
 
   const setAndSyncUiPreferences = (next: ResolvedUiPreferences, persistRemote = true) => {
     const normalized = applyAndPersistUiPreferencesLocal(next);
@@ -520,33 +533,35 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
             <p className="truncate text-sm font-semibold text-white">{brandName}</p>
             <p className="truncate text-[11px] text-slate-500">{workspaceLabel}</p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              title="Decrease text size so more content fits on the screen"
-              aria-label="Decrease text size"
-              onClick={() => bumpFont(-1)}
-              className={mobileHeaderIconButtonClass}
-            >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                <path d="M4 5h8M8 5v10" strokeLinecap="round" />
-                <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M12.5 15h3" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              title="Increase text size for easier reading"
-              aria-label="Increase text size"
-              onClick={() => bumpFont(1)}
-              className={mobileHeaderIconButtonClass}
-            >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                <path d="M4 5h8M8 5v10" strokeLinecap="round" />
-                <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M12.5 15h3M14 13.5v3" strokeLinecap="round" />
-              </svg>
-            </button>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div className={mobileHeaderButtonGroupClass}>
+              <button
+                type="button"
+                title="Decrease text size so more content fits on the screen"
+                aria-label="Decrease text size"
+                onClick={() => bumpFont(-1)}
+                className={`${mobileHeaderButtonGroupItemClass} border-r border-white/10`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12.5 15h3" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Increase text size for easier reading"
+                aria-label="Increase text size"
+                onClick={() => bumpFont(1)}
+                className={mobileHeaderButtonGroupItemClass}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12.5 15h3M14 13.5v3" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
             <button
               type="button"
               title="Open the user manual and screen-by-screen help"
@@ -560,41 +575,54 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
                 <circle cx="10" cy="14.3" r=".7" fill="currentColor" stroke="none" />
               </svg>
             </button>
-            <button
-              type="button"
-              title="Switch to dark mode"
-              aria-label="Switch to dark mode"
-              onClick={() => setTheme('dark')}
-              className={`${mobileHeaderIconButtonClass} ${themeMode === 'dark' ? 'border-sky-400/30 bg-sky-500/15 text-white' : ''}`}
-            >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                <path d="M13.8 2.8a6.6 6.6 0 1 0 3.4 11.9A7.4 7.4 0 0 1 13.8 2.8Z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              title="Switch to light mode"
-              aria-label="Switch to light mode"
-              onClick={() => setTheme('light')}
-              className={`${mobileHeaderIconButtonClass} ${themeMode === 'light' ? 'border-amber-400/30 bg-amber-500/15 text-amber-100' : ''}`}
-            >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                <circle cx="10" cy="10" r="3.2" />
-                <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              title="Logout from the application"
-              aria-label="Logout"
-              onClick={onLogout}
-              className={`${mobileHeaderIconButtonClass} border-rose-400/20 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20`}
-            >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                <path d="M7.5 3.5h-2A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5h2" strokeLinecap="round" />
-                <path d="M11.5 6.5 15 10l-3.5 3.5M8 10h7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+            <div className={mobileHeaderButtonGroupClass}>
+              <button
+                type="button"
+                title="Switch to dark mode"
+                aria-label="Switch to dark mode"
+                onClick={() => setTheme('dark')}
+                className={`${mobileHeaderButtonGroupItemClass} border-r border-white/10 ${themeMode === 'dark' ? 'bg-sky-500/15 text-white' : ''}`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M13.8 2.8a6.6 6.6 0 1 0 3.4 11.9A7.4 7.4 0 0 1 13.8 2.8Z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Switch to light mode"
+                aria-label="Switch to light mode"
+                onClick={() => setTheme('light')}
+                className={`${mobileHeaderButtonGroupItemClass} ${themeMode === 'light' ? 'bg-amber-500/15 text-amber-100' : ''}`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <circle cx="10" cy="10" r="3.2" />
+                  <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className={mobileHeaderButtonGroupClass}>
+              <div className={mobileHeaderUserLabelClass} title={headerUserName}>
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-slate-200">
+                  <svg viewBox="0 0 20 20" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.7">
+                    <circle cx="10" cy="6.5" r="2.75" />
+                    <path d="M5.5 15.5a4.5 4.5 0 0 1 9 0" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="truncate">{headerUserName}</span>
+              </div>
+              <button
+                type="button"
+                title="Logout from the application"
+                aria-label="Logout"
+                onClick={onLogout}
+                className={`${mobileHeaderButtonGroupItemClass} border-l border-white/10 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M7.5 3.5h-2A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5h2" strokeLinecap="round" />
+                  <path d="M11.5 6.5 15 10l-3.5 3.5M8 10h7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
             <button
               type="button"
               title={isMobileOpen ? 'Close menu' : 'Open menu'}

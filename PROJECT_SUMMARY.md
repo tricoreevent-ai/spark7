@@ -1,5 +1,7 @@
 # 🎉 Project Completion Report
 
+> Current product note, April 10, 2026: the public product brand is `Sarva`, and the live platform scope now includes customer CRM tabs, event quotation preview/email/print flow, memberships, accounting controls, and public SEO pages for Home, Products, About, Contact, Login, and User Manual.
+
 ## POS + Inventory + SaaS Application
 **Status**: ✅ **PRODUCTION READY**  
 **Date**: January 19, 2026  

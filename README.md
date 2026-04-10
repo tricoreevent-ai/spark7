@@ -2,6 +2,8 @@
 
 SPARK AI is a multi-module business operations system for sports arena, retail, membership, booking, and finance workflows. It combines POS billing, product and inventory control, quotations, customer credit tracking, facilities, memberships, HR, accounting, reporting, and role-based administration in one application.
 
+Public product brand: `Sarva`
+
 Key project docs:
 - User manual: [USER_MANUAL.md](./USER_MANUAL.md)
 - Hosting guide: [docs/HOSTING_DEPLOYMENT.md](./docs/HOSTING_DEPLOYMENT.md)
@@ -14,7 +16,7 @@ Key project docs:
 - orders and sales history
 - quotations with approval and draft invoice conversion
 - returns processing
-- customer records with contact and credit controls
+- customer CRM desk with profiles, enquiries, campaigns, visit history, and reports
 
 ### Product and stock operations
 - product entry and catalog management
@@ -29,8 +31,8 @@ Key project docs:
 - shifts
 - payroll
 - facilities and bookings
-- event bookings
-- memberships and membership reports
+- event bookings with event quotations, revision history, preview, print, email, and booking conversion
+- membership plans, subscriptions, active memberships, and membership reports
 
 ### Finance and administration
 - accounting workspace
@@ -38,6 +40,11 @@ Key project docs:
 - reporting dashboards
 - settings and branding
 - user management and role permissions
+
+### Public website and SEO
+- public routes for home, products, about, contact, login, and user manual
+- prerendered SEO pages with sitemap and robots generation
+- Sarva brand messaging focused on sports complex management platform keywords
 
 ## Architecture
 

@@ -102,13 +102,16 @@ export type EventQuotationDocumentInput = {
   organizationName?: string;
   contactPhone?: string;
   contactEmail?: string;
-  facilities: Array<{ name: string; location?: string; hourlyRate?: number }>;
+  facilities: Array<{ name: string; location?: string }>;
   occurrences: EventOccurrenceDocumentRow[];
   items: Array<{
     description: string;
     quantity: number;
     unitLabel?: string;
     unitPrice: number;
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;
+    discountAmount: number;
     lineTotal: number;
     notes?: string;
   }>;
@@ -143,6 +146,17 @@ type BusinessProfile = {
 };
 
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+const formatItemDiscountValue = (item: {
+  discountType?: 'percentage' | 'fixed';
+  discountValue?: number;
+  discountAmount?: number;
+}) => {
+  const discountAmount = round2(Number(item.discountAmount || 0));
+  if (discountAmount <= 0) return '-';
+  return item.discountType === 'percentage'
+    ? `${round2(Number(item.discountValue || 0)).toFixed(2)}%`
+    : formatCurrency(Number(item.discountValue || 0));
+};
 
 const toDate = (value: Date | string): Date => {
   const next = new Date(value);
@@ -961,15 +975,13 @@ export const buildEventQuotationDocument = async (input: EventQuotationDocumentI
       'Facilities',
       [
         { header: '#', width: 0.1, align: 'center' },
-        { header: 'Facility', width: 0.48 },
-        { header: 'Location', width: 0.26 },
-        { header: 'Default Rate / Hr', width: 0.16, align: 'right' },
+        { header: 'Facility', width: 0.56 },
+        { header: 'Location', width: 0.34 },
       ],
       input.facilities.map((facility, index) => [
         String(index + 1).padStart(2, '0'),
         safeValue(facility.name),
         safeValue(facility.location),
-        formatCurrency(Number(facility.hourlyRate || 0)),
       ])
     );
 
@@ -997,10 +1009,11 @@ export const buildEventQuotationDocument = async (input: EventQuotationDocumentI
       'Quotation Items',
       [
         { header: '#', width: 0.08, align: 'center' },
-        { header: 'Description', width: 0.4 },
-        { header: 'Qty', width: 0.1, align: 'right' },
-        { header: 'Unit', width: 0.12 },
+        { header: 'Description', width: 0.32 },
+        { header: 'Qty', width: 0.08, align: 'right' },
+        { header: 'Unit', width: 0.1 },
         { header: 'Rate', width: 0.14, align: 'right' },
+        { header: 'Item Discount', width: 0.12, align: 'right' },
         { header: 'Amount', width: 0.16, align: 'right' },
       ],
       input.items.map((item, index) => [
@@ -1009,6 +1022,7 @@ export const buildEventQuotationDocument = async (input: EventQuotationDocumentI
         round2(Number(item.quantity || 0)).toFixed(2),
         safeValue(item.unitLabel || 'Unit'),
         formatCurrency(Number(item.unitPrice || 0)),
+        formatItemDiscountValue(item),
         formatCurrency(Number(item.lineTotal || 0)),
       ])
     );
@@ -1060,17 +1074,46 @@ export const buildEventQuotationDocument = async (input: EventQuotationDocumentI
 
   const fileName = `${sanitizeFileNamePart(input.quoteNumber || input.eventName || 'event-quotation')}.pdf`;
   const subject = `${businessLabel(business)} Event Quotation - ${input.quoteNumber}`;
+  const businessContactLine = [business.phone, business.email].filter(Boolean).join(' | ');
+  const businessAddress = businessAddressLines(business).join(', ');
+  const schedulePreview = (input.occurrences || [])
+    .slice(0, 3)
+    .map((row) => `${formatDate(row.startTime)} ${formatTime(row.startTime)}-${formatTime(row.endTime)}`)
+    .join('<br/>');
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
-      <h2 style="margin-bottom:8px">${businessLabel(business)} Event Quotation</h2>
-      <p>Your event quotation is attached as a PDF.</p>
-      <table style="border-collapse:collapse;margin-top:12px">
-        <tr><td style="padding:4px 12px 4px 0"><strong>Quote No</strong></td><td style="padding:4px 0">${input.quoteNumber}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Event</strong></td><td style="padding:4px 0">${input.eventName}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Organizer</strong></td><td style="padding:4px 0">${input.organizerName}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Quotation Total</strong></td><td style="padding:4px 0">${formatCurrency(input.totalAmount)}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Valid Until</strong></td><td style="padding:4px 0">${input.validUntil ? formatDate(input.validUntil) : '-'}</td></tr>
-      </table>
+    <div style="margin:0;padding:24px;background:#eef3f8;font-family:Arial,sans-serif;color:#172033">
+      <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #d9e3f1;border-radius:18px;overflow:hidden">
+        <div style="background:linear-gradient(135deg,#173b68,#2a5c96);padding:24px 28px;color:#ffffff">
+          <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.82">Event Quotation</div>
+          <h2 style="margin:10px 0 6px;font-size:28px;line-height:1.2">${businessLabel(business)}</h2>
+          <div style="font-size:14px;color:#dbe9fb">${businessAddress || 'Business address not configured'}</div>
+          <div style="margin-top:8px;font-size:13px;color:#dbe9fb">${businessContactLine || 'Contact details not configured'}</div>
+        </div>
+        <div style="padding:28px">
+          <p style="margin:0 0 16px;font-size:15px;color:#425168">Please find attached the event quotation prepared for your review.</p>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:18px">
+            <div style="border:1px solid #dbe4f0;border-radius:14px;padding:16px;background:#f9fbff">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.12em;color:#6b7a90;margin-bottom:10px">Quotation</div>
+              <div style="margin-bottom:8px"><strong>Quote No:</strong> ${input.quoteNumber}</div>
+              <div style="margin-bottom:8px"><strong>Status:</strong> ${String(input.quoteStatus || '-').toUpperCase()}</div>
+              <div><strong>Valid Until:</strong> ${input.validUntil ? formatDate(input.validUntil) : '-'}</div>
+            </div>
+            <div style="border:1px solid #dbe4f0;border-radius:14px;padding:16px;background:#f9fbff">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.12em;color:#6b7a90;margin-bottom:10px">Event</div>
+              <div style="margin-bottom:8px"><strong>Event:</strong> ${input.eventName}</div>
+              <div style="margin-bottom:8px"><strong>Organizer:</strong> ${input.organizerName}</div>
+              <div><strong>Quoted Total:</strong> ${formatCurrency(input.totalAmount)}</div>
+            </div>
+          </div>
+          <div style="border:1px solid #dbe4f0;border-radius:14px;padding:16px;background:#ffffff">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.12em;color:#6b7a90;margin-bottom:10px">Schedule Preview</div>
+            <div style="font-size:14px;line-height:1.7;color:#1f2d3d">${schedulePreview || 'Schedule is attached in the PDF quotation.'}</div>
+          </div>
+          <div style="margin-top:18px;padding:16px;border-radius:14px;background:#edf5ff;color:#274f7d;font-size:13px;line-height:1.7">
+            The attached PDF includes facilities, selected dates, pricing breakdown, GST calculation, and terms and conditions in a print-ready format.
+          </div>
+        </div>
+      </div>
     </div>
   `;
   const text = `Event quotation\nQuote No: ${input.quoteNumber}\nEvent: ${input.eventName}\nOrganizer: ${input.organizerName}\nQuotation Total: ${formatCurrency(input.totalAmount)}`;

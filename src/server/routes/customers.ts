@@ -160,11 +160,14 @@ router.get('/search-unified', authMiddleware, async (req: AuthenticatedRequest, 
     ]);
 
     const seenPhones = new Set<string>();
+    const seenEmails = new Set<string>();
     const results: Array<Record<string, any>> = [];
 
     for (const customer of customers as any[]) {
       const phone = normalizePhone(customer.phone);
+      const email = normalizeEmail(customer.email);
       if (phone) seenPhones.add(phone);
+      if (email) seenEmails.add(email);
       results.push({
         _id: customer._id,
         customerCode: customer.customerCode,
@@ -179,8 +182,10 @@ router.get('/search-unified', authMiddleware, async (req: AuthenticatedRequest, 
 
     for (const member of members as any[]) {
       const phone = normalizePhone(member.phone);
-      if (phone && seenPhones.has(phone)) continue;
+      const email = normalizeEmail(member.email);
+      if ((phone && seenPhones.has(phone)) || (email && seenEmails.has(email))) continue;
       if (phone) seenPhones.add(phone);
+      if (email) seenEmails.add(email);
       results.push({
         _id: `member:${member._id}`,
         memberSubscriptionId: member._id,

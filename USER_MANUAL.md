@@ -2,7 +2,14 @@
 
 User Manual and Product Documentation
 
-Last updated: April 7, 2026
+Last updated: April 10, 2026
+
+## Latest Highlights
+
+- Customer CRM now separates profiles, enquiries, campaigns, and reports for cleaner follow-up.
+- Event quotations now support revision history, PDF preview, print output, email sending, and booking conversion.
+- Membership workflows cover plan setup, subscription issue, active-member tracking, renewals, and reporting.
+- The public Sarva website now includes Home, Products, About, Contact, Login, and the public User Manual.
 
 ## Quick Index
 
@@ -65,7 +72,7 @@ A typical usage flow in the system is:
 1. Admin sets up company details, users, permissions, and settings
 2. Catalog team adds products and categories
 3. Operations team sets up facilities, plans, and subscriptions
-4. Sales team handles customers, quotations, bookings, and transactions
+4. Sales team handles customer profiles, enquiries, campaigns, quotations, bookings, and transactions
 5. People module manages employees, attendance, shifts, and payroll
 6. Accounts team tracks payments, reconciliation, and settlements
 7. Management reviews reports and performance
@@ -394,15 +401,15 @@ Provides sales insights.
 Description  
 This page analyzes business performance and helps management understand operational and revenue trends through reports and summaries.
 
-### 8.5 Customers
+### 8.5 Customers and CRM
 
-Direct link: [Customers](/customers)
+Direct links: [Customer Profiles](/customers/profiles), [Customer Enquiries](/customers/enquiries), [Customer Reports](/customers/reports)
 
 Purpose  
 Runs the customer CRM desk.
 
 Description  
-This page combines customer profiles, enquiry follow-up, visit and payment history, repeat-customer review, and collection watchlists in one place.
+This page combines customer profiles, enquiry follow-up, campaigns, visit and payment history, repeat-customer review, and collection watchlists in one place. The CRM desk is split into profiles, enquiries, campaigns, and reports so staff can move directly to the exact customer task they need.
 
 Example  
 Create a profile for `Rahul Menon`, save his phone, email, preferred badminton slot `06:00 PM to 08:00 PM`, and note that he usually buys shuttle tubes from the sports shop. Later, when he asks about a weekend court block by phone, create an enquiry, assign it to front desk staff, and then open the booking or quotation screen directly from that enquiry.
@@ -440,7 +447,7 @@ Purpose
 Handles events.
 
 Description  
-This page manages registrations, organizer details, event quotations, schedules, facilities, payments, and printable event confirmations.
+This page manages registrations, organizer details, event quotations, schedules, facilities, payments, and printable event confirmations. The linked quotation workflow now supports revision history, PDF preview, print output, email sending, and booking conversion without retyping the event details.
 
 ### 9.4 Create Plan
 
@@ -601,7 +608,7 @@ This section explains each main transaction screen in plain business language so
 | --- | --- | --- |
 | [Facility Booking](/user-manual#transaction-facility-booking) | Reserves a facility slot for a customer. Example: book `Badminton Court 2` for `Rahul Menon` on `2026-04-10` from `18:00` to `19:00` for `600` and mark it paid. | The booking increases facility usage history, supports occupancy review, and can contribute to booking revenue summaries. |
 | [Event Booking](/user-manual#transaction-event-booking) | Blocks one or more facilities for an event organizer over a defined date and time window. Example: create `Summer Shuttle League` for `Metro Sports Club` from `2026-05-01` to `2026-05-03` with `5000` advance collected. | The event appears in event schedules, advance and balance tracking, and operational event reports. |
-| [Event Quotation](/user-manual#transaction-event-quotation) | Prepares a quotation before the organizer confirms the booking. Example: quote `State Badminton Camp` for `Court 1` and `Court 2`, edit the default rental charges, apply `10%` discount, add `18%` GST, and adjust the standard terms before sending it. | The quote stays in quotation tracking and revision history only. It affects booking and payment views only after the user loads it into the booking form and confirms the actual event booking. |
+| [Event Quotation](/user-manual#transaction-event-quotation) | Prepares a quotation before the organizer confirms the booking. Example: quote `State Badminton Camp` for `Court 1` and `Court 2`, edit the default rental charges, apply `10%` discount, add `18%` GST, preview the PDF, and send it by email. | The quote stays in quotation tracking and revision history only. It affects booking and payment views only after the user loads it into the booking form and confirms the actual event booking. |
 | [Sales Invoice](/user-manual#transaction-sales-invoice) | Creates the final customer bill for products sold at the counter or on credit. Example: sell shuttle tubes and grips to `Anjali Nair`, apply `100` discount, choose `UPI`, and post the invoice. | The sale increases sales totals, customer totals, GST summaries, payment-mode summaries, and reduces stock for the items sold. |
 | [Quotation](/user-manual#transaction-quotation) | Prepares a price offer before the customer confirms purchase. Example: send a quotation to `Rising Stars Academy` for jerseys and cones, valid until `2026-04-30`. | Quotations stay in pre-sales tracking and version history. They affect final sales reports only after they are converted into an invoice. |
 | [Returns](/user-manual#transaction-returns) | Records goods coming back from the customer and the related refund or adjustment decision. Example: return `2` shuttle tubes from invoice `INV-260407-00012` because the seal was damaged. | Approved returns reduce net sales impact and update sales return, refund, and customer adjustment reports. |
@@ -871,7 +878,7 @@ Sample values: `Event Name` Summer Shuttle League, `Organizer Name` Metro Sports
 Result: the event schedule is blocked in operations, the balance due is tracked, and payments for the event can be collected later.
 
 `Event Quotation`  
-Sample values: `Event Name` State Badminton Camp, `Organizer Name` Kerala Shuttle Academy, `Organization` Kerala Shuttle Academy, `Phone` 9847012345, `Email` academy@example.com, `Facilities` Court 1 and Court 2, `Date Range` 2026-05-10 to 2026-05-12, `Time` 09:00 to 13:00, `Quotation Status` Sent, `Discount Type` Percentage, `Discount` 10, `GST Rate` 18, `Terms` updated to mention sports complex discipline and damage charges. Use `Refresh Facility Pricing` first so the facility rental rows are pre-filled, then edit them if needed.  
+Sample values: `Event Name` State Badminton Camp, `Organizer Name` Kerala Shuttle Academy, `Organization` Kerala Shuttle Academy, `Phone` 9847012345, `Email` academy@example.com, `Facilities` Court 1 and Court 2, `Date Range` 2026-05-10 to 2026-05-12, `Time` 09:00 to 13:00, `Quotation Status` Sent, `Discount Type` Percentage, `Discount` 10, `GST Rate` 18, `Terms` updated to mention sports complex discipline and damage charges. Use `Refresh Facility Pricing` first so the facility rental rows are pre-filled, then edit them if needed. After saving, use `Preview` to review the PDF, `Send Mail` to email it, or `Print` for a hard copy.  
 Result: the quotation stays in quotation tracking and revision history only. When the organizer accepts it, the user can load it into the booking form and save the final event booking without retyping the event details.
 
 ### 14.2 Sales Screens

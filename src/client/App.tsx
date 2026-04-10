@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { EMPTY_PERMISSIONS, PAGE_META, PageKey, PermissionMatrix } from '@shared/rbac';
+import { EMPTY_PERMISSIONS, FULL_PERMISSIONS, PAGE_META, PageKey, PermissionMatrix } from '@shared/rbac';
 import { IUser } from '@shared/types';
 import { formatCurrency } from './config';
 import { Navbar } from './components/Navbar';
 import { HomeDashboard as ModernHomeDashboard } from './components/HomeDashboard';
+import { PublicLoginCard } from './components/PublicLoginCard';
 import { Inventory } from './Inventory';
 import { AddProduct } from './pages/AddProduct';
 import { Accounting } from './pages/Accounting';
@@ -28,7 +29,7 @@ import { ProductAlerts } from './pages/ProductAlerts';
 import { ProductCenter } from './pages/ProductCenter';
 import { ProductList } from './pages/ProductList';
 import { Procurement } from './pages/Procurement';
-import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicLoginPage } from './pages/PublicSite';
+import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicLoginPage, PublicProductsPage } from './pages/PublicSite';
 import { Quotations } from './pages/Quotations';
 import { Reports } from './pages/Reports';
 import Returns from './pages/Returns';
@@ -38,6 +39,8 @@ import { SettlementCenter } from './pages/SettlementCenter';
 import { Settings } from './pages/Settings';
 import { Shifts } from './pages/Shifts';
 import { UserManagement } from './pages/UserManagement';
+import publicMarketingShot from './assets/marketing/spark-dashboard-macbook.png';
+import { PublicSeo } from './public/PublicSeo';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { initializeAutoTooltips } from './utils/autoTooltips';
 import { getGeneralSettings, loadGeneralSettingsFromServer, resolveGeneralSettingsAssetUrl } from './utils/generalSettings';
@@ -70,6 +73,12 @@ type CompanyCreationConfig = {
 
 const headerIconButtonClass =
   'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white';
+const headerButtonGroupClass =
+  'inline-flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]';
+const headerButtonGroupItemClass =
+  'inline-flex h-9 w-9 items-center justify-center text-slate-200 transition hover:bg-white/10 hover:text-white';
+const headerUserLabelClass =
+  'flex h-9 max-w-[220px] items-center gap-2 px-3 text-sm font-semibold text-slate-100';
 
 const readSavedCredentials = (): SavedCredentials | null => {
   try {
@@ -298,7 +307,7 @@ const DashboardHome: React.FC<{
       key: 'customers',
       title: 'Customer CRM',
       desc: 'Manage customer profiles, enquiries, follow-up, and history in one desk.',
-      path: '/customers',
+      path: '/customers/profiles',
       icon: '🧑',
       category: 'Sales',
       accent: 'from-emerald-500/25 to-emerald-400/10',
@@ -878,6 +887,69 @@ const CompanyCreateAdminPage: React.FC<{ token: string; requiresAccessKey: boole
 };
 
 const SHORTCUT_PANEL_STORAGE_KEY = 'sarva_shortcuts_panel_open';
+const PRIVATE_TITLE_PREFIX = 'Sarva';
+
+const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
+  { match: /^\/$/, title: 'Dashboard' },
+  { match: /^\/sales-dashboard$/, title: 'Sales Dashboard' },
+  { match: /^\/inventory\/procurement$/, title: 'Procurement' },
+  { match: /^\/inventory$/, title: 'Inventory' },
+  { match: /^\/sales\/quotes$/, title: 'Quotations' },
+  { match: /^\/sales$/, title: 'Sales' },
+  { match: /^\/customers\/profiles$/, title: 'Customer Profiles' },
+  { match: /^\/customers\/enquiries$/, title: 'Customer Enquiries' },
+  { match: /^\/customers\/campaigns$/, title: 'Customer Campaigns' },
+  { match: /^\/customers\/reports$/, title: 'Customer Reports' },
+  { match: /^\/orders$/, title: 'Orders' },
+  { match: /^\/products\/catalog$/, title: 'Product Catalog' },
+  { match: /^\/products\/alerts$/, title: 'Product Alerts' },
+  { match: /^\/products\/entry$/, title: 'Product Entry' },
+  { match: /^\/products\/edit\/.+$/, title: 'Edit Product' },
+  { match: /^\/products$/, title: 'Product Center' },
+  { match: /^\/returns$/, title: 'Returns' },
+  { match: /^\/categories$/, title: 'Categories' },
+  { match: /^\/settings$/, title: 'Settings' },
+  { match: /^\/admin\/company-create$/, title: 'Company Creation' },
+  { match: /^\/accounting\/settlements$/, title: 'Settlement Center' },
+  { match: /^\/accounting$/, title: 'Accounting' },
+  { match: /^\/reports$/, title: 'Reports' },
+  { match: /^\/user-manual$/, title: 'User Manual' },
+  { match: /^\/employees$/, title: 'Employees' },
+  { match: /^\/attendance\/reports$/, title: 'Attendance Reports' },
+  { match: /^\/attendance\/self$/, title: 'Employee Attendance' },
+  { match: /^\/attendance$/, title: 'Attendance' },
+  { match: /^\/shifts$/, title: 'Shifts' },
+  { match: /^\/payroll$/, title: 'Payroll' },
+  { match: /^\/events\/quotations$/, title: 'Event Quotations' },
+  { match: /^\/events$/, title: 'Event Management' },
+  { match: /^\/facilities\/setup$/, title: 'Facility Setup' },
+  { match: /^\/facilities$/, title: 'Facilities' },
+  { match: /^\/membership-plans\/create$/, title: 'Membership Plan Setup' },
+  { match: /^\/membership-subscriptions\/create$/, title: 'Create Subscription' },
+  { match: /^\/membership-reports$/, title: 'Membership Reports' },
+  { match: /^\/memberships$/, title: 'Memberships' },
+  { match: /^\/user-management$/, title: 'User Management' },
+  { match: /^\/admin\/reports$/, title: 'Admin Reports' },
+  { match: /^\/forbidden$/, title: 'Access Denied' },
+];
+
+const resolvePrivateDocumentTitle = (pathname: string): string => {
+  const matched = PRIVATE_TITLE_MATCHERS.find((entry) => entry.match.test(pathname));
+  return matched?.title || 'Workspace';
+};
+
+const PrivateDocumentTitleManager: React.FC<{ enabled: boolean; brandName: string }> = ({ enabled, brandName }) => {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!enabled) return;
+    const pageTitle = resolvePrivateDocumentTitle(location.pathname);
+    const suffix = String(brandName || '').trim();
+    document.title = `${PRIVATE_TITLE_PREFIX} ${pageTitle}${suffix ? ` | ${suffix}` : ''}`;
+  }, [brandName, enabled, location.pathname]);
+
+  return null;
+};
 
 const GlobalShortcutsPanel: React.FC = () => {
   const location = useLocation();
@@ -974,14 +1046,15 @@ function App() {
   const headerUiPreferencesRef = useRef<ResolvedUiPreferences>(headerUiPreferences);
   const loginFormRef = useRef<HTMLFormElement | null>(null);
 
-  const permissions = useMemo(
-    () => withDefaultPermissions((user?.permissions as PermissionMatrix | undefined) || undefined),
-    [user]
-  );
+  const permissions = useMemo(() => {
+    if (String(user?.role || '').trim().toLowerCase() === 'super_admin') {
+      return { ...FULL_PERMISSIONS };
+    }
+    return withDefaultPermissions((user?.permissions as PermissionMatrix | undefined) || undefined);
+  }, [user]);
   const hasProductWorkspaceAccess = permissions.products || permissions.sales;
   const hasCustomerCrmAccess = permissions.customers || permissions.sales;
   const hasEventQuotationAccess = permissions['event-quotations'] || permissions.facilities;
-  const hasEventWorkspaceAccess = permissions.facilities || permissions['event-quotations'];
 
   const fallbackPath = useMemo(() => {
     const firstAllowed = orderedPages.find((page) => permissions[page]);
@@ -1477,153 +1550,42 @@ function App() {
     });
   };
 
+  const headerUserName =
+    [String(user?.firstName || '').trim(), String(user?.lastName || '').trim()].filter(Boolean).join(' ').trim() ||
+    String(user?.email || '').trim() ||
+    'User';
+
   const publicLoginForm = (
-    <section className="rounded-[2rem] border border-white/10 bg-slate-900/80 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)] backdrop-blur-xl sm:p-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Client Login</p>
-          <h2 className="mt-3 text-2xl font-bold text-white">Sign in to your Sarva workspace</h2>
-          <p className="mt-3 text-sm leading-7 text-slate-300">
-            Use your email, password, and tenant or company identifier to enter the correct client environment.
-          </p>
-        </div>
-        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
-          Secure Access
-        </span>
-      </div>
-
-      <form ref={loginFormRef} onSubmit={pendingOtpChallengeId ? handleVerifyLoginOtp : handleLogin} className="mt-6 space-y-4">
-        {pendingOtpChallengeId ? (
-          <>
-            <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
-              Enter the OTP sent to <span className="font-semibold text-white">{pendingOtpEmail || email}</span> to finish login.
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value.replace(/\D+/g, '').slice(0, 6))}
-              placeholder="Enter 6-digit OTP"
-              required
-              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-            />
-          </>
-        ) : (
-          <>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@example.com"
-              required
-              disabled={false}
-              readOnly={false}
-              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-            />
-            <input
-              type="text"
-              value={tenantSlug}
-              onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
-              placeholder="Company or tenant id"
-              className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-            />
-
-            <div className="space-y-2">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                required
-                disabled={false}
-                readOnly={false}
-                className="pointer-events-auto opacity-100 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-              />
-              <label className="flex items-center gap-2 text-xs text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={showPassword}
-                  onChange={(e) => setShowPassword(e.target.checked)}
-                  disabled={false}
-                  className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
-                />
-                Show password
-              </label>
-              <label className="flex items-center gap-2 text-xs text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={rememberCredentials}
-                  onChange={(e) => setRememberCredentials(e.target.checked)}
-                  disabled={false}
-                  className="pointer-events-auto opacity-100 h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-500"
-                />
-                Keep me signed in for 7 days
-              </label>
-            </div>
-          </>
-        )}
-
-        {error ? <div className="rounded-2xl border border-red-400/15 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div> : null}
-        {success ? (
-          <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{success}</div>
-        ) : null}
-
-        {pendingOtpChallengeId ? (
-          <div className="grid gap-2 sm:grid-cols-3">
-            <button
-              type="submit"
-              disabled={false}
-              className="pointer-events-auto opacity-100 w-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:from-cyan-400 hover:to-emerald-400"
-            >
-              {loading ? 'Please wait...' : 'Verify OTP'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleResendLoginOtp()}
-              className="pointer-events-auto opacity-100 w-full rounded-full border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
-            >
-              Resend OTP
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelOtpLogin}
-              className="pointer-events-auto opacity-100 w-full rounded-full border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-100 hover:bg-rose-500/20"
-            >
-              Back to Login
-            </button>
-          </div>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="submit"
-              disabled={false}
-              className="pointer-events-auto opacity-100 w-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:from-cyan-400 hover:to-emerald-400"
-            >
-              {loading ? 'Please wait...' : 'Login'}
-            </button>
-            <a
-              href="/user-manual"
-              className="pointer-events-auto flex w-full items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
-            >
-              User Manual
-            </a>
-          </div>
-        )}
-        {loading ? (
-          <button
-            type="button"
-            onClick={() => setLoading(false)}
-            className="w-full rounded-full border border-white/20 bg-transparent px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-200 hover:bg-white/10"
-          >
-            Reset Login Form
-          </button>
-        ) : null}
-      </form>
-    </section>
+    <PublicLoginCard
+      loginFormRef={loginFormRef}
+      pendingOtpChallengeId={pendingOtpChallengeId}
+      pendingOtpEmail={pendingOtpEmail}
+      email={email}
+      tenantSlug={tenantSlug}
+      password={password}
+      otpCode={otpCode}
+      showPassword={showPassword}
+      rememberCredentials={rememberCredentials}
+      loading={loading}
+      error={error}
+      success={success}
+      onEmailChange={setEmail}
+      onTenantSlugChange={setTenantSlug}
+      onPasswordChange={setPassword}
+      onOtpCodeChange={setOtpCode}
+      onShowPasswordChange={setShowPassword}
+      onRememberCredentialsChange={setRememberCredentials}
+      onSubmit={pendingOtpChallengeId ? handleVerifyLoginOtp : handleLogin}
+      onResendOtp={() => {
+        void handleResendLoginOtp();
+      }}
+      onCancelOtp={handleCancelOtpLogin}
+      onResetLoading={() => setLoading(false)}
+    />
   );
   return (
     <BrowserRouter>
+      <PrivateDocumentTitleManager enabled={isLoggedIn} brandName={headerBrandName || String(user?.businessName || '')} />
       {isLoggedIn && user ? (
         <div className="sarva-shell min-h-screen bg-transparent flex flex-col">
           <header className="hidden lg:flex items-center justify-between gap-4 border-b border-white/8 bg-slate-950/95 px-5 py-3 shadow-[0_18px_42px_rgba(2,6,23,0.18)] backdrop-blur-xl">
@@ -1638,32 +1600,34 @@ function App() {
               <p className="truncate text-sm font-semibold text-white">{headerBrandName}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                title="Decrease text size so more content fits on the screen"
-                aria-label="Decrease text size"
-                onClick={() => bumpFontScale(-1)}
-                className={headerIconButtonClass}
-              >
-                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
-                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M12.5 15h3" strokeLinecap="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                title="Increase text size for easier reading"
-                aria-label="Increase text size"
-                onClick={() => bumpFontScale(1)}
-                className={headerIconButtonClass}
-              >
-                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                  <path d="M4 5h8M8 5v10" strokeLinecap="round" />
-                  <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M12.5 15h3M14 13.5v3" strokeLinecap="round" />
-                </svg>
-              </button>
+              <div className={headerButtonGroupClass}>
+                <button
+                  type="button"
+                  title="Decrease text size so more content fits on the screen"
+                  aria-label="Decrease text size"
+                  onClick={() => bumpFontScale(-1)}
+                  className={`${headerButtonGroupItemClass} border-r border-white/10`}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                    <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M12.5 15h3" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  title="Increase text size for easier reading"
+                  aria-label="Increase text size"
+                  onClick={() => bumpFontScale(1)}
+                  className={headerButtonGroupItemClass}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M4 5h8M8 5v10" strokeLinecap="round" />
+                    <path d="M5.5 15.5 8 9l2.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M12.5 15h3M14 13.5v3" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
               <a
                 href="/user-manual"
                 title="Open the user manual and screen-by-screen help"
@@ -1676,41 +1640,58 @@ function App() {
                   <circle cx="10" cy="14.3" r=".7" fill="currentColor" stroke="none" />
                 </svg>
               </a>
-              <button
-                type="button"
-                title="Switch to dark mode"
-                aria-label="Switch to dark mode"
-                onClick={() => updateThemeMode('dark')}
-                className={`${headerIconButtonClass} ${headerUiPreferences.themeMode === 'dark' ? 'border-sky-400/30 bg-sky-500/15 text-white' : ''}`}
-              >
-                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                  <path d="M13.8 2.8a6.6 6.6 0 1 0 3.4 11.9A7.4 7.4 0 0 1 13.8 2.8Z" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                title="Switch to light mode"
-                aria-label="Switch to light mode"
-                onClick={() => updateThemeMode('light')}
-                className={`${headerIconButtonClass} ${headerUiPreferences.themeMode === 'light' ? 'border-amber-400/30 bg-amber-500/15 text-amber-100' : ''}`}
-              >
-                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                  <circle cx="10" cy="10" r="3.2" />
-                  <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" strokeLinecap="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                title="Logout from the application"
-                aria-label="Logout"
-                onClick={handleLogout}
-                className={`${headerIconButtonClass} border-rose-400/20 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20`}
-              >
-                <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
-                  <path d="M7.5 3.5h-2A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5h2" strokeLinecap="round" />
-                  <path d="M11.5 6.5 15 10l-3.5 3.5M8 10h7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+              <div className={headerButtonGroupClass}>
+                <button
+                  type="button"
+                  title="Switch to dark mode"
+                  aria-label="Switch to dark mode"
+                  onClick={() => updateThemeMode('dark')}
+                  className={`${headerButtonGroupItemClass} border-r border-white/10 ${
+                    headerUiPreferences.themeMode === 'dark' ? 'bg-sky-500/15 text-white' : ''
+                  }`}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M13.8 2.8a6.6 6.6 0 1 0 3.4 11.9A7.4 7.4 0 0 1 13.8 2.8Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  title="Switch to light mode"
+                  aria-label="Switch to light mode"
+                  onClick={() => updateThemeMode('light')}
+                  className={`${headerButtonGroupItemClass} ${
+                    headerUiPreferences.themeMode === 'light' ? 'bg-amber-500/15 text-amber-100' : ''
+                  }`}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <circle cx="10" cy="10" r="3.2" />
+                    <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <div className={headerButtonGroupClass}>
+                <div className={headerUserLabelClass} title={headerUserName}>
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-slate-200">
+                    <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.7">
+                      <circle cx="10" cy="6.5" r="2.75" />
+                      <path d="M5.5 15.5a4.5 4.5 0 0 1 9 0" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <span className="truncate">{headerUserName}</span>
+                </div>
+                <button
+                  type="button"
+                  title="Logout from the application"
+                  aria-label="Logout"
+                  onClick={handleLogout}
+                  className={`${headerButtonGroupItemClass} border-l border-white/10 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20`}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M7.5 3.5h-2A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5h2" strokeLinecap="round" />
+                    <path d="M11.5 6.5 15 10l-3.5 3.5M8 10h7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </header>
 
@@ -1740,7 +1721,14 @@ function App() {
               <Route path="/inventory/procurement" element={permissions.inventory ? <Procurement /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/sales" element={permissions.sales ? <Sales /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/sales/quotes" element={permissions.sales ? <Quotations /> : <Navigate to={fallbackPath} replace />} />
-              <Route path="/customers" element={hasCustomerCrmAccess ? <Customers /> : <Navigate to={fallbackPath} replace />} />
+              <Route
+                path="/customers"
+                element={hasCustomerCrmAccess ? <Navigate to="/customers/profiles" replace /> : <Navigate to={fallbackPath} replace />}
+              />
+              <Route path="/customers/profiles" element={hasCustomerCrmAccess ? <Customers initialTab="profiles" /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/customers/enquiries" element={hasCustomerCrmAccess ? <Customers initialTab="enquiries" /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/customers/campaigns" element={hasCustomerCrmAccess ? <Customers initialTab="campaigns" /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/customers/reports" element={hasCustomerCrmAccess ? <Customers initialTab="reports" /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/orders" element={permissions.orders ? <Orders /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products" element={hasProductWorkspaceAccess ? <ProductCenter /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products/catalog" element={hasProductWorkspaceAccess ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
@@ -1775,7 +1763,7 @@ function App() {
               <Route
                 path="/events"
                 element={
-                  hasEventWorkspaceAccess ? (
+                  permissions.facilities ? (
                     <EventManagement
                       initialView="bookings"
                       canManageBookings={permissions.facilities}
@@ -1789,7 +1777,7 @@ function App() {
               <Route
                 path="/events/quotations"
                 element={
-                  hasEventWorkspaceAccess ? (
+                  hasEventQuotationAccess ? (
                     <EventManagement
                       initialView="quotations"
                       canManageBookings={permissions.facilities}
@@ -1820,12 +1808,22 @@ function App() {
         </div>
       ) : (
         <Routes>
-          <Route path="/" element={<PublicHomePage />} />
+          <Route path="/" element={<PublicHomePage productImageSrc={publicMarketingShot} />} />
+          <Route path="/features" element={<Navigate to="/products" replace />} />
+          <Route path="/products" element={<PublicProductsPage />} />
           <Route path="/about" element={<PublicAboutPage />} />
           <Route path="/contact" element={<PublicContactPage />} />
           <Route path="/login" element={<PublicLoginPage>{publicLoginForm}</PublicLoginPage>} />
           <Route path="/help" element={<Navigate to="/user-manual" replace />} />
-          <Route path="/user-manual" element={<HelpCenter isPublic />} />
+          <Route
+            path="/user-manual"
+            element={
+              <>
+                <PublicSeo routeKey="user-manual" />
+                <HelpCenter isPublic />
+              </>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}

@@ -25,7 +25,7 @@ export const PAGE_KEYS = [
 
 export type PageKey = (typeof PAGE_KEYS)[number];
 
-export const DEFAULT_ROLES = ['admin', 'accountant', 'manager', 'sales', 'receptionist', 'employee'] as const;
+export const DEFAULT_ROLES = ['super_admin', 'admin', 'accountant', 'manager', 'sales', 'receptionist', 'employee'] as const;
 export type DefaultRole = (typeof DEFAULT_ROLES)[number];
 export type RoleName = DefaultRole | string;
 
@@ -57,6 +57,7 @@ const baseOperations = {
 };
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<DefaultRole, PermissionMatrix> = {
+  super_admin: { ...FULL_PERMISSIONS },
   admin: { ...FULL_PERMISSIONS },
   accountant: {
     ...EMPTY_PERMISSIONS,
@@ -128,7 +129,7 @@ export const PAGE_META: Record<PageKey, { title: string; path: string }> = {
   'sales-dashboard': { title: 'Sales Dashboard', path: '/sales-dashboard' },
   inventory: { title: 'Inventory', path: '/inventory' },
   sales: { title: 'Sales', path: '/sales' },
-  customers: { title: 'Customer CRM', path: '/customers' },
+  customers: { title: 'Customer CRM', path: '/customers/profiles' },
   orders: { title: 'Orders', path: '/orders' },
   products: { title: 'Product Center', path: '/products' },
   returns: { title: 'Returns', path: '/returns' },

@@ -2,10 +2,12 @@ import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { MembershipPlan } from '../models/MembershipPlan.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
+import { Customer } from '../models/Customer.js';
 import { Facility } from '../models/Facility.js';
 import { User } from '../models/User.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { writeAuditLog } from '../services/audit.js';
+import { generateNumber } from '../services/numbering.js';
 
 const router = Router();
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -18,6 +20,68 @@ const parseBoolean = (value: any, fallback = false): boolean => {
   const normalized = String(value).trim().toLowerCase();
   if (!normalized) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+const matchCustomerByMemberContact = async (phone?: string, email?: string) => {
+  const clauses = [
+    ...(phone ? [{ phone }] : []),
+    ...(email ? [{ email }] : []),
+  ];
+  if (!clauses.length) return null;
+  return Customer.findOne({ $or: clauses }).sort({ updatedAt: -1, createdAt: -1 });
+};
+
+const syncCustomerProfileFromSubscription = async (subscription: any, userId?: string) => {
+  const normalizedPhone = normalizePhone(subscription?.phone);
+  const normalizedEmail = normalizeEmail(subscription?.email);
+  const memberName =
+    String(subscription?.fullName || '').trim()
+    || String(subscription?.memberName || '').trim();
+
+  const existing = await matchCustomerByMemberContact(normalizedPhone, normalizedEmail);
+  if (existing) {
+    let changed = false;
+    if (normalizedPhone && existing.phone !== normalizedPhone) {
+      existing.phone = normalizedPhone;
+      changed = true;
+    }
+    if (normalizedEmail && existing.email !== normalizedEmail) {
+      existing.email = normalizedEmail;
+      changed = true;
+    }
+    if (memberName && existing.name !== memberName && ['individual', 'walk_in', 'regular_member'].includes(String(existing.customerCategory || ''))) {
+      existing.name = memberName;
+      changed = true;
+    }
+    if (!['corporate', 'group_team'].includes(String(existing.customerCategory || ''))) {
+      if (existing.customerCategory !== 'regular_member') {
+        existing.customerCategory = 'regular_member';
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (!existing.createdBy && userId) existing.createdBy = userId;
+      await existing.save();
+    }
+    return existing;
+  }
+
+  if (!memberName) return null;
+
+  const customerCode = await generateNumber('customer_code', { prefix: 'CUST-', padTo: 5 });
+  return Customer.create({
+    customerCode,
+    name: memberName,
+    phone: normalizedPhone || undefined,
+    email: normalizedEmail || undefined,
+    customerCategory: 'regular_member',
+    accountType: 'cash',
+    creditLimit: 0,
+    creditDays: 0,
+    openingBalance: 0,
+    outstandingBalance: 0,
+    notes: 'Created automatically from membership subscription.',
+    createdBy: userId,
+  });
 };
 
 type ReminderChannel = 'sms' | 'email' | 'whatsapp' | 'in_app' | 'pos_popup';
@@ -725,6 +789,7 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
       createdBy: req.userId,
     });
 
+    await syncCustomerProfileFromSubscription(subscription, req.userId);
     await pushAudit(req, 'subscription_create', 'member_subscription', subscription._id.toString(), undefined, subscription.toObject(), {
       planId: plan._id.toString(),
       planName: plan.name,
@@ -786,6 +851,7 @@ router.put('/subscriptions/:id/profile', authMiddleware, async (req: Authenticat
     });
 
     if (!sub) return res.status(404).json({ success: false, error: 'Subscription not found' });
+    await syncCustomerProfileFromSubscription(sub, req.userId);
     await pushAudit(req, 'subscription_profile_update', 'member_subscription', sub._id.toString(), before.toObject(), sub.toObject());
     res.json({ success: true, data: sub, message: 'Member profile updated' });
   } catch (error: any) {

@@ -10,7 +10,7 @@ import {
 } from '../utils/eventQuotationPrint';
 import { CrmConversionDraft } from '../utils/crmDrafts';
 import { downloadPdfDocument, openPdfDocument, ServerPdfDocument } from '../utils/pdfDocument';
-import { showConfirmDialog } from '../utils/appDialogs';
+import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
 
 export interface EventQuotationFacilityOption {
   _id: string;
@@ -23,7 +23,7 @@ export interface EventQuotationFacilityOption {
 export interface EventQuotationBookingDraft {
   sourceQuotationId: string;
   sourceQuotationNumber: string;
-  bookingMode: 'single' | 'range';
+  bookingMode: 'single' | 'multiple';
   eventName: string;
   organizerName: string;
   organizationName: string;
@@ -31,8 +31,7 @@ export interface EventQuotationBookingDraft {
   contactEmail: string;
   facilityIds: string[];
   eventDate: string;
-  rangeStartDate: string;
-  rangeEndDate: string;
+  occurrenceDates: string[];
   startTime: string;
   endTime: string;
   totalAmount: string;
@@ -50,7 +49,7 @@ type EventQuotationDeskProps = {
 
 type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'expired' | 'replaced' | 'booked';
 type DiscountType = 'percentage' | 'fixed';
-type BookingMode = 'single' | 'range';
+type BookingMode = 'single' | 'multiple';
 
 interface QuoteOccurrence {
   occurrenceDate?: string;
@@ -72,6 +71,9 @@ interface QuoteItemFormRow {
   quantity: number;
   unitLabel: string;
   unitPrice: number;
+  discountType: DiscountType;
+  discountValue: number;
+  discountAmount: number;
   lineTotal: number;
   notes?: string;
 }
@@ -146,21 +148,6 @@ const toDateInput = (value: Date): string => {
   return `${value.getFullYear()}-${month}-${day}`;
 };
 
-const enumerateDates = (startDate: string, endDate: string): string[] => {
-  if (!startDate || !endDate) return [];
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
-
-  const rows: string[] = [];
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    rows.push(toDateInput(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return rows;
-};
-
 const toIsoDateTime = (dateValue: string, timeValue: string): string => {
   const [year, month, day] = String(dateValue).split('-').map(Number);
   const [hours, minutes] = String(timeValue).split(':').map(Number);
@@ -177,6 +164,117 @@ const getDurationHours = (startTime: string, endTime: string): number => {
 };
 
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+const formatDateChip = (value: string): string =>
+  new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+
+const ORDERED_WEEKDAY_VALUES = [1, 2, 3, 4, 5, 6, 0] as const;
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+] as const;
+const WEEKEND_WEEKDAYS = [6, 0] as number[];
+const WORKWEEK_WEEKDAYS = [1, 2, 3, 4, 5] as number[];
+
+const normalizeDateList = (values: string[]): string[] =>
+  Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+
+const enumerateDates = (startDate: string, endDate: string): string[] => {
+  if (!startDate || !endDate) return [];
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(toDateInput(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+};
+
+const sortWeekdaySelection = (values: number[]): number[] =>
+  Array.from(new Set(values.filter((value) => ORDERED_WEEKDAY_VALUES.includes(value as any)))).sort(
+    (left, right) => ORDERED_WEEKDAY_VALUES.indexOf(left as any) - ORDERED_WEEKDAY_VALUES.indexOf(right as any)
+  );
+
+const normalizeFacilityIdValue = (value: any): string | undefined => {
+  if (!value) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === 'object' && value !== null && '_id' in value) {
+    const nested = String((value as any)._id || '').trim();
+    return nested || undefined;
+  }
+  const fallback = String(value || '').trim();
+  return fallback || undefined;
+};
+
+const calculateQuoteItemAmounts = (
+  quantityRaw: number,
+  unitPriceRaw: number,
+  discountTypeRaw: DiscountType,
+  discountValueRaw: number
+) => {
+  const quantity = round2(Math.max(0, Number(quantityRaw || 0)));
+  const unitPrice = round2(Math.max(0, Number(unitPriceRaw || 0)));
+  const grossAmount = round2(quantity * unitPrice);
+  const discountType: DiscountType = discountTypeRaw === 'fixed' ? 'fixed' : 'percentage';
+  const discountValue = round2(Math.max(0, Number(discountValueRaw || 0)));
+  const discountAmount = discountType === 'fixed'
+    ? round2(Math.min(discountValue, grossAmount))
+    : round2((grossAmount * Math.min(discountValue, 100)) / 100);
+
+  return {
+    quantity,
+    unitPrice,
+    discountType,
+    discountValue,
+    discountAmount,
+    lineTotal: round2(Math.max(0, grossAmount - discountAmount)),
+    grossAmount,
+  };
+};
+
+const buildQuoteItemRow = (item: Partial<QuoteItemFormRow> = {}): QuoteItemFormRow => {
+  const amounts = calculateQuoteItemAmounts(
+    Number(item.quantity ?? 0),
+    Number(item.unitPrice ?? 0),
+    item.discountType === 'fixed' ? 'fixed' : 'percentage',
+    Number(item.discountValue ?? 0)
+  );
+
+  return {
+    itemType: item.itemType === 'service' ? 'service' : item.itemType === 'custom' ? 'custom' : 'facility',
+    facilityId: normalizeFacilityIdValue(item.facilityId),
+    description: String(item.description || ''),
+    quantity: amounts.quantity,
+    unitLabel: String(item.unitLabel || 'Unit'),
+    unitPrice: amounts.unitPrice,
+    discountType: amounts.discountType,
+    discountValue: amounts.discountValue,
+    discountAmount: amounts.discountAmount,
+    lineTotal: amounts.lineTotal,
+    notes: String(item.notes || ''),
+  };
+};
 
 const emptyForm = () => {
   const today = todayInput();
@@ -190,10 +288,12 @@ const emptyForm = () => {
     organizationName: '',
     contactPhone: '',
     contactEmail: '',
-    facilityIds: [] as string[],
     eventDate: today,
+    occurrenceDates: [today] as string[],
+    dateEntry: today,
     rangeStartDate: today,
-    rangeEndDate: today,
+    rangeEndDate: plusDays(today, 13),
+    rangeWeekdays: [...WEEKEND_WEEKDAYS] as number[],
     startTime: '10:00',
     endTime: '11:00',
     items: [] as QuoteItemFormRow[],
@@ -263,6 +363,11 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
   useEffect(() => {
     if (!incomingCrmDraft) return;
     const requestedStartTime = incomingCrmDraft.requestedStartTime || '10:00';
+    const requestedDate = incomingCrmDraft.requestedDate || todayInput();
+    const requestedFacilityId = normalizeFacilityIdValue(incomingCrmDraft.requestedFacilityId);
+    const requestedFacility = requestedFacilityId
+      ? activeFacilities.find((facility) => facility._id === requestedFacilityId)
+      : undefined;
     setForm((prev) => ({
       ...prev,
       eventName: incomingCrmDraft.requestedFacilityName
@@ -271,47 +376,55 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
       organizerName: incomingCrmDraft.customerName || prev.organizerName,
       contactPhone: incomingCrmDraft.customerPhone || prev.contactPhone,
       contactEmail: incomingCrmDraft.customerEmail || prev.contactEmail,
-      facilityIds: incomingCrmDraft.requestedFacilityId ? [incomingCrmDraft.requestedFacilityId] : prev.facilityIds,
-      eventDate: incomingCrmDraft.requestedDate || prev.eventDate,
-      rangeStartDate: incomingCrmDraft.requestedDate || prev.rangeStartDate,
-      rangeEndDate: incomingCrmDraft.requestedDate || prev.rangeEndDate,
+      eventDate: requestedDate,
+      occurrenceDates: requestedDate ? [requestedDate] : prev.occurrenceDates,
+      dateEntry: requestedDate || prev.dateEntry,
+      rangeStartDate: requestedDate || prev.rangeStartDate,
+      rangeEndDate: requestedDate || prev.rangeEndDate,
       startTime: requestedStartTime,
       endTime: addHour(requestedStartTime),
+      items: requestedFacilityId && !prev.items.some((item) => normalizeFacilityIdValue(item.facilityId) === requestedFacilityId)
+        ? [
+            ...prev.items,
+            buildQuoteItemRow({
+              itemType: 'facility',
+              facilityId: requestedFacilityId,
+              description: requestedFacility?.name || incomingCrmDraft.requestedFacilityName || '',
+              quantity: 1,
+              unitLabel: 'Day',
+              unitPrice: 0,
+              discountType: 'percentage',
+              discountValue: 0,
+              notes: '',
+            }),
+          ]
+        : prev.items,
       notes: [prev.notes, incomingCrmDraft.notes].filter(Boolean).join('\n').trim(),
     }));
     setMessage(`CRM enquiry ${incomingCrmDraft.enquiryNumber || ''} loaded into event quotation.`);
     onConsumeCrmDraft?.();
-  }, [incomingCrmDraft, onConsumeCrmDraft]);
+  }, [activeFacilities, incomingCrmDraft, onConsumeCrmDraft]);
   const selectedDates = useMemo(
     () => (
-      form.bookingMode === 'range'
-        ? enumerateDates(form.rangeStartDate, form.rangeEndDate)
+      form.bookingMode === 'multiple'
+        ? normalizeDateList(form.occurrenceDates)
         : (form.eventDate ? [form.eventDate] : [])
     ),
-    [form.bookingMode, form.eventDate, form.rangeEndDate, form.rangeStartDate]
+    [form.bookingMode, form.eventDate, form.occurrenceDates]
+  );
+  const selectedFacilityIds = useMemo(
+    () => Array.from(
+      new Set(
+        form.items
+          .map((item) => (Number(item.quantity || 0) > 0 ? normalizeFacilityIdValue(item.facilityId) : undefined))
+          .filter((value): value is string => Boolean(value))
+      )
+    ),
+    [form.items]
   );
 
-  const defaultFacilityItems = useMemo(() => {
-    const totalHours = round2(getDurationHours(form.startTime, form.endTime) * selectedDates.length);
-    return activeFacilities
-      .filter((facility) => form.facilityIds.includes(facility._id))
-      .map((facility) => {
-        const unitPrice = round2(Number(facility.hourlyRate || 0));
-        return {
-          itemType: 'facility' as const,
-          facilityId: facility._id,
-          description: facility.name,
-          quantity: totalHours,
-          unitLabel: 'Hours',
-          unitPrice,
-          lineTotal: round2(totalHours * unitPrice),
-          notes: '',
-        };
-      });
-  }, [activeFacilities, form.endTime, form.facilityIds, form.startTime, selectedDates.length]);
-
   const subtotal = useMemo(
-    () => round2(form.items.reduce((sum, item) => sum + round2(Number(item.quantity || 0) * Number(item.unitPrice || 0)), 0)),
+    () => round2(form.items.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0)),
     [form.items]
   );
   const discountAmount = useMemo(() => {
@@ -327,12 +440,6 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
     [form.gstRate, taxableAmount]
   );
   const totalAmount = useMemo(() => round2(taxableAmount + gstAmount), [gstAmount, taxableAmount]);
-
-  useEffect(() => {
-    if (!form.items.length && defaultFacilityItems.length) {
-      setForm((prev) => ({ ...prev, items: defaultFacilityItems }));
-    }
-  }, [defaultFacilityItems, form.items.length]);
 
   const loadQuotes = useCallback(async () => {
     setLoading(true);
@@ -379,7 +486,6 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           .filter(Boolean)
       : [];
     const firstDate = occurrenceDates[0] || todayInput();
-    const lastDate = occurrenceDates[occurrenceDates.length - 1] || firstDate;
     const firstOccurrence = Array.isArray(quote.occurrences) && quote.occurrences.length > 0
       ? quote.occurrences[0]
       : undefined;
@@ -388,28 +494,33 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
       id: quote._id,
       quoteStatus: quote.quoteStatus === 'replaced' || quote.quoteStatus === 'booked' ? 'approved' : quote.quoteStatus,
       validUntil: quote.validUntil ? String(quote.validUntil).slice(0, 10) : plusDays(todayInput(), 7),
-      bookingMode: occurrenceDates.length > 1 ? 'range' : 'single',
+      bookingMode: occurrenceDates.length > 1 ? 'multiple' : 'single',
       eventName: quote.eventName || '',
       organizerName: quote.organizerName || '',
       organizationName: quote.organizationName || '',
       contactPhone: quote.contactPhone || '',
       contactEmail: quote.contactEmail || '',
-      facilityIds: Array.isArray(quote.facilityIds) ? quote.facilityIds.map((facility) => facility._id) : [],
       eventDate: firstDate,
+      occurrenceDates: occurrenceDates.length ? normalizeDateList(occurrenceDates) : [firstDate],
+      dateEntry: firstDate,
       rangeStartDate: firstDate,
-      rangeEndDate: lastDate,
+      rangeEndDate: occurrenceDates[occurrenceDates.length - 1] || firstDate,
+      rangeWeekdays: [...WEEKEND_WEEKDAYS],
       startTime: firstOccurrence ? new Date(firstOccurrence.startTime).toTimeString().slice(0, 5) : '10:00',
       endTime: firstOccurrence ? new Date(firstOccurrence.endTime).toTimeString().slice(0, 5) : '11:00',
       items: Array.isArray(quote.items)
         ? quote.items.map((item) => ({
-            itemType: item.itemType || 'custom',
-            facilityId: item.facilityId,
-            description: item.description,
-            quantity: Number(item.quantity || 0),
-            unitLabel: item.unitLabel || 'Unit',
-            unitPrice: Number(item.unitPrice || 0),
-            lineTotal: Number(item.lineTotal || 0),
-            notes: item.notes || '',
+            ...buildQuoteItemRow({
+              itemType: item.itemType || 'custom',
+              facilityId: normalizeFacilityIdValue(item.facilityId),
+              description: item.description,
+              quantity: Number(item.quantity || 0),
+              unitLabel: item.unitLabel || 'Unit',
+              unitPrice: Number(item.unitPrice || 0),
+              discountType: item.discountType || 'percentage',
+              discountValue: Number(item.discountValue || 0),
+              notes: item.notes || '',
+            }),
           }))
         : [],
       discountType: quote.discountType || 'percentage',
@@ -437,8 +548,8 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
       setError('Event name and organizer name are required');
       return;
     }
-    if (!form.facilityIds.length) {
-      setError('Select at least one facility');
+    if (!selectedFacilityIds.length) {
+      setError('Add at least one facility line item');
       return;
     }
     if (!selectedDates.length) {
@@ -460,7 +571,7 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
         organizationName: form.organizationName,
         contactPhone: form.contactPhone,
         contactEmail: form.contactEmail,
-        facilityIds: form.facilityIds,
+        facilityIds: selectedFacilityIds,
         occurrences: buildOccurrencesPayload(),
         quoteStatus: form.quoteStatus,
         validUntil: form.validUntil || undefined,
@@ -471,6 +582,8 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           quantity: Number(item.quantity || 0),
           unitLabel: item.unitLabel,
           unitPrice: Number(item.unitPrice || 0),
+          discountType: item.discountType,
+          discountValue: Number(item.discountValue || 0),
           notes: item.notes,
         })),
         discountType: form.discountType,
@@ -536,9 +649,10 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
     }
   };
 
-  const exportPdf = async (quote: QuoteRow, autoPrint = false) => {
+  const fetchQuoteDocument = async (quote: QuoteRow, action: 'preview' | 'print' | 'download') => {
     try {
       setError('');
+      setMessage('');
       const response = await fetchApiJson(apiUrl(`/api/events/quotations/${quote._id}/document`), {
         method: 'POST',
         headers,
@@ -548,15 +662,57 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
         setError('Quotation document is not available');
         return;
       }
-      if (autoPrint) {
+      if (action === 'print') {
         const opened = openPdfDocument(document, true);
         if (!opened) setError('Unable to open print window. Please allow popups and try again.');
-      } else {
+        return;
+      }
+      if (action === 'preview') {
+        const opened = openPdfDocument(document, false);
+        if (!opened) setError('Unable to open preview window. Please allow popups and try again.');
+        return;
+      }
+      if (action === 'download') {
         const downloaded = downloadPdfDocument(document);
         if (!downloaded) setError('Unable to download PDF document');
       }
     } catch (docError: any) {
       setError(docError?.message || 'Failed to prepare quotation document');
+    }
+  };
+
+  const emailQuote = async (quote: QuoteRow) => {
+    const suggestedEmail = String(quote.contactEmail || '').trim();
+    const recipient = await showPromptDialog('Enter the email address for this quotation.', {
+      title: 'Send Event Quotation',
+      label: 'Recipient email',
+      defaultValue: suggestedEmail,
+      inputType: 'email',
+      confirmText: 'Send Mail',
+      required: true,
+    });
+    if (!recipient) return;
+
+    try {
+      setError('');
+      setMessage('');
+      const response = await fetchApiJson(apiUrl(`/api/events/quotations/${quote._id}/send-mail`), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: recipient }),
+      });
+      const document = response?.data as ServerPdfDocument | undefined;
+      if (document?.emailed) {
+        setMessage(response?.message || `Quotation emailed to ${document.emailedTo}`);
+        return;
+      }
+      if (document?.emailError) {
+        setError(document.emailError || response?.message || 'Quotation email failed');
+        return;
+      }
+      setMessage(response?.message || 'Quotation email request completed');
+    } catch (mailError: any) {
+      setError(mailError?.message || 'Failed to send quotation email');
     }
   };
 
@@ -573,7 +729,6 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           .filter(Boolean)
       : [];
     const firstDate = occurrenceDates[0] || todayInput();
-    const lastDate = occurrenceDates[occurrenceDates.length - 1] || firstDate;
     const firstOccurrence = Array.isArray(quote.occurrences) && quote.occurrences.length > 0
       ? quote.occurrences[0]
       : undefined;
@@ -581,7 +736,7 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
     onUseQuoteForBooking({
       sourceQuotationId: quote._id,
       sourceQuotationNumber: quote.quoteNumber,
-      bookingMode: occurrenceDates.length > 1 ? 'range' : 'single',
+      bookingMode: occurrenceDates.length > 1 ? 'multiple' : 'single',
       eventName: quote.eventName,
       organizerName: quote.organizerName,
       organizationName: quote.organizationName || '',
@@ -589,8 +744,7 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
       contactEmail: quote.contactEmail || '',
       facilityIds: Array.isArray(quote.facilityIds) ? quote.facilityIds.map((facility) => facility._id) : [],
       eventDate: firstDate,
-      rangeStartDate: firstDate,
-      rangeEndDate: lastDate,
+      occurrenceDates: occurrenceDates.length ? normalizeDateList(occurrenceDates) : [firstDate],
       startTime: firstOccurrence ? new Date(firstOccurrence.startTime).toTimeString().slice(0, 5) : '10:00',
       endTime: firstOccurrence ? new Date(firstOccurrence.endTime).toTimeString().slice(0, 5) : '11:00',
       totalAmount: String(Number(quote.totalAmount || 0)),
@@ -600,8 +754,28 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
     setMessage(`Quotation ${quote.quoteNumber} loaded into the booking form.`);
   };
 
-  const syncFacilityPricing = () => {
-    setForm((prev) => ({ ...prev, items: defaultFacilityItems }));
+  const addFacilityItem = () => {
+    const nextQuantity = Math.max(1, selectedDates.length);
+    setForm((prev) => {
+      return {
+        ...prev,
+        items: [
+          ...prev.items,
+          buildQuoteItemRow({
+            itemType: 'facility',
+            facilityId: '',
+            description: '',
+            quantity: nextQuantity,
+            unitLabel: nextQuantity > 1 ? 'Days' : 'Day',
+            unitPrice: 0,
+            discountType: 'percentage',
+            discountValue: 0,
+            notes: '',
+          }),
+        ],
+      };
+    });
+    setError('');
   };
 
   const addCustomItem = () => {
@@ -609,15 +783,16 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
       ...prev,
       items: [
         ...prev.items,
-        {
+        buildQuoteItemRow({
           itemType: 'custom',
           description: '',
           quantity: 1,
           unitLabel: 'Unit',
           unitPrice: 0,
-          lineTotal: 0,
+          discountType: 'percentage',
+          discountValue: 0,
           notes: '',
-        },
+        }),
       ],
     }));
   };
@@ -626,19 +801,97 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
     setForm((prev) => {
       const nextItems = [...prev.items];
       const current = { ...nextItems[index] };
-      if (field === 'description' || field === 'unitLabel' || field === 'itemType' || field === 'facilityId' || field === 'notes') {
+      if (field === 'description' || field === 'unitLabel' || field === 'itemType' || field === 'facilityId' || field === 'notes' || field === 'discountType') {
         (current as any)[field] = value;
       } else {
         (current as any)[field] = Number(value || 0);
       }
-      current.lineTotal = round2(Number(current.quantity || 0) * Number(current.unitPrice || 0));
-      nextItems[index] = current;
+      if (field === 'facilityId') {
+        const selectedFacility = activeFacilities.find((facility) => facility._id === value);
+        current.itemType = selectedFacility ? 'facility' : current.itemType;
+        if (selectedFacility) {
+          current.description = selectedFacility.name;
+        }
+      }
+      nextItems[index] = buildQuoteItemRow(current);
       return { ...prev, items: nextItems };
     });
   };
 
   const removeItem = (index: number) => {
     setForm((prev) => ({ ...prev, items: prev.items.filter((_, rowIndex) => rowIndex !== index) }));
+  };
+
+  const addOccurrenceDate = () => {
+    const nextDate = String(form.dateEntry || '').trim();
+    if (!nextDate) {
+      setError('Choose a date before adding it to the quotation');
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      occurrenceDates: normalizeDateList([...prev.occurrenceDates, nextDate]),
+      dateEntry: nextDate,
+    }));
+    setError('');
+  };
+
+  const toggleRangeWeekday = (weekday: number) => {
+    setForm((prev) => ({
+      ...prev,
+      rangeWeekdays: sortWeekdaySelection(
+        prev.rangeWeekdays.includes(weekday)
+          ? prev.rangeWeekdays.filter((value) => value !== weekday)
+          : [...prev.rangeWeekdays, weekday]
+      ),
+    }));
+  };
+
+  const applyRangePreset = (weekdays: number[]) => {
+    setForm((prev) => ({
+      ...prev,
+      rangeWeekdays: sortWeekdaySelection(weekdays),
+    }));
+  };
+
+  const addRecurringDates = () => {
+    if (!form.rangeStartDate || !form.rangeEndDate) {
+      setError('Choose both range dates before adding recurring dates');
+      return;
+    }
+    if (!form.rangeWeekdays.length) {
+      setError('Select at least one weekday for the recurring pattern');
+      return;
+    }
+
+    const matchedDates = enumerateDates(form.rangeStartDate, form.rangeEndDate).filter((dateValue) =>
+      form.rangeWeekdays.includes(new Date(`${dateValue}T00:00:00`).getDay())
+    );
+
+    if (!matchedDates.length) {
+      setError('No matching dates were found in the selected range');
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      occurrenceDates: normalizeDateList([...prev.occurrenceDates, ...matchedDates]),
+      dateEntry: matchedDates[matchedDates.length - 1] || prev.dateEntry,
+    }));
+    setError('');
+    setMessage(
+      `${matchedDates.length} recurring date${matchedDates.length === 1 ? '' : 's'} added to the quotation.`
+    );
+  };
+
+  const removeOccurrenceDate = (dateValue: string) => {
+    setForm((prev) => {
+      const remaining = normalizeDateList(prev.occurrenceDates.filter((value) => value !== dateValue));
+      return {
+        ...prev,
+        occurrenceDates: remaining.length ? remaining : [prev.eventDate],
+      };
+    });
   };
 
   const statusClass = (status: QuoteStatus) => {
@@ -690,7 +943,7 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-white">{form.id ? 'Edit Event Quotation' : 'Create Event Quotation'}</h3>
-              <p className="text-xs text-gray-400">Default facility charges are loaded from the selected sports facilities and time slot, but every amount stays editable.</p>
+              <p className="text-xs text-gray-400">Choose facilities inside the quotation rows, add one or many event dates, and enter the custom charge approved for each line.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <ManualHelpLink anchor="transaction-event-quotation" />
@@ -721,47 +974,98 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setForm((prev) => ({ ...prev, bookingMode: 'range' }))}
-              className={`rounded-md px-3 py-2 text-sm font-semibold ${form.bookingMode === 'range' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
+              onClick={() => setForm((prev) => ({ ...prev, bookingMode: 'multiple' }))}
+              className={`rounded-md px-3 py-2 text-sm font-semibold ${form.bookingMode === 'multiple' ? 'bg-indigo-500 text-white' : 'bg-white/10 text-gray-200'}`}
             >
-              Date Range
+              Multiple Dates
             </button>
-          </div>
-
-          <div className="rounded border border-white/10 bg-black/20 p-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-gray-300">Select facilities for the quotation</p>
-              <button type="button" onClick={syncFacilityPricing} className="rounded bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30">
-                Refresh Facility Pricing
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-1">
-              {activeFacilities.map((facility) => (
-                <label key={facility._id} className="flex items-center gap-2 text-xs text-gray-200">
-                  <input
-                    type="checkbox"
-                    checked={form.facilityIds.includes(facility._id)}
-                    onChange={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        facilityIds: prev.facilityIds.includes(facility._id)
-                          ? prev.facilityIds.filter((id) => id !== facility._id)
-                          : [...prev.facilityIds, facility._id],
-                      }))
-                    }
-                  />
-                  {facility.name} ({formatCurrency(Number(facility.hourlyRate || 0))}/hr)
-                </label>
-              ))}
-            </div>
           </div>
 
           {form.bookingMode === 'single' ? (
             <input className={inputClass} type="date" value={form.eventDate} onChange={(e) => setForm((prev) => ({ ...prev, eventDate: e.target.value }))} />
           ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <input className={inputClass} type="date" value={form.rangeStartDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeStartDate: e.target.value }))} />
-              <input className={inputClass} type="date" value={form.rangeEndDate} onChange={(e) => setForm((prev) => ({ ...prev, rangeEndDate: e.target.value }))} />
+            <div className="space-y-3 rounded border border-white/10 bg-black/20 p-3">
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[0.75fr_1.25fr]">
+                <div className="rounded border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Manual Add</p>
+                  <p className="mt-1 text-xs text-gray-400">Add one exact date when the customer gives you specific slots.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input
+                      className={`${inputClass} max-w-[220px]`}
+                      type="date"
+                      value={form.dateEntry}
+                      onChange={(e) => setForm((prev) => ({ ...prev, dateEntry: e.target.value }))}
+                    />
+                    <button type="button" onClick={addOccurrenceDate} className="rounded bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/30">
+                      Add Date
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Recurring Helper</p>
+                  <p className="mt-1 text-xs text-gray-400">Useful for two weekends, every Saturday, or any repeating day pattern.</p>
+                  <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={form.rangeStartDate}
+                      onChange={(e) => setForm((prev) => ({ ...prev, rangeStartDate: e.target.value }))}
+                    />
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={form.rangeEndDate}
+                      onChange={(e) => setForm((prev) => ({ ...prev, rangeEndDate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {WEEKDAY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => toggleRangeWeekday(option.value)}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          form.rangeWeekdays.includes(option.value)
+                            ? 'bg-indigo-500 text-white'
+                            : 'border border-white/10 bg-black/20 text-gray-300 hover:bg-white/10'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => applyRangePreset(WEEKEND_WEEKDAYS)} className="rounded border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20">
+                      Weekends
+                    </button>
+                    <button type="button" onClick={() => applyRangePreset(WORKWEEK_WEEKDAYS)} className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
+                      Weekdays
+                    </button>
+                    <button type="button" onClick={() => applyRangePreset([...ORDERED_WEEKDAY_VALUES])} className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
+                      Every Day
+                    </button>
+                    <button type="button" onClick={addRecurringDates} className="rounded bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30">
+                      Add Matching Dates
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedDates.map((dateValue) => (
+                  <span key={dateValue} className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                    {formatDateChip(dateValue)}
+                    <button
+                      type="button"
+                      onClick={() => removeOccurrenceDate(dateValue)}
+                      className="rounded-full bg-black/20 px-1.5 py-0.5 text-[10px] text-cyan-50 hover:bg-black/40"
+                    >
+                      X
+                    </button>
+                  </span>
+                ))}
+                {!selectedDates.length ? <p className="text-xs text-gray-400">No dates added yet.</p> : null}
+              </div>
             </div>
           )}
 
@@ -791,31 +1095,99 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           </div>
 
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-white">Quotation Items</p>
-              <button type="button" onClick={addCustomItem} className="rounded bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30">
-                Add Custom Item
-              </button>
-            </div>
-            <div className="space-y-2">
-              {form.items.map((item, index) => (
-                <div key={`${item.description}-${index}`} className="grid grid-cols-12 gap-2 rounded border border-white/10 bg-white/5 p-2">
-                  <input className="col-span-12 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-sm text-white md:col-span-4" placeholder="Item description" value={item.description} onChange={(e) => updateItem(index, 'description', e.target.value)} />
-                  <input className="col-span-4 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-sm text-white md:col-span-2" type="number" min="0" step="0.01" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} />
-                  <input className="col-span-4 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-sm text-white md:col-span-2" placeholder="Unit" value={item.unitLabel} onChange={(e) => updateItem(index, 'unitLabel', e.target.value)} />
-                  <input className="col-span-4 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-sm text-white md:col-span-2" type="number" min="0" step="0.01" placeholder="Rate" value={item.unitPrice} onChange={(e) => updateItem(index, 'unitPrice', e.target.value)} />
-                  <div className="col-span-8 flex items-center justify-end text-sm font-semibold text-emerald-300 md:col-span-1">
-                    {formatCurrency(round2(Number(item.quantity || 0) * Number(item.unitPrice || 0)))}
-                  </div>
-                  <div className="col-span-4 flex items-center justify-end md:col-span-1">
-                    <button type="button" onClick={() => removeItem(index)} className="rounded bg-rose-500/20 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/30">
-                      Remove
-                    </button>
-                  </div>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Quotation Items</p>
+                <p className="text-xs text-gray-400">Select the facility in each row and enter the quoted charge. Default facility pricing is intentionally hidden here.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded border border-white/10 bg-white/5 px-3 py-2 text-xs text-gray-300">
+                  Linked facilities: <span className="font-semibold text-white">{selectedFacilityIds.length}</span>
                 </div>
-              ))}
-              {!form.items.length && <p className="text-sm text-gray-400">No quotation items added yet.</p>}
+                <button type="button" onClick={addFacilityItem} className="rounded bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30">
+                  Add Facility Line
+                </button>
+                <button type="button" onClick={addCustomItem} className="rounded bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30">
+                  Add Custom Line
+                </button>
+              </div>
             </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-[1080px] w-full border-separate border-spacing-0 text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-[0.16em] text-gray-400">
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Facility</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Description</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Qty</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Unit</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Quoted Charge</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold">Item Discount</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold text-right">Amount</th>
+                    <th className="border-b border-white/10 px-2 py-2 font-semibold text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((item, index) => {
+                    const grossAmount = round2(Number(item.quantity || 0) * Number(item.unitPrice || 0));
+                    return (
+                      <tr key={`${item.description}-${index}`} className="align-top">
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <select className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" value={item.facilityId || ''} onChange={(e) => updateItem(index, 'facilityId', e.target.value)}>
+                            <option value="" className="bg-gray-900">{item.itemType === 'custom' ? 'Optional facility link' : 'Select facility'}</option>
+                            {activeFacilities.map((facility) => (
+                              <option key={facility._id} value={facility._id} className="bg-gray-900">
+                                {facility.location ? `${facility.name} | ${facility.location}` : facility.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <input className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" placeholder="Item description" value={item.description} onChange={(e) => updateItem(index, 'description', e.target.value)} />
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <input className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" type="number" min="0" step="0.01" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} />
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <input className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" placeholder="Unit" value={item.unitLabel} onChange={(e) => updateItem(index, 'unitLabel', e.target.value)} />
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <input className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" type="number" min="0" step="0.01" placeholder="Charge" value={item.unitPrice} onChange={(e) => updateItem(index, 'unitPrice', e.target.value)} />
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3">
+                          <div className="flex gap-2">
+                            <select className="w-[120px] rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" value={item.discountType} onChange={(e) => updateItem(index, 'discountType', e.target.value)}>
+                              <option value="percentage" className="bg-gray-900">% Off</option>
+                              <option value="fixed" className="bg-gray-900">Fixed Off</option>
+                            </select>
+                            <input className="w-full rounded-md border border-white/10 bg-black/20 px-2 py-2 text-sm text-white" type="number" min="0" step="0.01" placeholder="Discount" value={item.discountValue} onChange={(e) => updateItem(index, 'discountValue', e.target.value)} />
+                          </div>
+                          <p className={`mt-1 text-[11px] ${item.discountAmount > 0 ? 'text-amber-200' : 'text-gray-500'}`}>
+                            {item.discountAmount > 0 ? `Less ${formatCurrency(item.discountAmount)}` : 'No line discount'}
+                          </p>
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3 text-right">
+                          <div className="font-semibold text-emerald-300">{formatCurrency(item.lineTotal)}</div>
+                          <div className="mt-1 text-[11px] text-gray-500">
+                            {item.discountAmount > 0 ? `Gross ${formatCurrency(grossAmount)}` : 'Net line total'}
+                          </div>
+                        </td>
+                        <td className="border-b border-white/10 px-2 py-3 text-right">
+                          <button type="button" onClick={() => removeItem(index)} className="rounded bg-rose-500/20 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/30">
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!form.items.length ? (
+                    <tr>
+                      <td colSpan={8} className="px-2 py-6 text-center text-sm text-gray-400">No quotation items added yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-gray-400">At least one facility line is required. Use custom lines for extras like coaching, lighting, officials, or event support.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
@@ -854,6 +1226,28 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
             <button disabled={saving} className={buttonClass}>
               {saving ? 'Saving...' : form.id ? 'Update Quotation' : 'Create Quotation'}
             </button>
+            {form.id ? (
+              <>
+                <button type="button" onClick={() => {
+                  const selected = rows.find((row) => row._id === form.id) || versions[0];
+                  if (selected) void fetchQuoteDocument(selected, 'preview');
+                }} className="rounded-md bg-sky-500/20 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/30">
+                  Preview
+                </button>
+                <button type="button" onClick={() => {
+                  const selected = rows.find((row) => row._id === form.id) || versions[0];
+                  if (selected) void emailQuote(selected);
+                }} className="rounded-md bg-fuchsia-500/20 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/30">
+                  Send Mail
+                </button>
+                <button type="button" onClick={() => {
+                  const selected = rows.find((row) => row._id === form.id) || versions[0];
+                  if (selected) void fetchQuoteDocument(selected, 'print');
+                }} className="rounded-md bg-cyan-500/20 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/30">
+                  Print
+                </button>
+              </>
+            ) : null}
             {form.id && !form.linkedBookingNumber && (
               <button type="button" onClick={() => {
                 const selected = rows.find((row) => row._id === form.id) || versions[0];
@@ -916,10 +1310,16 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
                           Use for Booking
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => void exportPdf(row, true)} className="rounded bg-cyan-500/20 px-2 py-1 text-xs text-cyan-200">
+                      <button type="button" onClick={() => void fetchQuoteDocument(row, 'preview')} className="rounded bg-sky-500/20 px-2 py-1 text-xs text-sky-100">
+                        Preview
+                      </button>
+                      <button type="button" onClick={() => void emailQuote(row)} className="rounded bg-fuchsia-500/20 px-2 py-1 text-xs text-fuchsia-100">
+                        Mail
+                      </button>
+                      <button type="button" onClick={() => void fetchQuoteDocument(row, 'print')} className="rounded bg-cyan-500/20 px-2 py-1 text-xs text-cyan-200">
                         Print
                       </button>
-                      <button type="button" onClick={() => void exportPdf(row, false)} className="rounded bg-sky-500/20 px-2 py-1 text-xs text-sky-100">
+                      <button type="button" onClick={() => void fetchQuoteDocument(row, 'download')} className="rounded bg-indigo-500/20 px-2 py-1 text-xs text-indigo-100">
                         PDF
                       </button>
                       <button type="button" onClick={() => downloadEventQuotationWord(printable, getGeneralSettings())} className="rounded bg-fuchsia-500/20 px-2 py-1 text-xs text-fuchsia-100">
@@ -965,10 +1365,10 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
           <div className={panelClass}>
             <h3 className="mb-2 text-lg font-semibold text-white">Professional Output</h3>
             <p className="text-sm text-gray-300">
-              Print or export the quotation with facility list, schedule, GST breakup, discount, and terms and conditions.
+              Preview, email, print, or export the quotation with facility list, selected dates, GST breakup, discount, and company details.
             </p>
             <div className="mt-3 rounded border border-white/10 bg-black/20 p-3 text-xs text-gray-300">
-              Word and Excel exports download directly. PDF and Print use the professional quotation document layout.
+              Preview opens the quotation PDF in a new tab. Mail sends a professionally formatted email with the branded PDF attached.
             </div>
           </div>
         </div>
