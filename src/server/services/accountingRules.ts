@@ -45,8 +45,9 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export const round2 = (value: number): number => Number(Number(value || 0).toFixed(2));
 
-export const paymentModeToAccountKey = (mode?: string): string =>
-  String(mode || 'cash').toLowerCase() === 'cash' ? 'cash_in_hand' : 'bank_account';
+export const paymentModeToAccountKey = (mode?: string, overrideAccountKey?: string): string =>
+  String(overrideAccountKey || '').trim()
+  || (String(mode || 'cash').toLowerCase() === 'cash' ? 'cash_in_hand' : 'bank_account');
 
 export const toPeriodKey = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -146,6 +147,7 @@ export const buildInvoicePostingPlan = (input: {
   gstTreatment?: GstTreatment;
   paymentAmount?: number;
   paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   revenueAccountKey?: string;
   receivableAccountKey?: string;
 }): {
@@ -163,7 +165,7 @@ export const buildInvoicePostingPlan = (input: {
     gstTreatment: input.gstTreatment,
   });
   const paymentAmount = round2(Math.max(0, Number(input.paymentAmount || 0)));
-  const cashAccountKey = paymentModeToAccountKey(input.paymentMode);
+  const cashAccountKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
 
   const revenueCredits: JournalPlanLine[] = [
     { accountKey: revenueAccountKey, debit: 0, credit: gst.baseAmount, description: 'Recognize revenue' },
@@ -208,12 +210,13 @@ export const buildInvoicePostingPlan = (input: {
 export const buildPaymentPostingPlan = (input: {
   amount: number;
   paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   counterAccountKey?: string;
 }): JournalPlanLine[] => {
   const amount = round2(Number(input.amount || 0));
   if (amount <= 0) throw new Error('Payment amount must be greater than 0');
 
-  const cashAccountKey = paymentModeToAccountKey(input.paymentMode);
+  const cashAccountKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
   const counterAccountKey = input.counterAccountKey || 'accounts_receivable';
   const lines: JournalPlanLine[] = [
     { accountKey: cashAccountKey, debit: amount, credit: 0, description: 'Payment received' },
@@ -227,6 +230,7 @@ export const buildExpensePostingPlan = (input: {
   amount: number;
   paidAmount?: number;
   paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   expenseAccountKey?: string;
   payableAccountKey?: string;
 }): {
@@ -238,7 +242,7 @@ export const buildExpensePostingPlan = (input: {
   const paidAmount = round2(Math.max(0, Number(input.paidAmount ?? input.amount ?? 0)));
   const expenseAccountKey = input.expenseAccountKey || 'general_expense';
   const payableAccountKey = input.payableAccountKey || 'accounts_payable';
-  const settlementKey = paymentModeToAccountKey(input.paymentMode);
+  const settlementKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
 
   if (totalAmount <= 0) throw new Error('Expense amount must be greater than 0');
 
@@ -275,10 +279,11 @@ export const buildRefundPostingPlan = (input: {
   gstRate?: number;
   gstTreatment?: GstTreatment;
   paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   revenueAccountKey?: string;
 }): { gst: GstBreakup; lines: JournalPlanLine[] } => {
   const revenueAccountKey = input.revenueAccountKey || 'booking_revenue';
-  const settlementKey = paymentModeToAccountKey(input.paymentMode);
+  const settlementKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
   const gst = calculateGstBreakup({
     baseAmount: input.baseAmount,
     gstAmount: input.gstAmount,

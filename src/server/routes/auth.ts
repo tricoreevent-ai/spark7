@@ -8,6 +8,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { AuthResponse, ErrorResponse, ThemeMode, UiPreferences } from '@shared/types';
 import { canAccessPage, getPermissionsForRole, normalizeRoleName, roleExists } from '../services/rbac.js';
 import { writeAuditLog } from '../services/audit.js';
+import { writeAuditFlag } from '../services/auditFlag.js';
 import { loadTenantGeneralSettings } from '../services/generalSettings.js';
 import { parseRecipients, sendConfiguredMail, uniqueRecipients } from '../services/mail.js';
 import { deriveTenantName, ensureTenantBySlug, ensureUserTenantId, findTenantBySlug, normalizeTenantSlug } from '../services/tenant.js';
@@ -21,6 +22,9 @@ const FONT_SCALE_MAX = 1.25;
 const LOGIN_OTP_LENGTH = 6;
 const LOGIN_OTP_MAX_ATTEMPTS = 5;
 const LOGIN_OTP_RESEND_COOLDOWN_MS = 30_000;
+const FORCE_LOGIN_MFA = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.AUTH_FORCE_MFA || '').trim().toLowerCase()
+);
 const ENABLE_COMPANY_CREATION_SCREEN = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.ENABLE_COMPANY_CREATION_SCREEN || '').trim().toLowerCase()
 );
@@ -613,7 +617,8 @@ router.post('/login', async (req: AuthenticatedRequest, res: Response<AuthRespon
     }
 
     const tenantSettings = await loadTenantGeneralSettings(resolvedTenantId);
-    if (tenantSettings.security.emailOtpEnabled) {
+    const loginOtpEnabled = FORCE_LOGIN_MFA || tenantSettings.security.emailOtpEnabled;
+    if (loginOtpEnabled) {
       const { challenge, maskedRecipients } = await sendLoginOtpChallenge({
         user,
         tenant,
@@ -733,6 +738,25 @@ router.post('/verify-login-otp', async (req: AuthenticatedRequest, res: Response
         },
       });
 
+      if (challenge.attempts >= 3) {
+        await writeAuditFlag({
+          module: 'security',
+          flagType: 'failed_mfa_attempts',
+          severity: challenge.attempts >= challenge.maxAttempts ? 'critical' : 'high',
+          message: `${challenge.attempts} failed MFA attempts detected for ${challenge.email}`,
+          dedupeKey: `failed_mfa_attempts:${challenge.userId}:${challenge._id.toString()}:${challenge.attempts}`,
+          detectedBy: challenge.userId,
+          metadata: {
+            email: challenge.email,
+            challengeId: challenge._id.toString(),
+            attempts: challenge.attempts,
+            maxAttempts: challenge.maxAttempts,
+            ip: req.ip,
+            userAgent: req.get('user-agent'),
+          },
+        });
+      }
+
       return res.status(401).json({
         success: false,
         error: 'Invalid OTP. Please try again.',
@@ -829,7 +853,7 @@ router.post('/resend-login-otp', async (req: AuthenticatedRequest, res: Response
 
     const resolvedTenantId = String(challenge.tenantId || '').trim();
     const tenantSettings = await loadTenantGeneralSettings(resolvedTenantId);
-    if (!tenantSettings.security.emailOtpEnabled) {
+    if (!tenantSettings.security.emailOtpEnabled && !FORCE_LOGIN_MFA) {
       return res.status(400).json({
         success: false,
         error: 'Extra security login is currently disabled. Please log in again.',

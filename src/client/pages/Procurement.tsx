@@ -12,6 +12,7 @@ interface SupplierRow {
   contactPerson?: string;
   phone?: string;
   email?: string;
+  gstin?: string;
   isActive: boolean;
 }
 
@@ -52,6 +53,7 @@ interface SupplierForm {
   contactPerson: string;
   phone: string;
   email: string;
+  gstin: string;
   isActive: boolean;
 }
 
@@ -89,6 +91,7 @@ const emptySupplier = (): SupplierForm => ({
   contactPerson: '',
   phone: '',
   email: '',
+  gstin: '',
   isActive: true,
 });
 
@@ -178,7 +181,7 @@ export const Procurement: React.FC = () => {
     const q = supplierSearch.trim().toLowerCase();
     if (!q) return suppliers;
     return suppliers.filter((supplier) =>
-      [supplier.supplierCode, supplier.name, supplier.contactPerson, supplier.phone, supplier.email]
+      [supplier.supplierCode, supplier.name, supplier.contactPerson, supplier.phone, supplier.email, supplier.gstin]
         .join(' ')
         .toLowerCase()
         .includes(q)
@@ -245,6 +248,7 @@ export const Procurement: React.FC = () => {
       contactPerson: supplier.contactPerson || '',
       phone: supplier.phone || '',
       email: supplier.email || '',
+      gstin: supplier.gstin || '',
       isActive: Boolean(supplier.isActive),
     });
   };
@@ -264,6 +268,7 @@ export const Procurement: React.FC = () => {
           contactPerson: supplierForm.contactPerson.trim(),
           phone: supplierForm.phone.trim(),
           email: supplierForm.email.trim(),
+          gstin: supplierForm.gstin.trim().toUpperCase(),
           isActive: supplierForm.isActive,
         }),
       });
@@ -481,6 +486,7 @@ export const Procurement: React.FC = () => {
           <input className={inputClass} placeholder="Contact Person" value={supplierForm.contactPerson} onChange={(e) => setSupplierForm((prev) => ({ ...prev, contactPerson: e.target.value }))} />
           <input className={inputClass} placeholder="Phone" value={supplierForm.phone} onChange={(e) => setSupplierForm((prev) => ({ ...prev, phone: e.target.value }))} />
           <input className={inputClass} type="email" placeholder="Email" value={supplierForm.email} onChange={(e) => setSupplierForm((prev) => ({ ...prev, email: e.target.value }))} />
+          <input className={inputClass} placeholder="GSTIN" value={supplierForm.gstin} onChange={(e) => setSupplierForm((prev) => ({ ...prev, gstin: e.target.value.toUpperCase() }))} />
           <label className="inline-flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={supplierForm.isActive} onChange={(e) => setSupplierForm((prev) => ({ ...prev, isActive: e.target.checked }))} />Supplier is active</label>
           <button type="submit" className={buttonClass} disabled={loading}>{editingSupplierId ? 'Update Supplier' : 'Create Supplier'}</button>
         </form>
@@ -492,17 +498,18 @@ export const Procurement: React.FC = () => {
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-white/10 text-sm">
-              <thead><tr className="text-left text-gray-300"><th className="px-2 py-2">Supplier</th><th className="px-2 py-2">Contact</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
+              <thead><tr className="text-left text-gray-300"><th className="px-2 py-2">Supplier</th><th className="px-2 py-2">Contact</th><th className="px-2 py-2">GSTIN</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-white/10">
                 {filteredSuppliers.map((supplier) => (
                   <tr key={supplier._id}>
                     <td className="px-2 py-2 text-white"><div className="font-semibold">{supplier.name}</div><div className="text-xs text-gray-500">{supplier.supplierCode}</div></td>
                     <td className="px-2 py-2 text-gray-300"><div>{supplier.contactPerson || '-'}</div><div className="text-xs text-gray-500">{supplier.phone || supplier.email || '-'}</div></td>
+                    <td className="px-2 py-2 text-gray-300">{supplier.gstin || '-'}</td>
                     <td className="px-2 py-2"><span className={`rounded-full px-2 py-1 text-xs ${supplier.isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>{supplier.isActive ? 'Active' : 'Inactive'}</span></td>
                     <td className="px-2 py-2 text-right"><div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => editSupplier(supplier)} className="text-xs text-indigo-200 hover:text-indigo-100">Edit</button><button type="button" onClick={() => void deactivateSupplier(supplier)} className="text-xs text-red-300 hover:text-red-200">Deactivate</button></div></td>
                   </tr>
                 ))}
-                {!filteredSuppliers.length && <tr><td colSpan={4} className="px-2 py-4 text-center text-gray-400">No suppliers found.</td></tr>}
+                {!filteredSuppliers.length && <tr><td colSpan={5} className="px-2 py-4 text-center text-gray-400">No suppliers found.</td></tr>}
               </tbody>
             </table>
           </div>

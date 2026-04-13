@@ -4,7 +4,7 @@ import { Customer } from '../models/Customer.js';
 import { CustomerEnquiry } from '../models/CustomerEnquiry.js';
 import { User } from '../models/User.js';
 import { generateNumber } from '../services/numbering.js';
-import { ensureDefaultTenant } from '../services/tenant.js';
+import { resolvePrimaryTenant } from '../services/tenant.js';
 import { runWithTenantContext } from '../services/tenantContext.js';
 
 const router = Router();
@@ -146,7 +146,7 @@ const buildWebsiteLeadNote = (args: { message: string; email: string; mobile?: s
 
 router.post('/contact', async (req: Request, res: Response) => {
   try {
-    const tenant = await ensureDefaultTenant();
+    const tenant = await resolvePrimaryTenant();
     return await runWithTenantContext(tenant._id.toString(), async () => {
       const name = normalize(req.body?.name);
       const email = normalize(req.body?.email).toLowerCase();

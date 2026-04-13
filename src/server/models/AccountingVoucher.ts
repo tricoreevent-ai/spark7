@@ -33,6 +33,10 @@ export interface IAccountingVoucher extends Document {
   totalAmount: number;
   lines: IAccountingVoucherLine[];
   isPrinted: boolean;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
+  deletionReason?: string;
   createdBy?: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -74,11 +78,26 @@ const AccountingVoucherSchema = new Schema<IAccountingVoucher>(
     totalAmount: { type: Number, required: true, min: 0 },
     lines: { type: [AccountingVoucherLineSchema], default: [] },
     isPrinted: { type: Boolean, default: false, index: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: String, trim: true, index: true },
+    deletionReason: { type: String, trim: true },
     createdBy: { type: String, index: true },
   },
   { timestamps: true }
 );
 
 AccountingVoucherSchema.index({ voucherType: 1, voucherDate: -1 });
+
+const excludeDeletedVouchers = function (this: any) {
+  const filter = this.getFilter ? this.getFilter() : {};
+  if (filter?.isDeleted !== undefined) return;
+  this.where({ isDeleted: { $ne: true } });
+};
+
+AccountingVoucherSchema.pre('find', excludeDeletedVouchers);
+AccountingVoucherSchema.pre('findOne', excludeDeletedVouchers);
+AccountingVoucherSchema.pre('countDocuments', excludeDeletedVouchers);
+AccountingVoucherSchema.pre('findOneAndUpdate', excludeDeletedVouchers);
 
 export const AccountingVoucher = mongoose.model<IAccountingVoucher>('AccountingVoucher', AccountingVoucherSchema);

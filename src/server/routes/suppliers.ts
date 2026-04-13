@@ -4,10 +4,12 @@ import { PurchaseOrder } from '../models/PurchaseOrder.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
+import { validateGstinLocally } from '../services/gstCompliance.js';
 
 const router = Router();
 
 const toNumber = (value: any): number => Number(value || 0);
+const normalizeGstin = (value: any): string => String(value || '').trim().toUpperCase();
 
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -30,6 +32,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
         { contactPerson: regex },
         { phone: regex },
         { email: regex },
+        { gstin: regex },
       ];
     }
 
@@ -142,6 +145,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       contactPerson = '',
       phone = '',
       email = '',
+      gstin = '',
       address = '',
       notes = '',
       performanceScore = 100,
@@ -150,6 +154,14 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     if (!String(name || '').trim()) {
       return res.status(400).json({ success: false, error: 'Supplier name is required' });
+    }
+
+    const normalizedGstin = normalizeGstin(gstin);
+    if (normalizedGstin) {
+      const gstValidation = validateGstinLocally(normalizedGstin);
+      if (!gstValidation.isValid) {
+        return res.status(400).json({ success: false, error: gstValidation.message });
+      }
     }
 
     const finalCode = String(supplierCode || '').trim().toUpperCase()
@@ -164,6 +176,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       contactPerson: String(contactPerson || '').trim(),
       phone: String(phone || '').trim(),
       email: String(email || '').trim().toLowerCase(),
+      gstin: normalizedGstin,
       address: String(address || '').trim(),
       notes: String(notes || '').trim(),
       performanceScore: Math.max(0, Math.min(100, toNumber(performanceScore))),
@@ -182,6 +195,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         name: supplier.name,
         phone: supplier.phone,
         email: supplier.email,
+        gstin: supplier.gstin,
       },
     });
 
@@ -201,6 +215,16 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     if (req.body.contactPerson !== undefined) updates.contactPerson = String(req.body.contactPerson || '').trim();
     if (req.body.phone !== undefined) updates.phone = String(req.body.phone || '').trim();
     if (req.body.email !== undefined) updates.email = String(req.body.email || '').trim().toLowerCase();
+    if (req.body.gstin !== undefined) {
+      const normalizedGstin = normalizeGstin(req.body.gstin);
+      if (normalizedGstin) {
+        const gstValidation = validateGstinLocally(normalizedGstin);
+        if (!gstValidation.isValid) {
+          return res.status(400).json({ success: false, error: gstValidation.message });
+        }
+      }
+      updates.gstin = normalizedGstin;
+    }
     if (req.body.address !== undefined) updates.address = String(req.body.address || '').trim();
     if (req.body.notes !== undefined) updates.notes = String(req.body.notes || '').trim();
     if (req.body.isActive !== undefined) updates.isActive = Boolean(req.body.isActive);
@@ -233,6 +257,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
         name: supplier.name,
         phone: supplier.phone,
         email: supplier.email,
+        gstin: supplier.gstin,
         isActive: supplier.isActive,
       },
       after: {
@@ -240,6 +265,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
         name: updated?.name,
         phone: updated?.phone,
         email: updated?.email,
+        gstin: updated?.gstin,
         isActive: updated?.isActive,
       },
     });

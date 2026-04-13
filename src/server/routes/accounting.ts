@@ -16,9 +16,26 @@ import { writeAuditLog } from '../services/audit.js';
 import { writeRecordVersion } from '../services/recordVersion.js';
 import { sendConfiguredMail } from '../services/mail.js';
 import { Employee } from '../models/Employee.js';
+import { TreasuryAccount } from '../models/TreasuryAccount.js';
+import { BankFeedTransaction } from '../models/BankFeedTransaction.js';
 import accountingCoreRoutes from './accountingCore.js';
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js';
+import {
+  ensureTreasuryDefaults,
+  importBankFeed,
+  resolveTreasuryRoute,
+  upsertPaymentMethodRoute,
+  upsertTreasuryAccount,
+} from '../services/treasury.js';
 
 const router = Router();
+const accountingReportRateLimit = createRateLimitMiddleware({
+  bucket: 'accounting-report',
+  limit: 30,
+  windowMs: 60_000,
+  message: 'Too many accounting reports were requested in a short time. Please wait a minute and try again.',
+  auditFlagType: 'accounting_report_rate_limit',
+});
 
 router.use('/core', accountingCoreRoutes);
 // Backward-compatibility alias so accounting core APIs work with clients
@@ -373,6 +390,7 @@ const createVoucherAndLedger = async (params: {
   notes?: string;
   documentFields?: IAccountingVoucherDocumentFields;
   lines: Array<{ accountId: string; debit: number; credit: number; narration?: string }>;
+  ledgerMetadata?: Record<string, any>;
   createdBy?: string;
 }) => {
   const lines = params.lines
@@ -452,11 +470,118 @@ const createVoucherAndLedger = async (params: {
       credit: line.credit,
       paymentMode: params.paymentMode,
       createdBy: params.createdBy,
-      metadata: { source: 'voucher', sourceId: voucher._id.toString() },
+      metadata: { source: 'voucher', sourceId: voucher._id.toString(), ...(params.ledgerMetadata || {}) },
     });
   }
 
   return voucher;
+};
+
+const createTreasuryAwareReceiptVoucher = async (body: any, createdBy?: string) => {
+  const payload = await buildVoucherLedgerPayload('receipt', body, createdBy);
+  const route = await resolveTreasuryRoute({
+    paymentMethod: payload.paymentMode,
+    treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
+    channelLabel: body?.paymentChannelLabel,
+  });
+
+  const voucher = await createVoucherAndLedger({
+    voucherType: payload.voucherType,
+    voucherDate: payload.voucherDate,
+    paymentMode: payload.paymentMode,
+    referenceNo: payload.referenceNo,
+    counterpartyName: payload.counterpartyName,
+    notes: payload.notes,
+    documentFields: payload.documentFields,
+    lines: payload.lines,
+    ledgerMetadata: {
+      treasuryAccountId: route.treasuryAccount._id.toString(),
+      treasuryAccountName: route.treasuryAccount.displayName,
+      paymentChannelLabel: body?.paymentChannelLabel || route.channelLabel,
+      processorName: route.processorName,
+    },
+    createdBy,
+  });
+
+  await DayBookEntry.create({
+    entryType: 'income',
+    category: payload.categoryLabel || 'Service Income',
+    amount: round2(voucher.totalAmount),
+    paymentMethod: toDayBookPaymentMode(payload.paymentMode || 'cash'),
+    treasuryAccountId: route.treasuryAccount._id,
+    treasuryAccountName: route.treasuryAccount.displayName,
+    narration: payload.notes,
+    referenceNo: voucher.voucherNumber,
+    entryDate: payload.voucherDate,
+    createdBy,
+  });
+
+  return { voucher, payload, route };
+};
+
+const createTreasuryAwarePaymentVoucher = async (body: any, createdBy?: string) => {
+  const payload = await buildVoucherLedgerPayload('payment', body, createdBy);
+  const route = await resolveTreasuryRoute({
+    paymentMethod: payload.paymentMode,
+    treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
+    channelLabel: body?.paymentChannelLabel,
+  });
+
+  const voucher = await createVoucherAndLedger({
+    voucherType: payload.voucherType,
+    voucherDate: payload.voucherDate,
+    paymentMode: payload.paymentMode,
+    referenceNo: payload.referenceNo,
+    counterpartyName: payload.counterpartyName,
+    notes: payload.notes,
+    documentFields: payload.documentFields,
+    lines: payload.lines,
+    ledgerMetadata: {
+      treasuryAccountId: route.treasuryAccount._id.toString(),
+      treasuryAccountName: route.treasuryAccount.displayName,
+      paymentChannelLabel: body?.paymentChannelLabel || route.channelLabel,
+      processorName: route.processorName,
+    },
+    createdBy,
+  });
+
+  await DayBookEntry.create({
+    entryType: 'expense',
+    category: payload.categoryLabel || 'General Expense',
+    amount: round2(voucher.totalAmount),
+    paymentMethod: toDayBookPaymentMode(payload.paymentMode || 'cash'),
+    treasuryAccountId: route.treasuryAccount._id,
+    treasuryAccountName: route.treasuryAccount.displayName,
+    narration: payload.notes,
+    referenceNo: voucher.voucherNumber,
+    entryDate: payload.voucherDate,
+    createdBy,
+  });
+
+  return { voucher, payload, route };
+};
+
+const createTreasuryAwareTransferVoucher = async (body: any, createdBy?: string) => {
+  const payload = await buildVoucherLedgerPayload('transfer', body, createdBy);
+  const direction = String(body?.direction || 'cash_to_bank').toLowerCase() === 'bank_to_cash' ? 'bank_to_cash' : 'cash_to_bank';
+  const voucher = await createVoucherAndLedger({
+    voucherType: payload.voucherType,
+    voucherDate: payload.voucherDate,
+    paymentMode: payload.paymentMode,
+    referenceNo: payload.referenceNo,
+    counterpartyName: payload.counterpartyName,
+    notes: payload.notes,
+    documentFields: payload.documentFields,
+    lines: payload.lines,
+    ledgerMetadata: {
+      transferDirection: direction,
+      fromTreasuryAccountId: body?.fromTreasuryAccountId ? String(body.fromTreasuryAccountId) : undefined,
+      toTreasuryAccountId: body?.toTreasuryAccountId ? String(body.toTreasuryAccountId) : undefined,
+    },
+    createdBy,
+  });
+
+  return { voucher, payload };
 };
 
 interface VoucherLedgerPayload {
@@ -533,7 +658,13 @@ const buildVoucherLedgerPayload = async (
 
     const categoryLabel = String(body?.category || existingIncomeLine?.narration || 'Service Income').trim() || 'Service Income';
     const mode = normalizePaymentMode(body?.paymentMode || existing?.paymentMode || 'cash');
-    const cashBankAccount = await getCoreAccount(toBookType(mode) === 'cash' ? 'cash' : 'bank');
+    const treasuryRoute = await resolveTreasuryRoute({
+      paymentMethod: mode,
+      treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
+      channelLabel: body?.paymentChannelLabel || existing?.paymentChannelLabel,
+    });
+    const cashBankAccount = await ChartAccount.findById(treasuryRoute.chartAccountId);
+    if (!cashBankAccount) throw new Error('Treasury chart account is missing for this receipt');
     const incomeAccount = await getOrCreateAccount({
       accountName: `Income - ${categoryLabel}`,
       accountType: 'income',
@@ -563,7 +694,13 @@ const buildVoucherLedgerPayload = async (
     if (amountNum <= 0) throw new Error('amount must be greater than 0');
 
     const mode = normalizePaymentMode(body?.paymentMode || existing?.paymentMode || 'cash');
-    const cashBankAccount = await getCoreAccount(toBookType(mode) === 'cash' ? 'cash' : 'bank');
+    const treasuryRoute = await resolveTreasuryRoute({
+      paymentMethod: mode,
+      treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
+      channelLabel: body?.paymentChannelLabel || existing?.paymentChannelLabel,
+    });
+    const cashBankAccount = await ChartAccount.findById(treasuryRoute.chartAccountId);
+    if (!cashBankAccount) throw new Error('Treasury chart account is missing for this payment');
     const categoryLabel = String(body?.category || existingExpenseLine?.narration || 'General Expense').trim() || 'General Expense';
     const expenseAccount = await getOrCreateAccount({
       accountName: `Expense - ${categoryLabel}`,
@@ -636,8 +773,25 @@ const buildVoucherLedgerPayload = async (
   const amountNum = round2(Number(body?.amount ?? existing?.totalAmount ?? 0));
   if (amountNum <= 0) throw new Error('amount must be greater than 0');
 
-  const cash = await getCoreAccount('cash');
-  const bank = await getCoreAccount('bank');
+  const cashRoute = await resolveTreasuryRoute({
+    paymentMethod: 'cash',
+    treasuryAccountId: body?.fromTreasuryAccountId && direction === 'cash_to_bank'
+      ? String(body.fromTreasuryAccountId)
+      : body?.toTreasuryAccountId && direction === 'bank_to_cash'
+        ? String(body.toTreasuryAccountId)
+        : undefined,
+  });
+  const bankRoute = await resolveTreasuryRoute({
+    paymentMethod: 'bank',
+    treasuryAccountId: body?.fromTreasuryAccountId && direction === 'bank_to_cash'
+      ? String(body.fromTreasuryAccountId)
+      : body?.toTreasuryAccountId && direction === 'cash_to_bank'
+        ? String(body.toTreasuryAccountId)
+        : undefined,
+  });
+  const cash = await ChartAccount.findById(cashRoute.chartAccountId);
+  const bank = await ChartAccount.findById(bankRoute.chartAccountId);
+  if (!cash || !bank) throw new Error('Treasury transfer accounts are not configured');
   const debitAccount = direction === 'bank_to_cash' ? cash : bank;
   const creditAccount = direction === 'bank_to_cash' ? bank : cash;
 
@@ -669,6 +823,41 @@ const recalculateRunningBalancesForAccounts = async (accountIds: string[]) => {
   }
 };
 
+const markLedgerRowsDeleted = async (
+  filter: Record<string, any>,
+  actorId: string | undefined,
+  reason: string
+) => {
+  await AccountLedgerEntry.updateMany(filter, {
+    $set: {
+      isDeleted: true,
+      deletedAt: new Date(),
+      deletedBy: actorId,
+      deletionReason: reason,
+      isReconciled: false,
+    },
+  });
+};
+
+const markDayBookRowsDeleted = async (
+  filter: Record<string, any>,
+  actorId: string | undefined,
+  reason: string
+) => {
+  await DayBookEntry.updateMany(filter, {
+    $set: {
+      status: 'cancelled',
+      isDeleted: true,
+      deletedAt: new Date(),
+      deletedBy: actorId,
+      deletionReason: reason,
+      cancelledAt: new Date(),
+      cancelledBy: actorId,
+      cancellationReason: reason,
+    },
+  });
+};
+
 const replaceVoucherLedgerRows = async (
   voucher: any,
   payload: VoucherLedgerPayload,
@@ -681,10 +870,10 @@ const replaceVoucherLedgerRows = async (
   });
   const affectedAccountIds = new Set<string>(previousRows.map((row) => String(row.accountId || '')));
 
-  await AccountLedgerEntry.deleteMany({
+  await markLedgerRowsDeleted({
     'metadata.source': 'voucher',
     'metadata.sourceId': sourceId,
-  });
+  }, actorId, `Superseded by voucher update ${voucher.voucherNumber}`);
 
   for (const line of payload.lines) {
     affectedAccountIds.add(String(line.accountId || ''));
@@ -862,7 +1051,14 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
       isSystem: true,
       createdBy: req.userId,
     });
-    const cashBank = await getCoreAccount(toBookType(payment.paymentMethod) === 'cash' ? 'cash' : 'bank');
+    const salaryTreasuryRoute = await resolveTreasuryRoute({
+      paymentMethod: payment.paymentMethod,
+      treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
+    });
+    const cashBank = await ChartAccount.findById(salaryTreasuryRoute.chartAccountId);
+    if (!cashBank) {
+      return res.status(400).json({ success: false, error: 'Treasury account is not configured for the selected salary payment method' });
+    }
     const voucherNumber = await generateNumber('salary_voucher', { prefix: 'SP-', datePart: true, padTo: 5 });
 
     await postLedger({
@@ -876,7 +1072,11 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
       credit: 0,
       paymentMode: normalizePaymentMode(salaryMode),
       createdBy: req.userId,
-      metadata: { source: 'salary_payment', sourceId: payment._id.toString() },
+      metadata: {
+        source: 'salary_payment',
+        sourceId: payment._id.toString(),
+        treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
+      },
     });
     await postLedger({
       accountId: cashBank._id,
@@ -889,7 +1089,11 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
       credit: totalAmount,
       paymentMode: normalizePaymentMode(salaryMode),
       createdBy: req.userId,
-      metadata: { source: 'salary_payment', sourceId: payment._id.toString() },
+      metadata: {
+        source: 'salary_payment',
+        sourceId: payment._id.toString(),
+        treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
+      },
     });
 
     const payslipStatus = await sendSalaryPayslip({
@@ -1061,10 +1265,10 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
     const oldAccountIds = oldLedgerRows.map((row) => String(row.accountId || '')).filter(Boolean);
     const oldVoucherNo = String(oldLedgerRows[0]?.voucherNumber || '').trim();
 
-    await AccountLedgerEntry.deleteMany({
+    await markLedgerRowsDeleted({
       'metadata.source': 'salary_payment',
       'metadata.sourceId': sourceId,
-    });
+    }, req.userId, `Superseded by salary payment update ${sourceId}`);
 
     const salaryExpense = await getOrCreateAccount({
       accountName: 'Salary Expense',
@@ -1073,7 +1277,14 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
       isSystem: true,
       createdBy: req.userId,
     });
-    const cashBank = await getCoreAccount(toBookType(payment.paymentMethod) === 'cash' ? 'cash' : 'bank');
+    const salaryTreasuryRoute = await resolveTreasuryRoute({
+      paymentMethod: payment.paymentMethod,
+      treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
+    });
+    const cashBank = await ChartAccount.findById(salaryTreasuryRoute.chartAccountId);
+    if (!cashBank) {
+      return res.status(400).json({ success: false, error: 'Treasury account is not configured for the selected salary payment method' });
+    }
     const voucherNumber = oldVoucherNo || await generateNumber('salary_voucher', { prefix: 'SP-', datePart: true, padTo: 5 });
 
     await postLedger({
@@ -1285,10 +1496,10 @@ router.put('/contracts/:id', authMiddleware, async (req: AuthenticatedRequest, r
     const oldAccountIds = oldLedgerRows.map((row) => String(row.accountId || '')).filter(Boolean);
     const oldVoucherNo = String(oldLedgerRows[0]?.voucherNumber || '').trim();
 
-    await AccountLedgerEntry.deleteMany({
+    await markLedgerRowsDeleted({
       'metadata.source': 'contract_payment',
       'metadata.sourceId': sourceId,
-    });
+    }, req.userId, `Superseded by contract payment update ${sourceId}`);
 
     if (payment.status === 'paid' || payment.status === 'partial') {
       const contractExpense = await getOrCreateAccount({
@@ -1371,11 +1582,20 @@ router.post('/day-book/entry', authMiddleware, async (req: AuthenticatedRequest,
       return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
     }
 
+    const normalizedMode = normalizePaymentMode(paymentMethod);
+    const treasuryRoute = await resolveTreasuryRoute({
+      paymentMethod: normalizedMode,
+      treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
+      channelLabel: req.body?.paymentChannelLabel ? String(req.body.paymentChannelLabel) : undefined,
+    });
+
     const entry = await DayBookEntry.create({
       entryType,
       category,
       amount: amountNum,
-      paymentMethod: toDayBookPaymentMode(normalizePaymentMode(paymentMethod)),
+      paymentMethod: toDayBookPaymentMode(normalizedMode),
+      treasuryAccountId: treasuryRoute.treasuryAccount._id,
+      treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
       narration,
       referenceNo,
       entryDate: entryDate ? new Date(entryDate) : new Date(),
@@ -1522,10 +1742,15 @@ router.delete('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedRe
       return res.status(403).json({ success: false, error: 'You do not have permission to delete this entry' });
     }
 
+    const reason = String(req.body?.reason || 'Cancelled from accounting console').trim() || 'Cancelled from accounting console';
     existing.status = 'cancelled';
+    existing.isDeleted = true;
+    existing.deletedAt = new Date();
+    existing.deletedBy = req.userId;
+    existing.deletionReason = reason;
     existing.cancelledAt = new Date();
     existing.cancelledBy = req.userId;
-    existing.cancellationReason = 'Cancelled from accounting console';
+    existing.cancellationReason = reason;
     await existing.save();
     await writeAuditLog({
       module: 'accounting',
@@ -1548,9 +1773,9 @@ router.delete('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedRe
       changedBy: req.userId,
       dataSnapshot: existing.toObject(),
     });
-    res.json({ success: true, message: 'Day-book entry cancelled' });
+    res.json({ success: true, message: 'Day-book entry archived' });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || 'Failed to delete day-book entry' });
+    res.status(500).json({ success: false, error: error.message || 'Failed to archive day-book entry' });
   }
 });
 
@@ -1847,43 +2072,7 @@ router.get('/chart-accounts/:id/ledger', authMiddleware, async (req: Authenticat
 // Vouchers
 router.post('/vouchers/receipt', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { amount, voucherDate, paymentMode, category, referenceNo, counterpartyName, notes } = req.body;
-    const amountNum = round2(Number(amount || 0));
-    if (amountNum <= 0) return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
-
-    const mode = normalizePaymentMode(paymentMode);
-    const cashBankAccount = await getCoreAccount(toBookType(mode) === 'cash' ? 'cash' : 'bank');
-    const incomeAccount = await getOrCreateAccount({
-      accountName: `Income - ${String(category || 'Service Income').trim()}`,
-      accountType: 'income',
-      createdBy: req.userId,
-    });
-
-    const voucher = await createVoucherAndLedger({
-      voucherType: 'receipt',
-      voucherDate: voucherDate ? new Date(voucherDate) : new Date(),
-      paymentMode: mode,
-      referenceNo,
-      counterpartyName,
-      notes,
-      createdBy: req.userId,
-      lines: [
-        { accountId: cashBankAccount._id.toString(), debit: amountNum, credit: 0, narration: 'Receipt inflow' },
-        { accountId: incomeAccount._id.toString(), debit: 0, credit: amountNum, narration: String(category || 'Service Income') },
-      ],
-    });
-
-    await DayBookEntry.create({
-      entryType: 'income',
-      category: String(category || 'Service Income'),
-      amount: amountNum,
-      paymentMethod: toDayBookPaymentMode(mode),
-      narration: notes,
-      referenceNo: voucher.voucherNumber,
-      entryDate: voucher.voucherDate,
-      createdBy: req.userId,
-    });
-
+    const { voucher } = await createTreasuryAwareReceiptVoucher(req.body, req.userId);
     res.status(201).json({ success: true, data: voucher, message: 'Receipt voucher created' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to create receipt voucher') });
@@ -1892,60 +2081,7 @@ router.post('/vouchers/receipt', authMiddleware, async (req: AuthenticatedReques
 
 router.post('/vouchers/payment', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { amount, voucherDate, paymentMode, category, referenceNo, counterpartyName, notes } = req.body;
-    const documentFieldsInput = req.body?.documentFields && typeof req.body.documentFields === 'object'
-      ? req.body.documentFields
-      : {};
-    const documentFields: IAccountingVoucherDocumentFields = {
-      accountName: String(documentFieldsInput.accountName || counterpartyName || '').trim() || undefined,
-      beingPaymentOf: String(documentFieldsInput.beingPaymentOf || notes || '').trim() || undefined,
-      forPeriod: String(documentFieldsInput.forPeriod || '').trim() || undefined,
-      receivedBy: String(documentFieldsInput.receivedBy || '').trim() || undefined,
-      authorizedBy: String(documentFieldsInput.authorizedBy || '').trim() || undefined,
-      receivedSign: String(documentFieldsInput.receivedSign || '').trim() || undefined,
-      authorizedSign: String(documentFieldsInput.authorizedSign || '').trim() || undefined,
-    };
-    const hasDocumentFields = Object.values(documentFields).some((value) => Boolean(String(value || '').trim()));
-    const normalizedNotes = String(notes || documentFields.beingPaymentOf || '').trim() || undefined;
-    const normalizedCounterpartyName = String(counterpartyName || documentFields.accountName || '').trim() || undefined;
-    const categoryLabel = String(category || documentFields.beingPaymentOf || 'General Expense').trim() || 'General Expense';
-    const amountNum = round2(Number(amount || 0));
-    if (amountNum <= 0) return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
-
-    const mode = normalizePaymentMode(paymentMode);
-    const cashBankAccount = await getCoreAccount(toBookType(mode) === 'cash' ? 'cash' : 'bank');
-    const expenseAccount = await getOrCreateAccount({
-      accountName: `Expense - ${categoryLabel}`,
-      accountType: 'expense',
-      createdBy: req.userId,
-    });
-
-    const voucher = await createVoucherAndLedger({
-      voucherType: 'payment',
-      voucherDate: voucherDate ? new Date(voucherDate) : new Date(),
-      paymentMode: mode,
-      referenceNo,
-      counterpartyName: normalizedCounterpartyName,
-      notes: normalizedNotes,
-      documentFields: hasDocumentFields ? documentFields : undefined,
-      createdBy: req.userId,
-      lines: [
-        { accountId: expenseAccount._id.toString(), debit: amountNum, credit: 0, narration: categoryLabel },
-        { accountId: cashBankAccount._id.toString(), debit: 0, credit: amountNum, narration: 'Payment outflow' },
-      ],
-    });
-
-    await DayBookEntry.create({
-      entryType: 'expense',
-      category: categoryLabel,
-      amount: amountNum,
-      paymentMethod: toDayBookPaymentMode(mode),
-      narration: normalizedNotes,
-      referenceNo: voucher.voucherNumber,
-      entryDate: voucher.voucherDate,
-      createdBy: req.userId,
-    });
-
+    const { voucher } = await createTreasuryAwarePaymentVoucher(req.body, req.userId);
     res.status(201).json({ success: true, data: voucher, message: 'Payment voucher created' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to create payment voucher') });
@@ -2103,13 +2239,15 @@ router.post('/vouchers/:id/update', authMiddleware, updateVoucherHandler);
 router.delete('/vouchers/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!isSuperAdmin(req)) {
-      return res.status(403).json({ success: false, error: 'Only super admin can delete vouchers' });
+      return res.status(403).json({ success: false, error: 'Only super admin can archive vouchers' });
     }
 
     const voucherId = String(req.params.id);
     const voucher = await AccountingVoucher.findById(voucherId);
     if (!voucher) return res.status(404).json({ success: false, error: 'Voucher not found' });
     const before = voucher.toObject();
+    const reason = String(req.body?.reason || `Archived from accounting console for voucher ${voucher.voucherNumber}`).trim()
+      || `Archived from accounting console for voucher ${voucher.voucherNumber}`;
 
     const sourceId = voucher._id.toString();
     const ledgerRows = await AccountLedgerEntry.find({
@@ -2118,17 +2256,21 @@ router.delete('/vouchers/:id', authMiddleware, async (req: AuthenticatedRequest,
     }).select('accountId');
     const accountIds = ledgerRows.map((row) => String(row.accountId || ''));
 
-    await AccountLedgerEntry.deleteMany({
+    await markLedgerRowsDeleted({
       'metadata.source': 'voucher',
       'metadata.sourceId': sourceId,
-    });
-    await DayBookEntry.deleteMany({ referenceNo: voucher.voucherNumber });
-    await AccountingVoucher.findByIdAndDelete(voucherId);
+    }, req.userId, reason);
+    await markDayBookRowsDeleted({ referenceNo: voucher.voucherNumber }, req.userId, reason);
+    voucher.isDeleted = true;
+    voucher.deletedAt = new Date();
+    voucher.deletedBy = req.userId;
+    voucher.deletionReason = reason;
+    await voucher.save();
     await recalculateRunningBalancesForAccounts(accountIds);
 
     await writeAuditLog({
       module: 'accounting',
-      action: 'voucher_deleted',
+      action: 'voucher_archived',
       entityType: 'voucher',
       entityId: sourceId,
       referenceNo: voucher.voucherNumber,
@@ -2136,25 +2278,28 @@ router.delete('/vouchers/:id', authMiddleware, async (req: AuthenticatedRequest,
       ipAddress: req.ip,
       metadata: {
         voucherType: voucher.voucherType,
+        reason,
         userAgent: req.get('user-agent'),
       },
       before,
+      after: voucher.toObject(),
     });
     await writeRecordVersion({
       module: 'accounting',
       entityType: 'voucher',
       recordId: sourceId,
-      action: 'DELETE',
+      action: 'ARCHIVE',
       changedBy: req.userId,
-      dataSnapshot: before,
+      dataSnapshot: voucher.toObject(),
       metadata: {
         voucherType: voucher.voucherType,
+        reason,
       },
     });
 
-    res.json({ success: true, message: 'Voucher deleted successfully' });
+    res.json({ success: true, message: 'Voucher archived successfully' });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to delete voucher') });
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to archive voucher') });
   }
 });
 
@@ -2171,31 +2316,298 @@ router.post('/vouchers/:id/mark-printed', authMiddleware, async (req: Authentica
 // Transfer between cash and bank
 router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { amount, transferDate, direction = 'cash_to_bank', referenceNo, notes } = req.body;
-    const amountNum = round2(Number(amount || 0));
-    if (amountNum <= 0) return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
-
-    const cash = await getCoreAccount('cash');
-    const bank = await getCoreAccount('bank');
-    const debitAccount = direction === 'bank_to_cash' ? cash : bank;
-    const creditAccount = direction === 'bank_to_cash' ? bank : cash;
-
-    const voucher = await createVoucherAndLedger({
-      voucherType: 'transfer',
-      voucherDate: transferDate ? new Date(transferDate) : new Date(),
-      paymentMode: 'bank_transfer',
-      referenceNo,
-      notes,
-      createdBy: req.userId,
-      lines: [
-        { accountId: debitAccount._id.toString(), debit: amountNum, credit: 0, narration: `Transfer ${direction}` },
-        { accountId: creditAccount._id.toString(), debit: 0, credit: amountNum, narration: `Transfer ${direction}` },
-      ],
-    });
-
+    const { voucher } = await createTreasuryAwareTransferVoucher(req.body, req.userId);
     res.status(201).json({ success: true, data: voucher, message: 'Cash/Bank transfer recorded' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to save transfer') });
+  }
+});
+
+router.post('/treasury/sample-spark7', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!isPrivileged(req)) {
+      return res.status(403).json({ success: false, error: 'Only admin, manager, or accountant can load treasury sample data' });
+    }
+
+    await ensureTreasuryDefaults(req.userId);
+
+    const findAccount = async (displayName: string) =>
+      TreasuryAccount.findOne({
+        displayName: { $regex: `^${escapeRegex(displayName)}$`, $options: 'i' },
+      });
+
+    const existingCash = await TreasuryAccount.findOne({ accountType: 'cash_float' }).sort({ isPrimary: -1, createdAt: 1 });
+    const existingHdfc = await findAccount('HDFC Sports Store');
+    const existingIcici = await findAccount('ICICI Facility Rent');
+
+    const cashAccount = await upsertTreasuryAccount({
+      id: existingCash?._id?.toString(),
+      accountType: 'cash_float',
+      displayName: 'Main Cash Counter',
+      walletProvider: 'Front Desk Counter',
+      openingBalance: Number(existingCash?.openingBalance ?? 12000),
+      notes: 'Spark7 sample cash counter for treasury testing',
+      createdBy: req.userId,
+    });
+
+    const hdfcAccount = await upsertTreasuryAccount({
+      id: existingHdfc?._id?.toString(),
+      accountType: 'bank',
+      displayName: 'HDFC Sports Store',
+      bankName: 'HDFC Bank',
+      accountNumber: '50100123456789',
+      branchName: 'Kakkanad',
+      ifscCode: 'HDFC0001234',
+      processorName: 'Sports Store QR',
+      openingBalance: Number(existingHdfc?.openingBalance ?? 25000),
+      isPrimary: true,
+      notes: 'Spark7 sample bank for sports store and commission collections',
+      createdBy: req.userId,
+    });
+
+    const iciciAccount = await upsertTreasuryAccount({
+      id: existingIcici?._id?.toString(),
+      accountType: 'bank',
+      displayName: 'ICICI Facility Rent',
+      bankName: 'ICICI Bank',
+      accountNumber: '12340567890123',
+      branchName: 'Kaloor',
+      ifscCode: 'ICIC0000456',
+      processorName: 'Facility Rentals',
+      openingBalance: Number(existingIcici?.openingBalance ?? 18000),
+      isPrimary: false,
+      notes: 'Spark7 sample bank for room rent and facility rental collections',
+      createdBy: req.userId,
+    });
+
+    await Promise.all([
+      upsertPaymentMethodRoute({
+        paymentMethod: 'cash',
+        treasuryAccountId: cashAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: true,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'upi',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: true,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'bank_transfer',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: true,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'upi',
+        channelLabel: 'sports_store',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: false,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'upi',
+        channelLabel: 'room_rent',
+        treasuryAccountId: iciciAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: false,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'bank_transfer',
+        channelLabel: 'room_rent',
+        treasuryAccountId: iciciAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: false,
+        createdBy: req.userId,
+      }),
+      upsertPaymentMethodRoute({
+        paymentMethod: 'upi',
+        channelLabel: 'commission',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        settlementDays: 0,
+        feePercent: 0,
+        fixedFee: 0,
+        isDefault: false,
+        createdBy: req.userId,
+      }),
+    ]);
+
+    const createdReferences: string[] = [];
+    const skippedReferences: string[] = [];
+
+    const createVoucherIfMissing = async (referenceNo: string, run: () => Promise<void>) => {
+      const existing = await AccountingVoucher.findOne({ referenceNo: String(referenceNo).trim() });
+      if (existing) {
+        skippedReferences.push(referenceNo);
+        return;
+      }
+      await run();
+      createdReferences.push(referenceNo);
+    };
+
+    await createVoucherIfMissing('SPARK7-ROOMRENT-001', async () => {
+      await createTreasuryAwareReceiptVoucher({
+        amount: 12000,
+        voucherDate: '2026-04-08',
+        paymentMode: 'bank_transfer',
+        category: 'Room Rent Income',
+        referenceNo: 'SPARK7-ROOMRENT-001',
+        counterpartyName: 'Badminton Court Morning Slot',
+        notes: 'Spark7 sample room rent collection routed to ICICI',
+        treasuryAccountId: iciciAccount!._id.toString(),
+        paymentChannelLabel: 'room_rent',
+      }, req.userId);
+    });
+
+    await createVoucherIfMissing('SPARK7-ROOMRENT-002', async () => {
+      await createTreasuryAwareReceiptVoucher({
+        amount: 8500,
+        voucherDate: '2026-04-09',
+        paymentMode: 'upi',
+        category: 'Room Rent Income',
+        referenceNo: 'SPARK7-ROOMRENT-002',
+        counterpartyName: 'Table Tennis Hall Evening Slot',
+        notes: 'Spark7 sample second room rent collection',
+        treasuryAccountId: iciciAccount!._id.toString(),
+        paymentChannelLabel: 'room_rent',
+      }, req.userId);
+    });
+
+    await createVoucherIfMissing('SPARK7-COMMISSION-001', async () => {
+      await createTreasuryAwareReceiptVoucher({
+        amount: 3500,
+        voucherDate: '2026-04-09',
+        paymentMode: 'upi',
+        category: 'Commission Income',
+        referenceNo: 'SPARK7-COMMISSION-001',
+        counterpartyName: 'District Tournament Organizer',
+        notes: 'Spark7 sample commission collection routed to HDFC',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        paymentChannelLabel: 'commission',
+      }, req.userId);
+    });
+
+    await createVoucherIfMissing('SPARK7-RENTPAY-001', async () => {
+      await createTreasuryAwarePaymentVoucher({
+        amount: 5500,
+        voucherDate: '2026-04-10',
+        paymentMode: 'bank_transfer',
+        category: 'Facility Rent Expense',
+        referenceNo: 'SPARK7-RENTPAY-001',
+        counterpartyName: 'ABC Estates',
+        notes: 'Spark7 sample rent payment from HDFC account',
+        treasuryAccountId: hdfcAccount!._id.toString(),
+        documentFields: {
+          accountName: 'ABC Estates',
+          beingPaymentOf: 'Monthly facility rent',
+          forPeriod: 'April 2026',
+          receivedBy: 'Landlord',
+          authorizedBy: 'Manager',
+        },
+      }, req.userId);
+    });
+
+    await createVoucherIfMissing('SPARK7-HDFC-TRANSFER-001', async () => {
+      await createTreasuryAwareTransferVoucher({
+        amount: 6000,
+        transferDate: '2026-04-09',
+        direction: 'cash_to_bank',
+        referenceNo: 'SPARK7-HDFC-TRANSFER-001',
+        notes: 'Spark7 sample transfer from cash counter to HDFC',
+        fromTreasuryAccountId: cashAccount!._id.toString(),
+        toTreasuryAccountId: hdfcAccount!._id.toString(),
+      }, req.userId);
+    });
+
+    await createVoucherIfMissing('SPARK7-ICICI-TRANSFER-001', async () => {
+      await createTreasuryAwareTransferVoucher({
+        amount: 4000,
+        transferDate: '2026-04-10',
+        direction: 'cash_to_bank',
+        referenceNo: 'SPARK7-ICICI-TRANSFER-001',
+        notes: 'Spark7 sample transfer from cash counter to ICICI',
+        fromTreasuryAccountId: cashAccount!._id.toString(),
+        toTreasuryAccountId: iciciAccount!._id.toString(),
+      }, req.userId);
+    });
+
+    const createdBankRefs: string[] = [];
+    const skipBankRefIfExists = async (treasuryAccountId: string, referenceNo: string, row: { date: string; amount: number; description: string }) => {
+      const existing = await BankFeedTransaction.findOne({ treasuryAccountId, referenceNo });
+      if (existing) return;
+      await importBankFeed({
+        treasuryAccountId,
+        rows: [{ date: row.date, amount: row.amount, description: row.description, referenceNo }],
+        createdBy: req.userId,
+      });
+      createdBankRefs.push(referenceNo);
+    };
+
+    await skipBankRefIfExists(hdfcAccount!._id.toString(), 'SPARK7-COMMISSION-001', {
+      date: '2026-04-09',
+      amount: 3500,
+      description: 'Commission collection credited to HDFC',
+    });
+    await skipBankRefIfExists(hdfcAccount!._id.toString(), 'SPARK7-HDFC-TRANSFER-001', {
+      date: '2026-04-09',
+      amount: 6000,
+      description: 'Cash deposit from counter to HDFC',
+    });
+    await skipBankRefIfExists(hdfcAccount!._id.toString(), 'SPARK7-RENTPAY-001', {
+      date: '2026-04-10',
+      amount: -5500,
+      description: 'Facility rent payment debited from HDFC',
+    });
+    await skipBankRefIfExists(iciciAccount!._id.toString(), 'SPARK7-ROOMRENT-001', {
+      date: '2026-04-08',
+      amount: 12000,
+      description: 'Room rent collection credited to ICICI',
+    });
+    await skipBankRefIfExists(iciciAccount!._id.toString(), 'SPARK7-ROOMRENT-002', {
+      date: '2026-04-09',
+      amount: 8500,
+      description: 'Second room rent collection credited to ICICI',
+    });
+    await skipBankRefIfExists(iciciAccount!._id.toString(), 'SPARK7-ICICI-TRANSFER-001', {
+      date: '2026-04-10',
+      amount: 4000,
+      description: 'Cash deposit from counter to ICICI',
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        accounts: {
+          cash: cashAccount,
+          hdfc: hdfcAccount,
+          icici: iciciAccount,
+        },
+        createdReferences,
+        skippedReferences,
+        createdBankRefs,
+      },
+      message: `Spark7 sample treasury data loaded. Created ${createdReferences.length} voucher(s) and ${createdBankRefs.length} bank row(s).`,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to load Spark7 treasury sample data') });
   }
 });
 
@@ -2533,7 +2945,7 @@ router.get('/day-book', authMiddleware, async (req: AuthenticatedRequest, res: R
   }
 });
 
-router.get('/reports/expense', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/expense', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2615,7 +3027,7 @@ router.get('/reports/expense', authMiddleware, async (req: AuthenticatedRequest,
   }
 });
 
-router.get('/reports/income', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/income', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2666,7 +3078,7 @@ router.get('/reports/income', authMiddleware, async (req: AuthenticatedRequest, 
   }
 });
 
-router.get('/reports/trial-balance', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/trial-balance', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2676,7 +3088,7 @@ router.get('/reports/trial-balance', authMiddleware, async (req: AuthenticatedRe
     for (const account of accounts) {
       const opening = await getAccountClosing(account._id, new Date(start.getTime() - 1));
       const agg = await AccountLedgerEntry.aggregate([
-        { $match: { accountId: account._id, entryDate: { $gte: start, $lte: end } } },
+        { $match: { accountId: account._id, isDeleted: { $ne: true }, entryDate: { $gte: start, $lte: end } } },
         { $group: { _id: null, debit: { $sum: '$debit' }, credit: { $sum: '$credit' } } },
       ]);
       const debit = round2(Number(agg[0]?.debit || 0));
@@ -2713,7 +3125,7 @@ router.get('/reports/trial-balance', authMiddleware, async (req: AuthenticatedRe
   }
 });
 
-router.get('/reports/profit-loss', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/profit-loss', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2750,7 +3162,7 @@ router.get('/reports/profit-loss', authMiddleware, async (req: AuthenticatedRequ
   }
 });
 
-router.get('/reports/balance-sheet', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/balance-sheet', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const asOnDate = req.query.asOnDate ? new Date(String(req.query.asOnDate)) : new Date();
     asOnDate.setHours(23, 59, 59, 999);
@@ -2795,7 +3207,7 @@ router.get('/reports/balance-sheet', authMiddleware, async (req: AuthenticatedRe
   }
 });
 
-router.get('/reports/cash-book', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/cash-book', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2806,7 +3218,7 @@ router.get('/reports/cash-book', authMiddleware, async (req: AuthenticatedReques
   }
 });
 
-router.get('/reports/bank-book', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/bank-book', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
@@ -2818,7 +3230,7 @@ router.get('/reports/bank-book', authMiddleware, async (req: AuthenticatedReques
 });
 
 // Basic reports summary
-router.get('/reports/summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/reports/summary', authMiddleware, accountingReportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);

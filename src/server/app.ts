@@ -1,6 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import path from 'path';
@@ -32,12 +33,14 @@ import quoteRoutes from './routes/quotes.js';
 import reportsRoutes from './routes/reports.js';
 import adminReportsRoutes from './routes/adminReports.js';
 import settlementRoutes from './routes/settlements.js';
+import gstRoutes from './routes/gst.js';
 import settingsRoutes from './routes/settings.js';
 import generalSettingsRoutes from './routes/generalSettings.js';
 import publicRoutes from './routes/public.js';
 import { authMiddleware } from './middleware/auth.js';
 import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
+import { redactSensitiveData } from './utils/redaction.js';
 
 const entryDir = process.argv[1]
   ? path.dirname(path.resolve(process.argv[1]))
@@ -105,6 +108,7 @@ const parseCsv = (value: string | undefined): string[] => {
 
 // Use SERVE_CLIENT=false when frontend is deployed separately.
 const serveClient = parseBoolean(process.env.SERVE_CLIENT, true);
+const enableHsts = parseBoolean(process.env.ENABLE_HSTS, String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production');
 const allowedCorsOrigins = parseCsv(process.env.CORS_ORIGIN || process.env.FRONTEND_URL);
 const clientIndexPath = path.join(clientDistPath, 'index.html');
 
@@ -143,6 +147,17 @@ app.use(cors({
   },
   credentials: true,
 }));
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  hsts: enableHsts
+    ? {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      }
+    : false,
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(uploadsRoot));
@@ -178,12 +193,12 @@ const connectDB = async (): Promise<boolean> => {
     try {
       await bootstrapDatabaseOnStartup();
     } catch (bootstrapError) {
-      console.error('Database bootstrap warning:', bootstrapError);
+      console.error('Database bootstrap warning:', redactSensitiveData(bootstrapError));
     }
     console.log('MongoDB connected successfully');
     return true;
   } catch (error) {
-    console.error('MongoDB connection error:', error);
+    console.error('MongoDB connection error:', redactSensitiveData(error));
     return false;
   }
 };
@@ -234,6 +249,7 @@ app.use('/api/credit-notes', authMiddleware, requirePageAccess('accounting'), cr
 app.use('/api/reports', authMiddleware, requirePageAccess('reports'), reportsRoutes);
 app.use('/api/admin-reports', authMiddleware, requirePageAccess('admin-reports'), adminReportsRoutes);
 app.use('/api/settlements', authMiddleware, requirePageAccess('accounting'), settlementRoutes);
+app.use('/api/gst', authMiddleware, requireAnyPageAccess(['accounting', 'customers', 'inventory', 'products', 'sales']), gstRoutes);
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
 app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
 
@@ -269,7 +285,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   if (err?.type === 'entity.too.large') {
     return res.status(413).json({ success: false, error: 'Request payload too large. Use a smaller image.' });
   }
-  console.error(err?.stack || err);
+  console.error(redactSensitiveData(err?.stack || err));
   res.status(500).json({ success: false, error: 'Internal Server Error' });
 });
 
@@ -296,7 +312,7 @@ const startServer = async () => {
   });
 
   server.on('error', (err) => {
-    console.error('Server error:', err);
+    console.error('Server error:', redactSensitiveData(err));
   });
 
   // Lightweight heartbeat to make liveness explicit in logs
@@ -309,11 +325,11 @@ startServer();
 
 // Global error handlers (prevents silent exits; logs for debugging)
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('Unhandled Rejection at:', redactSensitiveData(promise), 'reason:', redactSensitiveData(reason));
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception thrown:', err);
+  console.error('Uncaught Exception thrown:', redactSensitiveData(err));
 });
 
 process.on('SIGINT', () => {

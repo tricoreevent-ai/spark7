@@ -32,6 +32,11 @@ export interface IReturn {
   returnedGst: number; // GST portion refunded
   refundAmount: number; // Final refund amount
   refundMethod: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'credit_note' | 'original_payment';
+  refundTreasuryAccountId?: mongoose.Types.ObjectId;
+  refundTreasuryAccountName?: string;
+  refundProcessedAt?: Date;
+  refundReferenceNo?: string;
+  refundExpectedSettlementDate?: Date;
   refundStatus: 'pending' | 'completed' | 'rejected';
   returnStatus: 'draft' | 'approved' | 'rejected';
   reason: string; // Overall return reason (mandatory)
@@ -105,6 +110,15 @@ const ReturnSchema = new Schema<IReturnDocument>(
       enum: ['cash', 'card', 'upi', 'bank_transfer', 'credit_note', 'original_payment'],
       default: 'original_payment',
     },
+    refundTreasuryAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TreasuryAccount',
+      index: true,
+    },
+    refundTreasuryAccountName: { type: String, trim: true },
+    refundProcessedAt: { type: Date, index: true },
+    refundReferenceNo: { type: String, trim: true, index: true },
+    refundExpectedSettlementDate: { type: Date, index: true },
     refundStatus: {
       type: String,
       enum: ['pending', 'completed', 'rejected'],

@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { IUser } from '@shared/types';
 import { PageKey, PermissionMatrix } from '@shared/rbac';
-import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
+import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
+import { getGeneralSettings } from '../utils/generalSettings';
 import {
   FONT_SCALE_STEP,
   ResolvedUiPreferences,
@@ -95,6 +96,13 @@ const pathMatches = (currentPath: string, itemPath: string): boolean => {
   return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
 };
 
+const getBestMatchingMenuItem = <T extends { path: string },>(items: T[], currentPath: string): T | undefined =>
+  items.reduce<T | undefined>((bestMatch, item) => {
+    if (!pathMatches(currentPath, item.path)) return bestMatch;
+    if (!bestMatch) return item;
+    return item.path.length > bestMatch.path.length ? item : bestMatch;
+  }, undefined);
+
 const menuSearchTooltip =
   'Search pages or tabs by typing part of the name, like Sales, Reports, Payroll, Voucher, Attendance, or Settings. Press Enter to open the first result.';
 
@@ -116,7 +124,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
   const [menuSearchQuery, setMenuSearchQuery] = useState('');
   const [isMenuSearchOpen, setIsMenuSearchOpen] = useState(false);
   const [brandName, setBrandName] = useState('Sarva');
-  const [brandLogo, setBrandLogo] = useState('');
+  const [brandLogo, setBrandLogo] = useState(DEFAULT_BRAND_LOGO_PATH);
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const uiPreferencesRef = useRef<ResolvedUiPreferences>(uiPreferences);
   const menuSearchRef = useRef<HTMLDivElement | null>(null);
@@ -156,14 +164,14 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
     [allowedMenuItems]
   );
 
-  const activeCategory = useMemo(() => {
-    const activeItem = allowedMenuItems.find((item) => pathMatches(location.pathname, item.path));
-    return activeItem?.category || groupedMenuItems[0]?.category || null;
-  }, [allowedMenuItems, groupedMenuItems, location.pathname]);
-
   const activeItem = useMemo(
-    () => allowedMenuItems.find((item) => pathMatches(location.pathname, item.path)),
+    () => getBestMatchingMenuItem(allowedMenuItems, location.pathname),
     [allowedMenuItems, location.pathname]
+  );
+
+  const activeCategory = useMemo(
+    () => activeItem?.category || groupedMenuItems[0]?.category || null,
+    [activeItem, groupedMenuItems]
   );
 
   const searchableMenuItems = useMemo(() => {
@@ -230,11 +238,8 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
     const refreshBrand = () => {
       const settings = getGeneralSettings();
       const name = settings.business.tradeName || settings.business.legalName || 'Sarva';
-      const logo = resolveGeneralSettingsAssetUrl(
-        settings.business.reportLogoDataUrl || settings.business.invoiceLogoDataUrl || ''
-      );
       setBrandName(name);
-      setBrandLogo(logo);
+      setBrandLogo(DEFAULT_BRAND_LOGO_PATH);
     };
 
     refreshBrand();
@@ -346,9 +351,9 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
         : 'hover:bg-white/5 hover:text-white'
     }`;
 
-  const desktopSubmenuLinkClass = ({ isActive }: { isActive: boolean }) =>
+  const desktopSubmenuLinkClass = (selected: boolean) =>
     `group flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] transition ${
-      isActive
+      selected
         ? 'bg-sky-500/20 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
         : 'text-slate-300 hover:bg-white/5 hover:text-white'
     }`;
@@ -480,7 +485,8 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
                   <NavLink
                     key={`${group.category}-${item.path}`}
                     to={item.path}
-                    className={desktopSubmenuLinkClass}
+                    end
+                    className={() => desktopSubmenuLinkClass(activeItem?.path === item.path)}
                     onClick={() => onNavigate?.()}
                   >
                     <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-black/20 text-[11px]">
@@ -529,9 +535,14 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
 
       <div className="sticky top-0 z-40 border-b border-white/8 bg-slate-950/95 px-4 py-2.5 shadow-[0_18px_42px_rgba(2,6,23,0.22)] backdrop-blur-xl lg:hidden">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">{brandName}</p>
-            <p className="truncate text-[11px] text-slate-500">{workspaceLabel}</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <img src={brandLogo} alt="Sarva logo" className="h-7 w-7 object-contain" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-white">{brandName}</p>
+              <p className="truncate text-[11px] text-slate-500">{workspaceLabel}</p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <div className={mobileHeaderButtonGroupClass}>

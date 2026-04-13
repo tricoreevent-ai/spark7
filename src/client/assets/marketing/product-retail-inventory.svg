@@ -1,0 +1,41 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="inventoryBg" x1="56" y1="28" x2="596" y2="328" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1726"/>
+      <stop offset="1" stop-color="#131A2B"/>
+    </linearGradient>
+    <linearGradient id="inventoryBox" x1="116" y1="96" x2="262" y2="246" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="1" stop-color="#22C55E"/>
+    </linearGradient>
+    <linearGradient id="inventoryChart" x1="380" y1="92" x2="542" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#inventoryBg)"/>
+  <circle cx="90" cy="82" r="84" fill="#10B981" fill-opacity="0.07"/>
+  <circle cx="538" cy="284" r="90" fill="#38BDF8" fill-opacity="0.07"/>
+
+  <rect x="88" y="94" width="248" height="164" rx="28" fill="#0B1220" stroke="#223149"/>
+  <rect x="118" y="132" width="72" height="72" rx="14" fill="url(#inventoryBox)" fill-opacity="0.18" stroke="#86EFAC"/>
+  <path d="M118 154L154 132L190 154" stroke="#86EFAC" stroke-width="2"/>
+  <path d="M154 132V204" stroke="#86EFAC" stroke-width="2"/>
+  <path d="M118 154V204H190V154" stroke="#86EFAC" stroke-width="2"/>
+  <rect x="208" y="122" width="96" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="208" y="148" width="70" height="10" rx="5" fill="#64748B"/>
+  <rect x="208" y="174" width="96" height="10" rx="5" fill="#22D3EE" fill-opacity="0.4"/>
+  <rect x="208" y="198" width="84" height="10" rx="5" fill="#FBBF24" fill-opacity="0.55"/>
+  <rect x="118" y="226" width="186" height="12" rx="6" fill="#1F2937"/>
+  <path d="M128 238V260M144 238V260M160 238V260M176 238V260M198 238V260M214 238V260M230 238V260M246 238V260M268 238V260M284 238V260" stroke="#FDE68A" stroke-width="3" stroke-linecap="round"/>
+
+  <rect x="382" y="92" width="176" height="176" rx="28" fill="#111827" stroke="#334155"/>
+  <path d="M414 226V144" stroke="#334155" stroke-width="2"/>
+  <path d="M414 226H530" stroke="#334155" stroke-width="2"/>
+  <rect x="432" y="188" width="22" height="38" rx="8" fill="#38BDF8" fill-opacity="0.35"/>
+  <rect x="466" y="168" width="22" height="58" rx="8" fill="#34D399" fill-opacity="0.4"/>
+  <rect x="500" y="148" width="22" height="78" rx="8" fill="url(#inventoryChart)" fill-opacity="0.55"/>
+  <path d="M430 148L454 164L482 138L522 112" stroke="#FBBF24" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M510 110H526V126" stroke="#FBBF24" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+

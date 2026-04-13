@@ -1,0 +1,60 @@
+<svg width="720" height="440" viewBox="0 0 720 440" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="440" rx="36" fill="#09090B"/>
+  <rect x="20" y="20" width="680" height="400" rx="28" fill="url(#bg)"/>
+  <circle cx="150" cy="84" r="58" fill="url(#amberGlow)"/>
+  <circle cx="594" cy="94" r="64" fill="url(#skyGlow)"/>
+  <circle cx="606" cy="334" r="60" fill="url(#emeraldGlow)"/>
+  <circle cx="128" cy="338" r="62" fill="url(#roseGlow)"/>
+
+  <rect x="248" y="106" width="224" height="224" rx="34" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <circle cx="360" cy="188" r="48" fill="#0F172A" stroke="#475569" stroke-width="2"/>
+  <path d="M332 182H388" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round"/>
+  <path d="M332 204H376" stroke="#CBD5E1" stroke-width="8" stroke-linecap="round"/>
+  <rect x="296" y="254" width="128" height="32" rx="16" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="322" y="275" fill="#34D399" font-family="Arial, sans-serif" font-size="16" font-weight="700">Let us know</text>
+
+  <rect x="72" y="122" width="126" height="56" rx="20" fill="#131C2F" stroke="#334155" stroke-width="2"/>
+  <text x="96" y="146" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="15" font-weight="700">Products</text>
+  <text x="96" y="166" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="13">Demos and walkthroughs</text>
+
+  <rect x="522" y="122" width="126" height="56" rx="20" fill="#131C2F" stroke="#334155" stroke-width="2"/>
+  <text x="549" y="146" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="15" font-weight="700">Applications</text>
+  <text x="550" y="166" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="13">Custom build planning</text>
+
+  <rect x="72" y="278" width="126" height="56" rx="20" fill="#131C2F" stroke="#334155" stroke-width="2"/>
+  <text x="92" y="302" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="15" font-weight="700">Marketing</text>
+  <text x="90" y="322" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="13">Campaign and launch support</text>
+
+  <rect x="522" y="278" width="126" height="56" rx="20" fill="#131C2F" stroke="#334155" stroke-width="2"/>
+  <text x="550" y="302" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="15" font-weight="700">Events</text>
+  <text x="545" y="322" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="13">Managed delivery and ops</text>
+
+  <path d="M198 150H248" stroke="#FBBF24" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+  <path d="M472 150H522" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+  <path d="M198 306H248" stroke="#FB7185" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+  <path d="M472 306H522" stroke="#34D399" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+
+  <defs>
+    <linearGradient id="bg" x1="42" y1="36" x2="680" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.5" stop-color="#09090B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <radialGradient id="amberGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(150 84) rotate(90) scale(58)">
+      <stop stop-color="#FBBF24" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FBBF24" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="skyGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(594 94) rotate(90) scale(64)">
+      <stop stop-color="#38BDF8" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="emeraldGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(606 334) rotate(90) scale(60)">
+      <stop stop-color="#34D399" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#34D399" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="roseGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(128 338) rotate(90) scale(62)">
+      <stop stop-color="#FB7185" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FB7185" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>

@@ -1,0 +1,185 @@
+<svg width="1500" height="840" viewBox="0 0 1500 840" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1500" height="840" rx="38" fill="#090C18"/>
+  <rect x="18" y="18" width="1464" height="804" rx="32" fill="url(#pageBg)"/>
+
+  <text x="56" y="92" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="54" font-weight="700">Sales Dashboard</text>
+  <text x="56" y="138" fill="#D6E1FF" font-family="Arial, sans-serif" font-size="22">
+    Track seven-day sales movement, act on urgent stock issues, and jump into billing work without leaving the sales workspace.
+  </text>
+
+  <rect x="1170" y="52" width="126" height="54" rx="16" fill="url(#primaryButton)"/>
+  <text x="1200" y="86" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="18" font-weight="700">Start Billing</text>
+  <rect x="1306" y="52" width="154" height="54" rx="16" fill="#192134" stroke="#4B5563"/>
+  <text x="1321" y="86" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="18" font-weight="700">Open Sales History</text>
+
+  <g>
+    <rect x="56" y="170" width="360" height="144" rx="28" fill="url(#todayCard)" stroke="#114B44"/>
+    <text x="84" y="214" fill="#8EF1D5" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">TODAY</text>
+    <text x="84" y="266" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="50" font-weight="700">₹0.00</text>
+    <text x="84" y="309" fill="#D5EDE6" font-family="Arial, sans-serif" font-size="18">Current day sales movement from the live trend window.</text>
+  </g>
+
+  <g>
+    <rect x="430" y="170" width="360" height="144" rx="28" fill="url(#weekCard)" stroke="#184D74"/>
+    <text x="458" y="214" fill="#9EE1FF" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">LAST 7 DAYS</text>
+    <text x="458" y="266" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="50" font-weight="700">₹2,588.00</text>
+    <text x="458" y="309" fill="#D5E7F8" font-family="Arial, sans-serif" font-size="18">Combined sales from the current seven-day dashboard trend.</text>
+  </g>
+
+  <g>
+    <rect x="804" y="170" width="360" height="144" rx="28" fill="url(#averageCard)" stroke="#5E2E80"/>
+    <text x="832" y="214" fill="#F0B7FF" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">DAILY AVERAGE</text>
+    <text x="832" y="266" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="50" font-weight="700">₹369.71</text>
+    <text x="832" y="309" fill="#ECD7F9" font-family="Arial, sans-serif" font-size="18">Average daily collection based on the same seven-day window.</text>
+  </g>
+
+  <g>
+    <rect x="1178" y="170" width="266" height="144" rx="28" fill="url(#peakCard)" stroke="#6D5221"/>
+    <text x="1206" y="214" fill="#F9E07D" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">PEAK DAY</text>
+    <text x="1206" y="266" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="50" font-weight="700">Fri</text>
+    <text x="1206" y="309" fill="#F8E7B6" font-family="Arial, sans-serif" font-size="18">₹1,644.00 on 10 Apr</text>
+  </g>
+
+  <g>
+    <rect x="56" y="340" width="838" height="360" rx="32" fill="url(#graphPanel)" stroke="#334155"/>
+    <text x="88" y="384" fill="#8EF1D5" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">SALES GRAPH</text>
+    <text x="88" y="432" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="34" font-weight="700">7-day sales trend</text>
+    <text x="88" y="474" fill="#D2DEEF" font-family="Arial, sans-serif" font-size="18">Compare each day quickly before opening the full sales report.</text>
+
+    <rect x="690" y="370" width="144" height="78" rx="20" fill="#1C2439" stroke="#445064"/>
+    <text x="712" y="404" fill="#9BC9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="3">TREND TOTAL</text>
+    <text x="712" y="431" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">₹2,588.00</text>
+
+    <rect x="88" y="514" width="774" height="156" rx="28" fill="#0F1526" stroke="#313B52"/>
+
+    <text x="138" y="556" fill="#96C9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700">₹944.00</text>
+    <text x="282" y="556" fill="#96C9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700">0</text>
+    <text x="396" y="556" fill="#96C9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700">0</text>
+    <text x="510" y="556" fill="#96C9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700">0</text>
+    <text x="624" y="556" fill="#89FFC8" font-family="Arial, sans-serif" font-size="18" font-weight="700">₹1,644.00</text>
+    <text x="760" y="556" fill="#96C9FF" font-family="Arial, sans-serif" font-size="18" font-weight="700">0</text>
+
+    <g>
+      <rect x="106" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="118" y="644" width="64" height="70" rx="20" fill="url(#barBlue)"/>
+      <text x="138" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Mon</text>
+      <text x="136" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">06 Apr</text>
+    </g>
+
+    <g>
+      <rect x="224" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="236" y="700" width="64" height="14" rx="7" fill="url(#miniBar)"/>
+      <text x="256" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Tue</text>
+      <text x="254" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">07 Apr</text>
+    </g>
+
+    <g>
+      <rect x="342" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="354" y="700" width="64" height="14" rx="7" fill="url(#miniBar)"/>
+      <text x="374" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Wed</text>
+      <text x="372" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">08 Apr</text>
+    </g>
+
+    <g>
+      <rect x="460" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="472" y="700" width="64" height="14" rx="7" fill="url(#miniBar)"/>
+      <text x="492" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Thu</text>
+      <text x="490" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">09 Apr</text>
+    </g>
+
+    <g>
+      <rect x="578" y="568" width="100" height="116" rx="24" fill="#162232" stroke="#395065"/>
+      <rect x="590" y="566" width="76" height="146" rx="22" fill="url(#barPeak)"/>
+      <rect x="584" y="560" width="88" height="158" rx="28" fill="url(#peakGlow)" opacity="0.5"/>
+      <text x="618" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Fri</text>
+      <text x="612" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">10 Apr</text>
+    </g>
+
+    <g>
+      <rect x="706" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="718" y="700" width="64" height="14" rx="7" fill="url(#miniBar)"/>
+      <text x="738" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Sat</text>
+      <text x="736" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">11 Apr</text>
+    </g>
+
+    <g>
+      <rect x="824" y="570" width="88" height="114" rx="22" fill="#141C30" stroke="#364154"/>
+      <rect x="836" y="700" width="64" height="14" rx="7" fill="url(#miniBar)"/>
+      <text x="858" y="742" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="16" font-weight="700">Sun</text>
+      <text x="854" y="765" fill="#8BA0C8" font-family="Arial, sans-serif" font-size="14">12 Apr</text>
+    </g>
+  </g>
+
+  <g>
+    <rect x="916" y="340" width="528" height="430" rx="32" fill="url(#stockPanel)" stroke="#4B365F"/>
+    <text x="948" y="384" fill="#F5C4DE" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">STOCK ATTENTION</text>
+    <text x="948" y="432" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="34" font-weight="700">Important stock alerts</text>
+    <text x="948" y="474" fill="#E1D8EC" font-family="Arial, sans-serif" font-size="18">
+      Focus first on the items that can interrupt sales or need immediate restocking.
+    </text>
+
+    <rect x="948" y="520" width="464" height="86" rx="20" fill="#3A1E36" stroke="#86415B"/>
+    <text x="972" y="555" fill="#FFC2D7" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">OUT OF STOCK</text>
+    <text x="972" y="586" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">1</text>
+
+    <rect x="948" y="620" width="464" height="86" rx="20" fill="#302B2A" stroke="#8B6A29"/>
+    <text x="972" y="655" fill="#FEE284" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">BELOW MINIMUM</text>
+    <text x="972" y="686" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">1</text>
+
+    <rect x="948" y="720" width="464" height="86" rx="20" fill="#12324A" stroke="#2A7DA8"/>
+    <text x="972" y="755" fill="#9DE6FF" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">AUTO REORDER</text>
+    <text x="972" y="786" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">0</text>
+  </g>
+
+  <defs>
+    <linearGradient id="pageBg" x1="36" y1="30" x2="1464" y2="744" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1323"/>
+      <stop offset="0.58" stop-color="#11192C"/>
+      <stop offset="1" stop-color="#1A1326"/>
+    </linearGradient>
+    <linearGradient id="primaryButton" x1="1170" y1="52" x2="1296" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16D08A"/>
+      <stop offset="1" stop-color="#12B886"/>
+    </linearGradient>
+    <linearGradient id="todayCard" x1="56" y1="170" x2="416" y2="314" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102B35"/>
+      <stop offset="1" stop-color="#14202F"/>
+    </linearGradient>
+    <linearGradient id="weekCard" x1="430" y1="170" x2="790" y2="314" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15263A"/>
+      <stop offset="1" stop-color="#172337"/>
+    </linearGradient>
+    <linearGradient id="averageCard" x1="804" y1="170" x2="1164" y2="314" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#25173B"/>
+      <stop offset="1" stop-color="#1C1735"/>
+    </linearGradient>
+    <linearGradient id="peakCard" x1="1178" y1="170" x2="1444" y2="314" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2B241F"/>
+      <stop offset="1" stop-color="#201E23"/>
+    </linearGradient>
+    <linearGradient id="graphPanel" x1="56" y1="340" x2="894" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15263A"/>
+      <stop offset="1" stop-color="#11172B"/>
+    </linearGradient>
+    <linearGradient id="stockPanel" x1="916" y1="340" x2="1444" y2="770" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#21263C"/>
+      <stop offset="1" stop-color="#2B1D39"/>
+    </linearGradient>
+    <linearGradient id="barBlue" x1="118" y1="644" x2="182" y2="714" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79D0FF"/>
+      <stop offset="1" stop-color="#3C73F1"/>
+    </linearGradient>
+    <linearGradient id="miniBar" x1="236" y1="700" x2="300" y2="714" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55C9FF"/>
+      <stop offset="1" stop-color="#4587F7"/>
+    </linearGradient>
+    <linearGradient id="barPeak" x1="590" y1="566" x2="666" y2="712" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#74E8BA"/>
+      <stop offset="1" stop-color="#24B7E4"/>
+    </linearGradient>
+    <radialGradient id="peakGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(628 646) rotate(90) scale(108 84)">
+      <stop stop-color="#56EAC1"/>
+      <stop offset="1" stop-color="#56EAC1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>

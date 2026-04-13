@@ -5,10 +5,16 @@ export interface IDayBookEntry extends Document {
   category: string;
   amount: number;
   paymentMethod: 'cash' | 'card' | 'upi' | 'bank' | 'cheque' | 'online';
+  treasuryAccountId?: mongoose.Types.ObjectId;
+  treasuryAccountName?: string;
   narration?: string;
   referenceNo?: string;
   entryDate: Date;
   status: 'active' | 'cancelled';
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
+  deletionReason?: string;
   cancelledAt?: Date;
   cancelledBy?: string;
   cancellationReason?: string;
@@ -31,10 +37,20 @@ const DayBookEntrySchema = new Schema<IDayBookEntry>(
       enum: ['cash', 'card', 'upi', 'bank', 'cheque', 'online'],
       default: 'cash',
     },
+    treasuryAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TreasuryAccount',
+      index: true,
+    },
+    treasuryAccountName: { type: String, trim: true },
     narration: { type: String, trim: true },
     referenceNo: { type: String, trim: true },
     entryDate: { type: Date, required: true, default: Date.now, index: true },
     status: { type: String, enum: ['active', 'cancelled'], default: 'active', index: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: String, index: true },
+    deletionReason: { type: String, trim: true },
     cancelledAt: { type: Date },
     cancelledBy: { type: String, index: true },
     cancellationReason: { type: String, trim: true },
@@ -44,5 +60,16 @@ const DayBookEntrySchema = new Schema<IDayBookEntry>(
 );
 
 DayBookEntrySchema.index({ entryDate: -1, entryType: 1, status: 1 });
+
+const excludeDeletedDayBookEntries = function (this: any) {
+  const filter = this.getFilter ? this.getFilter() : {};
+  if (filter?.isDeleted !== undefined) return;
+  this.where({ isDeleted: { $ne: true } });
+};
+
+DayBookEntrySchema.pre('find', excludeDeletedDayBookEntries);
+DayBookEntrySchema.pre('findOne', excludeDeletedDayBookEntries);
+DayBookEntrySchema.pre('countDocuments', excludeDeletedDayBookEntries);
+DayBookEntrySchema.pre('findOneAndUpdate', excludeDeletedDayBookEntries);
 
 export const DayBookEntry = mongoose.model<IDayBookEntry>('DayBookEntry', DayBookEntrySchema);

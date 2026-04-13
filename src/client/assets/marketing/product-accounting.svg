@@ -1,0 +1,39 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accountingBg" x1="48" y1="24" x2="598" y2="334" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1728"/>
+      <stop offset="1" stop-color="#141B2F"/>
+    </linearGradient>
+    <linearGradient id="accountingLedger" x1="90" y1="90" x2="298" y2="252" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <linearGradient id="accountingVoucher" x1="392" y1="88" x2="550" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#FB923C"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#accountingBg)"/>
+  <circle cx="98" cy="76" r="88" fill="#38BDF8" fill-opacity="0.07"/>
+  <circle cx="546" cy="292" r="88" fill="#F59E0B" fill-opacity="0.07"/>
+
+  <rect x="84" y="90" width="252" height="178" rx="28" fill="#0B1220" stroke="#24324A"/>
+  <rect x="108" y="114" width="204" height="132" rx="20" fill="url(#accountingLedger)" fill-opacity="0.15" stroke="#93C5FD" stroke-opacity="0.5"/>
+  <rect x="132" y="140" width="76" height="12" rx="6" fill="#E2E8F0"/>
+  <rect x="132" y="166" width="58" height="10" rx="5" fill="#64748B"/>
+  <rect x="132" y="194" width="156" height="16" rx="8" fill="#111827" stroke="#334155"/>
+  <path d="M146 202H176" stroke="#22D3EE" stroke-width="4" stroke-linecap="round"/>
+  <path d="M220 202H274" stroke="#FBBF24" stroke-width="4" stroke-linecap="round"/>
+  <path d="M132 228H288" stroke="#1E293B" stroke-width="10" stroke-linecap="round"/>
+
+  <rect x="384" y="90" width="176" height="178" rx="28" fill="#101827" stroke="#334155"/>
+  <rect x="412" y="116" width="120" height="132" rx="20" fill="#111827" stroke="#475569"/>
+  <rect x="432" y="138" width="80" height="12" rx="6" fill="url(#accountingVoucher)"/>
+  <rect x="432" y="164" width="60" height="10" rx="5" fill="#CBD5E1"/>
+  <rect x="432" y="186" width="88" height="10" rx="5" fill="#64748B"/>
+  <circle cx="472" cy="222" r="18" fill="#FBBF24" fill-opacity="0.22" stroke="#FDE68A" stroke-width="2"/>
+  <path d="M472 210V234" stroke="#FDE68A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M462 216C466 212 478 212 482 216" stroke="#FDE68A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M462 228C466 232 478 232 482 228" stroke="#FDE68A" stroke-width="4" stroke-linecap="round"/>
+</svg>
+

@@ -1,0 +1,37 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="settlementBg" x1="44" y1="26" x2="598" y2="334" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1728"/>
+      <stop offset="1" stop-color="#141A2D"/>
+    </linearGradient>
+    <linearGradient id="settlementReceipt" x1="102" y1="92" x2="296" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#FB923C"/>
+    </linearGradient>
+    <linearGradient id="settlementReview" x1="388" y1="96" x2="552" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#settlementBg)"/>
+  <circle cx="100" cy="78" r="88" fill="#F59E0B" fill-opacity="0.07"/>
+  <circle cx="546" cy="292" r="92" fill="#22D3EE" fill-opacity="0.07"/>
+
+  <rect x="86" y="92" width="248" height="176" rx="28" fill="#0B1220" stroke="#24324A"/>
+  <path d="M126 122H256L286 152V232C286 245 275 256 262 256H126C113 256 102 245 102 232V146C102 133 113 122 126 122Z" fill="url(#settlementReceipt)" fill-opacity="0.16" stroke="#FDE68A" stroke-width="2"/>
+  <path d="M256 122V152H286" stroke="#FDE68A" stroke-width="2"/>
+  <rect x="128" y="164" width="108" height="12" rx="6" fill="#E2E8F0"/>
+  <rect x="128" y="188" width="72" height="10" rx="5" fill="#64748B"/>
+  <rect x="128" y="210" width="112" height="10" rx="5" fill="#38BDF8" fill-opacity="0.42"/>
+  <path d="M220 222L238 240L266 200" stroke="#FBBF24" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="386" y="92" width="174" height="176" rx="28" fill="#101827" stroke="#334155"/>
+  <rect x="414" y="124" width="118" height="118" rx="18" fill="#111827" stroke="#475569"/>
+  <path d="M432 208L454 184L474 198L514 154" stroke="url(#settlementReview)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="454" cy="184" r="8" fill="#38BDF8"/>
+  <circle cx="474" cy="198" r="8" fill="#34D399"/>
+  <circle cx="514" cy="154" r="8" fill="#FBBF24"/>
+  <rect x="432" y="144" width="52" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="432" y="226" width="84" height="10" rx="5" fill="#1E293B"/>
+</svg>
+

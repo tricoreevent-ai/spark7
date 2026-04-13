@@ -43,6 +43,7 @@ import publicMarketingShot from './assets/marketing/spark-dashboard-macbook.png'
 import { PublicSeo } from './public/PublicSeo';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { initializeAutoTooltips } from './utils/autoTooltips';
+import { DEFAULT_BRAND_LOGO_PATH } from './utils/brandAssets';
 import { getGeneralSettings, loadGeneralSettingsFromServer, resolveGeneralSettingsAssetUrl } from './utils/generalSettings';
 import {
   FONT_SCALE_STEP,
@@ -1041,7 +1042,7 @@ function App() {
   const [token, setToken] = useState('');
   const [todaySales, setTodaySales] = useState<number | null>(null);
   const [headerBrandName, setHeaderBrandName] = useState('Sarva');
-  const [headerBrandLogo, setHeaderBrandLogo] = useState('');
+  const [headerBrandLogo, setHeaderBrandLogo] = useState(DEFAULT_BRAND_LOGO_PATH);
   const [headerUiPreferences, setHeaderUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const headerUiPreferencesRef = useRef<ResolvedUiPreferences>(headerUiPreferences);
   const loginFormRef = useRef<HTMLFormElement | null>(null);
@@ -1225,11 +1226,8 @@ function App() {
     const refreshHeaderBrand = () => {
       const settings = getGeneralSettings();
       const name = settings.business.tradeName || settings.business.legalName || user?.businessName || 'Sarva';
-      const logo = resolveGeneralSettingsAssetUrl(
-        settings.business.reportLogoDataUrl || settings.business.invoiceLogoDataUrl || ''
-      );
       setHeaderBrandName(name);
-      setHeaderBrandLogo(logo);
+      setHeaderBrandLogo(DEFAULT_BRAND_LOGO_PATH);
     };
 
     refreshHeaderBrand();
@@ -1591,11 +1589,7 @@ function App() {
           <header className="hidden lg:flex items-center justify-between gap-4 border-b border-white/8 bg-slate-950/95 px-5 py-3 shadow-[0_18px_42px_rgba(2,6,23,0.18)] backdrop-blur-xl">
             <div className="min-w-0 flex items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                {headerBrandLogo ? (
-                  <img src={headerBrandLogo} alt="Brand logo" className="h-7 w-7 object-contain" />
-                ) : (
-                  <span className="text-sm font-bold text-white">{String(headerBrandName || 'S').charAt(0).toUpperCase()}</span>
-                )}
+                <img src={headerBrandLogo} alt="Sarva logo" className="h-7 w-7 object-contain" />
               </div>
               <p className="truncate text-sm font-semibold text-white">{headerBrandName}</p>
             </div>

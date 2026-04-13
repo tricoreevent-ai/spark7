@@ -3,6 +3,8 @@ import { Link, NavLink } from 'react-router-dom';
 import { PublicSeo } from '../public/PublicSeo';
 import {
   APPLICATION_RIGHTS_NOTE,
+  PUBLIC_BRAND_NAME,
+  PUBLIC_BRAND_TAGLINE,
   PRIMARY_SEO_PHRASE,
   PRODUCT_BRAND_NAME,
   RIGHTS_HOLDER_ADDRESS,
@@ -11,8 +13,25 @@ import {
   WHATSAPP_DISPLAY_PHONE,
 } from '../public/publicBrand';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
 
 const DEFAULT_PUBLIC_MARKETING_IMAGE = new URL('../assets/marketing/spark-dashboard-macbook.png', import.meta.url).href;
+const APP_DEVELOPMENT_IMAGE = new URL('../assets/marketing/service-app-development.svg', import.meta.url).href;
+const MARKETING_EXECUTION_IMAGE = new URL('../assets/marketing/service-marketing-execution.svg', import.meta.url).href;
+const EVENT_DELIVERY_IMAGE = new URL('../assets/marketing/service-event-delivery.svg', import.meta.url).href;
+const PRODUCT_LINE_VECTOR_IMAGE = new URL('../assets/marketing/public-product-line-snapshot.svg', import.meta.url).href;
+const ABOUT_ECOSYSTEM_VECTOR_IMAGE = new URL('../assets/marketing/public-about-ecosystem.svg', import.meta.url).href;
+const CONTACT_CONNECT_VECTOR_IMAGE = new URL('../assets/marketing/public-contact-connect.svg', import.meta.url).href;
+const FACILITY_BOOKING_CAPABILITY_IMAGE = new URL('../assets/marketing/product-facility-booking.svg', import.meta.url).href;
+const MEMBERSHIPS_CAPABILITY_IMAGE = new URL('../assets/marketing/product-memberships.svg', import.meta.url).href;
+const RETAIL_INVENTORY_CAPABILITY_IMAGE = new URL('../assets/marketing/product-retail-inventory.svg', import.meta.url).href;
+const SALES_CRM_CAPABILITY_IMAGE = new URL('../assets/marketing/product-sales-crm.svg', import.meta.url).href;
+const EMPLOYEE_MANAGEMENT_CAPABILITY_IMAGE = new URL('../assets/marketing/product-employee-management.svg', import.meta.url).href;
+const ACCOUNTING_CAPABILITY_IMAGE = new URL('../assets/marketing/product-accounting.svg', import.meta.url).href;
+const SETTLEMENTS_CAPABILITY_IMAGE = new URL('../assets/marketing/product-settlements-closing.svg', import.meta.url).href;
+const ADMIN_CONFIGURATION_CAPABILITY_IMAGE = new URL('../assets/marketing/product-admin-configuration.svg', import.meta.url).href;
+const DECORATIVE_BLOB_AMBER_SKY = new URL('../assets/marketing/decorative-blob-amber-sky.svg', import.meta.url).href;
+const DECORATIVE_BLOB_EMERALD_ROSE = new URL('../assets/marketing/decorative-blob-emerald-rose.svg', import.meta.url).href;
 const PUBLIC_CONTENT_WIDTH_CLASS = 'max-w-[1600px]';
 
 type PublicPageKey = 'home' | 'products' | 'about' | 'contact' | 'login';
@@ -32,6 +51,7 @@ type PublicShellProps = {
   secondaryAction?: ActionLink;
   heroSupplement?: React.ReactNode;
   heroVariant?: 'default' | 'banner';
+  heroCompact?: boolean;
   heroRight: React.ReactNode;
   children?: React.ReactNode;
 };
@@ -71,107 +91,116 @@ type EventManagementCapability = {
   title: string;
   description: string;
   bullets: string[];
+  imageSrc: string;
+  imageAlt: string;
 };
 
 type ProductCapabilityRow = {
   area: string;
   detail: string;
+  imageSrc?: string;
+  imageAlt?: string;
 };
 
 const homeFeatures = [
   {
-    title: 'Facility Booking System',
+    title: 'Custom Application Development',
     description:
-      'Manage court reservations, recurring schedules, event bookings, availability rules, and payment follow-up from one sports complex workflow.',
+      'Build tailored web applications, admin dashboards, booking flows, and internal tools that fit the way your team actually works.',
   },
   {
-    title: 'Online Court Scheduling',
+    title: 'Software Products',
     description:
-      'Keep online court scheduling, front desk follow-up, quotations, and venue availability aligned without separate tools.',
+      'Launch ready-made software products like the Sarva sports operations platform while keeping room for custom add-ons and future scale.',
   },
   {
-    title: 'Secure Payment Processing',
+    title: 'Website and Landing Page Delivery',
     description:
-      'Track collections, billing, receipts, and secure payment processing alongside the booking and membership records they belong to.',
+      'Create branded websites, service pages, campaign landing pages, and digital experiences that support lead generation and conversion.',
   },
   {
-    title: 'Membership Management',
+    title: 'Marketing and Digital Marketing',
     description:
-      'Create plans, issue subscriptions, track renewals, and monitor member activity from one connected membership management workspace.',
+      'Support campaign planning, digital promotion, audience reach, content coordination, and growth-focused execution across channels.',
   },
   {
-    title: 'Staff Operations',
+    title: 'Brand and Creative Support',
     description:
-      'Store employee details, manage shifts, mark attendance, and support payroll preparation from the same sports facility management software.',
+      'Shape messaging, campaign creatives, presentation assets, and visual communication that keep your brand sharper and more consistent.',
   },
   {
-    title: 'Reporting and Controls',
+    title: 'Event Management',
     description:
-      'Review accounting entries, settlements, reports, user permissions, SMTP setup, and print configuration in one admin-ready system.',
+      'Plan and manage sports events, branded activations, launches, registrations, schedules, communication, and delivery support.',
   },
   {
-    title: 'Sports Event Management Application',
+    title: 'Operations and Reporting Systems',
     description:
-      'Run multiple sports events with publishing, registration windows, payment proof collection, schedules, newsletters, and admin review tools.',
+      'Connect processes, dashboards, approvals, reporting views, and operational visibility so delivery stays easier to track and improve.',
+  },
+  {
+    title: 'Ongoing Growth Support',
+    description:
+      'Keep improving products, campaigns, and event outcomes with iterative refinement, reporting reviews, and next-phase planning.',
   },
 ];
 
 const workflowSteps = [
-  'Set up facilities, plans, products, users, and pricing structure.',
-  'Run front desk sales, facility bookings, memberships, and event reservations.',
-  'Track staff attendance, payroll inputs, and operational follow-up.',
-  'Close the loop with accounting, settlements, reports, and printable confirmations.',
+  'Understand the brief, audience, process gaps, and growth goals.',
+  'Design the right mix of product build, campaign execution, and event support.',
+  'Launch, manage, and coordinate delivery across software, marketing, and on-ground activity.',
+  'Review results, improve performance, and scale the next phase with better clarity.',
 ];
 
 const homeHeroDetails = [
   {
-    title: 'Run online court scheduling and facility booking from one flow.',
+    title: 'Build custom applications and digital products around real business workflows.',
     description:
-      'Control court schedules, event blocks, advance collection, and customer follow-up from one connected facility booking system.',
+      'From operational platforms to admin dashboards and client-facing experiences, Sarva Horizon turns ideas into practical systems.',
   },
   {
-    title: 'Keep membership management and staff operations in sync.',
+    title: 'Plan marketing and digital marketing that connects visibility with growth.',
     description:
-      'Track renewals, attendance, payroll inputs, and operational follow-up without splitting work across separate tools.',
+      'We support messaging, campaign direction, digital promotion, and branded communication that helps teams move with more focus.',
   },
   {
-    title: 'Close the day with secure payments and reporting clarity.',
+    title: 'Execute events, activations, and software rollouts with stronger coordination.',
     description:
-      'Move from billing to receipts, vouchers, settlements, and reports with a cleaner audit trail for daily review.',
+      'Products, campaigns, and events all need delivery discipline. We help clients launch with clearer planning and follow-through.',
   },
 ];
 
 const aboutHighlights = [
   {
-    title: 'Built for high-activity venues',
+    title: 'Application development with delivery focus',
     description:
-      'Sarva is sports facility management software designed for sports complexes, indoor arenas, clubs, coaching centers, and recreational campuses.',
+      'Sarva Horizon designs and builds practical applications, dashboards, workflow tools, and digital products for organizations that need more than generic templates.',
   },
   {
-    title: 'Client-ready architecture',
+    title: 'Marketing and digital growth support',
     description:
-      'Each organization can access its own tenant workspace, making it suitable for different clients using the same application product.',
+      'The team also works across marketing, digital marketing, campaign communication, and branded visibility so growth is supported beyond the software layer.',
   },
   {
-    title: 'Operational depth',
+    title: 'Event management and activation',
     description:
-      'The platform covers bookings, events, products, memberships, employees, finance, and admin controls instead of splitting work across separate tools.',
+      'Sarva Horizon handles event planning, organizer coordination, registration workflows, branded activations, and managed execution for real-world programmes.',
   },
   {
-    title: 'Multi-sport event management',
+    title: 'Sarva product line',
     description:
-      'Sarva also supports a sports event management application for tournaments, leagues, registrations, payment review, matches, newsletters, and partner-facing operations.',
+      'Sarva remains the software product line inside the wider Sarva Horizon brand, with dedicated solutions for sports complex operations and sports event management.',
   },
 ];
 
 const moduleHighlights = [
-  { title: 'Home', detail: 'Snapshot dashboard for activity, alerts, reminders, and quick navigation.' },
-  { title: 'Sales', detail: 'Quotations, orders, customers, returns, and sales reporting.' },
-  { title: 'Catalog', detail: 'Product entry, catalog browsing, procurement, categories, and stock alerts.' },
-  { title: 'People', detail: 'Employees, attendance, shifts, and payroll support.' },
-  { title: 'Operations', detail: 'Facility setup, bookings, event booking, plans, subscriptions, and memberships.' },
-  { title: 'Accounts', detail: 'Accounting records, settlements, and financial review.' },
-  { title: 'Admin', detail: 'Settings, company profile, user management, print, and mail configuration.' },
+  { title: 'Application Development', detail: 'Custom web apps, operational dashboards, portals, and workflow tools.' },
+  { title: 'Software Products', detail: 'Sarva product experiences for sports operations and event management.' },
+  { title: 'Web and Landing Pages', detail: 'Public websites, structured service pages, and conversion-focused launch assets.' },
+  { title: 'Marketing', detail: 'Campaign planning, communication strategy, creative direction, and brand support.' },
+  { title: 'Digital Marketing', detail: 'Digital reach, lead generation support, campaign execution, and optimisation review.' },
+  { title: 'Event Management', detail: 'Sports events, branded activations, coordination, and delivery workflows.' },
+  { title: 'Ongoing Support', detail: 'Iteration, reporting, rollout support, and next-stage execution planning.' },
 ];
 
 const featureShowcaseCards: FeatureShowcaseCard[] = [
@@ -277,30 +306,36 @@ const featureWorkstreams: FeatureWorkstream[] = [
 
 const eventManagementCapabilities: EventManagementCapability[] = [
   {
-    title: 'Public event website and discovery',
+    title: 'Application development and digital systems',
     description:
-      'Publish events, control registration windows, showcase banners, list featured tournaments, and support public newsletters, contact, and partner access.',
-    bullets: ['Public event catalog and event detail pages', 'Corporate and sponsor-facing communication', 'Newsletter publishing and announcement flow'],
+      'Build portals, internal systems, client dashboards, booking flows, and custom digital products that solve day-to-day operational needs.',
+    bullets: ['Custom web applications and portals', 'Dashboards, admin tools, and business workflows', 'Product enhancement and rollout support'],
+    imageSrc: APP_DEVELOPMENT_IMAGE,
+    imageAlt: 'Interface illustration representing application development and digital systems',
   },
   {
-    title: 'Registration and payment flow',
+    title: 'Marketing and digital marketing execution',
     description:
-      'Let participants sign in, register for paid or free events, and submit payment proof for review when the event requires payment confirmation.',
-    bullets: ['Registration workflow with sign-in', 'Paid-event proof upload and review', 'User dashboard for registration and payment status'],
+      'Support campaigns, digital visibility, content coordination, and growth-oriented communication with a more structured execution rhythm.',
+    bullets: ['Campaign planning and creative alignment', 'Digital promotion and lead generation support', 'Performance review and improvement loops'],
+    imageSrc: MARKETING_EXECUTION_IMAGE,
+    imageAlt: 'Analytics and campaign illustration representing marketing and digital marketing execution',
   },
   {
-    title: 'Admin event control',
+    title: 'Event management and activation delivery',
     description:
-      'Operate multi-sport events from one admin portal covering events, registrations, matches, accounting, reports, users, settings, and the training manual.',
-    bullets: ['Event creation, status control, and visibility', 'Match scheduling and knockout generation', 'Accounting, alerts, reports, backups, and SMTP-ready settings'],
+      'Coordinate tournaments, launches, branded activations, registrations, communication, and on-ground execution with better operational follow-through.',
+    bullets: ['Event planning, scheduling, and coordination', 'Registration, communication, and logistics support', 'Post-event reporting, media, and follow-up'],
+    imageSrc: EVENT_DELIVERY_IMAGE,
+    imageAlt: 'Calendar and logistics illustration representing event management and activation delivery',
   },
 ];
 
 const trialOfferBenefits = [
-  '30-day guided trial request for one client workspace',
-  'Basic setup support for facilities, users, and starter workflow mapping',
-  'WhatsApp and email follow-up during the trial period',
-  'A practical review of bookings, memberships, payments, and reporting before rollout',
+  'Discovery call for products, application builds, marketing support, or events',
+  'Scope discussion with the right mix of software, campaign, and delivery services',
+  'WhatsApp and email follow-up for planning, proposals, and next steps',
+  'Optional walkthrough of the Sarva software product line where relevant',
 ];
 
 const productLineHighlights = [
@@ -343,35 +378,51 @@ const sportsComplexPlatformCapabilities: ProductCapabilityRow[] = [
     area: 'Facility and event booking',
     detail:
       'Court, pool, hall, and slot booking with event quotations, revision history, PDF preview, email sending, and booking conversion.',
+    imageSrc: FACILITY_BOOKING_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of sports court booking, scheduling, and event quotation workflow',
   },
   {
     area: 'Memberships',
     detail: 'Plan creation, subscriptions, renewals, expiry alerts, member benefits, and membership reporting.',
+    imageSrc: MEMBERSHIPS_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of membership cards, renewal flow, and member benefits',
   },
   {
     area: 'Retail and inventory',
     detail: 'Product catalog, stock alerts, procurement, purchase orders, stock receipts, and returns.',
+    imageSrc: RETAIL_INVENTORY_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of inventory boxes, barcode tracking, and stock movement',
   },
   {
     area: 'Sales and CRM',
     detail: 'Customer profiles, enquiries, campaigns, quotations, invoices, credit notes, and collection follow-up.',
+    imageSrc: SALES_CRM_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of customer CRM, sales pipeline, and quotation follow-up',
   },
   {
     area: 'Employee management',
     detail: 'GPS-ready self check-in, attendance register, shifts, and payroll support.',
+    imageSrc: EMPLOYEE_MANAGEMENT_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of attendance, GPS check-in, and workforce scheduling',
   },
   {
     area: 'Accounting',
     detail:
       'Invoicing, vendor bills, vouchers, cash and bank books, CSV bank reconciliation, and financial statements.',
+    imageSrc: ACCOUNTING_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of accounting ledgers, vouchers, and financial reporting',
   },
   {
     area: 'Settlements and closing',
     detail: 'Receipt allocation, day-end cash review, and variance reporting.',
+    imageSrc: SETTLEMENTS_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of settlement receipts, closing review, and balance checks',
   },
   {
     area: 'Admin and configuration',
     detail: 'User roles, company setup, SMTP and printing preferences, and backup controls.',
+    imageSrc: ADMIN_CONFIGURATION_CAPABILITY_IMAGE,
+    imageAlt: 'Vector illustration of admin settings, user roles, and system configuration',
   },
 ];
 
@@ -445,19 +496,19 @@ const productComparisonRows = [
 
 const contactOptions = [
   {
-    title: 'Request a walkthrough',
+    title: 'Book a consultation',
     description:
-      'Use the Contact page to book a demo, discuss onboarding, and review how the sports complex management platform fits your venue.',
+      'Use the Contact page to discuss software products, custom application development, marketing requirements, or event execution support.',
   },
   {
-    title: 'Client access',
+    title: 'Explore the product line',
     description:
-      'Existing client organizations can sign in from the Login link using their email, password, and tenant or company identifier.',
+      'Sarva software products remain available for sports complex operations and sports event management when your requirement is product-led.',
   },
   {
-    title: 'Training and rollout',
+    title: 'Work with one coordinated team',
     description:
-      `${PRODUCT_BRAND_NAME} works well for front desk, operations, sales, HR, accounts, and administration teams that need a shared system with clear process flow.`,
+      `${PUBLIC_BRAND_NAME} brings together application development, digital marketing, event management, and service delivery under one brand.`,
   },
 ];
 
@@ -535,7 +586,7 @@ const PublicContactForm: React.FC = () => {
             follow up on rollout, onboarding, or product questions.
           </p>
           <p className="mt-2 text-xs uppercase tracking-[0.18em] text-amber-200">
-            Ask for the 30-day guided trial if you want to evaluate the platform before rollout.
+            Ask for a discovery call, proposal discussion, or product walkthrough to find the right starting point.
           </p>
         </div>
         <a
@@ -600,7 +651,7 @@ const PublicContactForm: React.FC = () => {
           <textarea
             value={form.message}
             onChange={updateField('message')}
-            placeholder="Tell us about your sports complex, rollout plan, the modules you want, or that you want the 30-day trial offer."
+            placeholder="Tell us about your application requirement, software interest, marketing goal, digital campaign, or event management need."
             required
             rows={5}
             className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-amber-300 focus:outline-none"
@@ -649,6 +700,7 @@ const PublicShell: React.FC<PublicShellProps> = ({
   secondaryAction,
   heroSupplement,
   heroVariant = 'default',
+  heroCompact = false,
   heroRight,
   children,
 }) => {
@@ -663,11 +715,18 @@ const PublicShell: React.FC<PublicShellProps> = ({
         <header className="border-b border-white/10 bg-zinc-950/80 backdrop-blur-xl">
           <div className={`mx-auto flex ${PUBLIC_CONTENT_WIDTH_CLASS} flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8`}>
             <div className="flex items-center justify-between gap-4">
-              <Link to="/" className="group">
-                <p className="text-2xl font-bold tracking-tight text-white">{PRODUCT_BRAND_NAME}</p>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-400 transition group-hover:text-slate-200">
-                  {PRIMARY_SEO_PHRASE}
-                </p>
+              <Link to="/" className="group flex items-center gap-3">
+                <img
+                  src={DEFAULT_BRAND_LOGO_PATH}
+                  alt={`${PUBLIC_BRAND_NAME} logo`}
+                  className="h-12 w-12 shrink-0 object-contain drop-shadow-[0_10px_26px_rgba(2,6,23,0.35)] transition group-hover:scale-[1.02]"
+                />
+                <div className="min-w-0">
+                  <p className="text-2xl font-bold tracking-tight text-white">{PUBLIC_BRAND_NAME}</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400 transition group-hover:text-slate-200">
+                    {PUBLIC_BRAND_TAGLINE}
+                  </p>
+                </div>
               </Link>
 
               <div className="hidden items-center gap-3 md:flex">
@@ -744,15 +803,29 @@ const PublicShell: React.FC<PublicShellProps> = ({
               </div>
             </section>
           ) : (
-            <section className="grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-stretch">
-              <div className="h-full rounded-[2rem] border border-white/10 bg-white/[0.04] p-7 shadow-[0_30px_90px_rgba(2,6,23,0.35)] backdrop-blur-xl sm:p-10">
+            <section className={`grid gap-8 ${heroCompact ? 'lg:grid-cols-[0.76fr_1.24fr] lg:gap-6' : 'lg:grid-cols-[0.92fr_1.08fr] lg:items-stretch'}`}>
+              <div
+                className={`h-full rounded-[2rem] border border-white/10 bg-white/[0.04] shadow-[0_30px_90px_rgba(2,6,23,0.35)] backdrop-blur-xl ${
+                  heroCompact ? 'p-6 sm:p-7 lg:p-8' : 'p-7 sm:p-10'
+                }`}
+              >
                 <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-200">{eyebrow}</p>
-                <h1 className="mt-5 max-w-3xl text-4xl font-bold leading-tight text-white sm:text-5xl">
+                <h1
+                  className={`max-w-3xl font-bold leading-tight text-white ${
+                    heroCompact ? 'mt-4 text-3xl sm:text-4xl' : 'mt-5 text-4xl sm:text-5xl'
+                  }`}
+                >
                   {title}
                 </h1>
-                <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">{description}</p>
+                <p
+                  className={`max-w-3xl text-slate-300 ${
+                    heroCompact ? 'mt-4 text-sm leading-7 sm:text-base' : 'mt-5 text-base leading-8 sm:text-lg'
+                  }`}
+                >
+                  {description}
+                </p>
 
-                <div className="mt-7 flex flex-wrap gap-3">
+                <div className={`${heroCompact ? 'mt-6' : 'mt-7'} flex flex-wrap gap-3`}>
                   {primaryAction ? (
                     <Link to={primaryAction.to} className={actionClassName(primaryAction.variant)}>
                       {primaryAction.label}
@@ -766,13 +839,13 @@ const PublicShell: React.FC<PublicShellProps> = ({
                 </div>
 
                 {heroSupplement ? (
-                  <div className="mt-8 border-t border-white/10 pt-8">
+                  <div className={`${heroCompact ? 'mt-6 pt-6' : 'mt-8 pt-8'} border-t border-white/10`}>
                     {heroSupplement}
                   </div>
                 ) : null}
               </div>
 
-              <div className="space-y-4">{heroRight}</div>
+              <div className={`${heroCompact ? 'space-y-3 lg:pl-1' : 'space-y-4'}`}>{heroRight}</div>
             </section>
           )}
 
@@ -781,10 +854,17 @@ const PublicShell: React.FC<PublicShellProps> = ({
 
         <footer className="border-t border-white/10 bg-zinc-950/84">
           <div className={`mx-auto flex ${PUBLIC_CONTENT_WIDTH_CLASS} flex-col gap-4 px-4 py-6 text-sm text-slate-300 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
-            <div className="space-y-1">
-              <p>{PRODUCT_BRAND_NAME} helps sports complexes connect bookings, sales, memberships, staff, and finance in one system.</p>
-              <p className="text-xs text-slate-400">{RIGHTS_HOLDER_ADDRESS}</p>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-200">{APPLICATION_RIGHTS_NOTE}</p>
+            <div className="flex items-start gap-3">
+              <img
+                src={DEFAULT_BRAND_LOGO_PATH}
+                alt={`${PUBLIC_BRAND_NAME} logo`}
+                className="h-12 w-12 shrink-0 object-contain drop-shadow-[0_10px_26px_rgba(2,6,23,0.35)]"
+              />
+              <div className="space-y-1">
+                <p>{PUBLIC_BRAND_NAME} brings together software products, custom application development, digital marketing, and event services under one brand.</p>
+                <p className="text-xs text-slate-400">{RIGHTS_HOLDER_ADDRESS}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-200">{APPLICATION_RIGHTS_NOTE}</p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link to="/products" className="text-amber-200 transition hover:text-amber-100">
@@ -820,21 +900,22 @@ const PublicHomeProductShot: React.FC<{ productImageSrc: string }> = ({ productI
       <div className="absolute inset-0 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
         <div className="max-w-[36rem]">
           <div className="rounded-[1.6rem] border border-white/15 bg-zinc-950/58 px-5 py-5 shadow-[0_20px_50px_rgba(2,6,23,0.24)] backdrop-blur-md sm:px-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">Sarva Platform</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">{PUBLIC_BRAND_NAME}</p>
             <h2 className="mt-3 text-xl font-bold leading-tight text-white sm:text-2xl lg:text-[2rem]">
-              One connected sports complex command center for front desk, operations, finance, and growth teams.
+              Products, campaigns, and event execution delivered through one sharper service brand.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-200">
-              Manage facility booking, online court scheduling, event quotations, memberships, collections, staff
-              activity, and reporting from one polished workspace.
+              Sarva Horizon covers custom applications, the Sarva software line, marketing support, digital marketing,
+              creative delivery, and event management for clients that want one coordinated team.
             </p>
             <div className="mt-5 rounded-[1.35rem] border border-sky-400/20 bg-sky-400/10 px-4 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
-                Also available
+                Software products
               </p>
-              <p className="mt-2 text-sm font-semibold text-white">Sarva Sports Event Management</p>
+              <p className="mt-2 text-sm font-semibold text-white">Sarva Sports Platform and Event Products</p>
               <p className="mt-2 text-sm leading-6 text-slate-200">
-                Multi-sport event publishing, registrations, payment proof review, matches, newsletters, and reports.
+                The Sarva product line remains part of the portfolio for sports complex operations, event workflows,
+                registrations, quotations, and reporting.
               </p>
             </div>
           </div>
@@ -842,10 +923,10 @@ const PublicHomeProductShot: React.FC<{ productImageSrc: string }> = ({ productI
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            'Facility booking and schedule control',
-            'Memberships, CRM, and event quotations',
-            'Multi-sport events, registrations, and matches',
-            'Payments, reporting, and admin controls',
+            'Custom application development',
+            'Software products and digital tools',
+            'Digital marketing and brand growth',
+            'Event management and activations',
           ].map((item) => (
             <div
               key={item}
@@ -866,30 +947,30 @@ export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc 
       <PublicSeo routeKey="home" imagePath={productImageSrc} />
       <PublicShell
         active="home"
-        eyebrow={PRIMARY_SEO_PHRASE}
+        eyebrow={PUBLIC_BRAND_TAGLINE}
         title={
           <>
-            The All-in-One{' '}
+            Build, market, and launch with{' '}
             <span className="bg-gradient-to-r from-amber-200 via-stone-100 to-sky-200 bg-clip-text text-transparent">
-              {PRIMARY_SEO_PHRASE}
+              {PUBLIC_BRAND_NAME}
             </span>
           </>
         }
         description={
           <>
-            {PRODUCT_BRAND_NAME} is sports facility management software for active venues that need a facility booking
-            system, online court scheduling, membership management, secure payment processing, staff operations,
-            reporting, and a sports event management application for multi-sport events.
+            {PUBLIC_BRAND_NAME} combines custom application development, the Sarva software products, marketing,
+            digital marketing, creative support, and event management for teams that want stronger execution from one
+            connected brand.
           </>
         }
-        primaryAction={{ label: 'Client Login', to: '/login' }}
+        primaryAction={{ label: `Talk to ${PUBLIC_BRAND_NAME}`, to: '/contact' }}
         secondaryAction={{ label: 'Explore Products', to: '/products', variant: 'secondary' }}
         heroVariant="banner"
         heroSupplement={
           <div className="space-y-5">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Operational highlights</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">Built for the way sports venues actually run every day</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Service highlights</p>
+              <h2 className="mt-2 text-2xl font-bold text-white">A broader delivery model across products, growth, and events</h2>
             </div>
             {homeHeroDetails.map((item, index) => (
               <div key={item.title} className="rounded-[1.6rem] border border-white/10 bg-white/5 p-4">
@@ -911,12 +992,12 @@ export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc 
         <section className="space-y-5">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Feature details</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">Operational modules that power one connected venue workflow</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Service areas</p>
+              <h2 className="mt-2 text-2xl font-bold text-white">What Sarva Horizon handles beyond a single software story</h2>
             </div>
             <p className="max-w-2xl text-sm leading-7 text-slate-300">
-              Each feature below supports a real business area, but the value comes from how {PRODUCT_BRAND_NAME} keeps them connected
-              inside one daily operating flow.
+              Sarva is still the software product line, but the wider Sarva Horizon brand also supports application
+              development, marketing, digital growth, creative execution, and event delivery.
             </p>
           </div>
 
@@ -932,13 +1013,14 @@ export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc 
 
         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <article className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-200">Sports Event Management</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-200">Integrated delivery</p>
             <h2 className="mt-3 text-2xl font-bold text-white">
-              Sarva also includes a sports event management application for multi-sport tournaments and event series.
+              {PUBLIC_BRAND_NAME} works across application development, marketing, digital campaigns, and event management.
             </h2>
             <p className="mt-4 text-sm leading-7 text-slate-300">
-              Teams can publish events, manage registrations, collect payment proof, review participants, plan matches,
-              monitor accounting, publish newsletters, and operate the event admin portal from one connected flow.
+              Some clients come for the Sarva software products. Others need a broader partner across custom digital
+              builds, campaign support, branded execution, and managed events. This public site now reflects that
+              wider service reality.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link
@@ -951,15 +1033,23 @@ export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc 
                 to="/contact"
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
               >
-                Request Event Demo
+                Start a Conversation
               </Link>
             </div>
           </article>
 
           <div className="grid gap-4 md:grid-cols-3">
             {eventManagementCapabilities.map((item) => (
-              <article key={item.title} className="rounded-[2rem] border border-white/10 bg-white/5 p-5">
-                <p className="text-lg font-semibold text-white">{item.title}</p>
+              <article key={item.title} className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 p-5">
+                <div className="overflow-hidden rounded-[1.45rem] border border-white/10 bg-black/20">
+                  <img
+                    src={item.imageSrc}
+                    alt={item.imageAlt}
+                    className="h-40 w-full object-cover object-center"
+                    loading="lazy"
+                  />
+                </div>
+                <p className="mt-4 text-lg font-semibold text-white">{item.title}</p>
                 <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {item.bullets.map((bullet) => (
@@ -979,42 +1069,42 @@ export const PublicHomePage: React.FC<PublicHomePageProps> = ({ productImageSrc 
         <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
           <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Why It Works</p>
-            <h2 className="mt-3 text-2xl font-bold text-white">A single workflow from enquiry to settlement</h2>
+            <h2 className="mt-3 text-2xl font-bold text-white">One coordinated partner for build, launch, and growth</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300">
-              Sports complexes often split work between booking registers, accounting sheets, and disconnected software.
-              {PRODUCT_BRAND_NAME} brings those steps together so staff can work faster and management can follow the full customer and
-              revenue lifecycle with less manual coordination.
+              Many teams split app development, marketing execution, creative work, and event operations across too
+              many vendors. {PUBLIC_BRAND_NAME} brings those delivery layers closer together so strategy and execution stay
+              more aligned.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link
                 to="/contact"
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
               >
-                Contact {PRODUCT_BRAND_NAME}
-              </Link>
-              <Link
-                to="/user-manual"
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
-              >
-                View User Manual
+                Contact {PUBLIC_BRAND_NAME}
               </Link>
               <Link
                 to="/about"
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
               >
-                About the Platform
+                About {PUBLIC_BRAND_NAME}
               </Link>
               <Link
                 to="/products"
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
               >
-                View Products
+                Explore Products
+              </Link>
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
+              >
+                Client Login
               </Link>
             </div>
           </article>
 
           <article className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Operating Flow</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">How We Work</p>
             <div className="mt-4 grid gap-3">
               {workflowSteps.map((step, index) => (
                 <div key={step} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
@@ -1044,48 +1134,41 @@ export const PublicProductsPage: React.FC = () => {
         primaryAction={{ label: 'Book a Demo', to: '/contact' }}
         secondaryAction={{ label: 'Open User Manual', to: '/user-manual', variant: 'secondary' }}
         heroRight={
-          <section className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+          <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+            <img
+              src={DECORATIVE_BLOB_AMBER_SKY}
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-16 -top-16 hidden h-40 w-40 opacity-70 md:block"
+            />
+            <img
+              src={DECORATIVE_BLOB_EMERALD_ROSE}
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute -bottom-14 -left-14 hidden h-36 w-36 opacity-60 md:block"
+            />
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Product Line Snapshot</p>
-            <div className="mt-4 grid gap-4">
-              <article className="rounded-[1.7rem] border border-amber-300/15 bg-[linear-gradient(135deg,rgba(245,158,11,0.14),rgba(24,24,27,0.9))] p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-100">Product 1</p>
-                <h2 className="mt-3 text-xl font-bold text-white">Sarva Sports Complex Management Platform</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-200">
-                  ERP-style sports venue software for bookings, memberships, CRM, inventory, HR, accounting, and
-                  day-end operational control.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {['Multi-facility venues', 'Front desk teams', 'Finance and admin control'].map((item) => (
-                    <span
-                      key={item}
-                      className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-amber-50"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
+            <div className="mt-4 overflow-hidden rounded-[1.7rem] border border-white/10 bg-slate-950/45">
+              <img
+                src={PRODUCT_LINE_VECTOR_IMAGE}
+                alt="Sales dashboard snapshot showing summary cards, a seven-day sales graph, and stock alerts"
+                className="h-[250px] w-full bg-[#0b1120] object-contain object-center"
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <article className="rounded-[1.5rem] bg-[linear-gradient(135deg,rgba(245,158,11,0.14),rgba(24,24,27,0.9))] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.18)]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-100">Platform product</p>
+                <p className="mt-2 text-base font-semibold text-white">Venue-wide operating system</p>
+                <p className="mt-2 text-sm leading-6 text-slate-200">Bookings, memberships, CRM, inventory, people, and finance in one connected workspace.</p>
               </article>
-
-              <article className="rounded-[1.7rem] border border-sky-400/15 bg-[linear-gradient(135deg,rgba(56,189,248,0.14),rgba(24,24,27,0.9))] p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">Product 2</p>
-                <h2 className="mt-3 text-xl font-bold text-white">Sarva Sports Event Management</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-200">
-                  Focused event software for tournaments, registrations, quotations, schedules, payment review, and
-                  organizer workflows.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {['Tournament organizers', 'Schools and leagues', 'Corporate sports events'].map((item) => (
-                    <span
-                      key={item}
-                      className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-sky-50"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
+              <article className="rounded-[1.5rem] bg-[linear-gradient(135deg,rgba(56,189,248,0.14),rgba(24,24,27,0.9))] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.18)]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">Event product</p>
+                <p className="mt-2 text-base font-semibold text-white">Focused event control</p>
+                <p className="mt-2 text-sm leading-6 text-slate-200">Registrations, quotations, schedules, payments, and organizer workflows without the full ERP stack.</p>
               </article>
             </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <div className="mt-4 rounded-2xl bg-white/[0.06] px-4 py-4">
               <p className="text-sm font-semibold text-white">One vision, flexible adoption</p>
               <p className="mt-2 text-sm leading-7 text-slate-300">
                 Choose the product that fits your scale today and expand into the broader Sarva ecosystem when your
@@ -1097,8 +1180,9 @@ export const PublicProductsPage: React.FC = () => {
       >
         <section className="grid gap-4 md:grid-cols-3">
           {productLineHighlights.map((item) => (
-            <article key={item.title} className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <p className="text-lg font-semibold text-white">{item.title}</p>
+            <article key={item.title} className="rounded-[1.8rem] bg-[linear-gradient(180deg,rgba(39,39,42,0.9),rgba(24,24,27,0.75))] p-6 shadow-[0_16px_36px_rgba(2,6,23,0.16)]">
+              <div className="h-1.5 w-12 rounded-full bg-gradient-to-r from-amber-300 to-sky-300" />
+              <p className="mt-4 text-lg font-semibold text-white">{item.title}</p>
               <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
             </article>
           ))}
@@ -1113,25 +1197,27 @@ export const PublicProductsPage: React.FC = () => {
               connects facility operations, retail sales, inventory, memberships, HR, accounting, and customer
               relationships into one operating system.
             </p>
-            <div className="mt-5">
+            <div className="mt-5 rounded-[1.5rem] bg-black/20 p-5">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-100">Who it is for</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <ul className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 {sportsComplexPlatformAudience.map((item) => (
-                  <span
-                    key={item}
-                    className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-100"
-                  >
-                    {item}
-                  </span>
+                  <li key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-100">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-amber-300" />
+                    <span>{item}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
-            <div className="mt-6 grid gap-3">
+            <div className="mt-6 rounded-[1.5rem] bg-slate-950/30 p-5">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-100">Why teams choose it</p>
+              <ul className="mt-4 space-y-3">
               {sportsComplexPlatformReasons.map((item) => (
-                <div key={item} className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm font-semibold text-slate-100">
-                  {item}
-                </div>
+                <li key={item} className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-100">
+                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-amber-300" />
+                  <span>{item}</span>
+                </li>
               ))}
+              </ul>
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
@@ -1151,8 +1237,19 @@ export const PublicProductsPage: React.FC = () => {
 
           <div className="grid gap-3 sm:grid-cols-2">
             {sportsComplexPlatformCapabilities.map((item) => (
-              <article key={item.area} className="rounded-[1.7rem] border border-white/10 bg-zinc-900/72 p-5">
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-100">{item.area}</p>
+              <article key={item.area} className="rounded-[1.7rem] bg-zinc-900/72 p-5 shadow-[0_16px_34px_rgba(2,6,23,0.18)]">
+                {item.imageSrc ? (
+                  <div className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-slate-950/45 shadow-[0_14px_34px_rgba(2,6,23,0.22)]">
+                    <img
+                      src={item.imageSrc}
+                      alt={item.imageAlt || item.area}
+                      className="h-36 w-full object-cover object-center"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : null}
+                <div className="mt-4 h-1.5 w-10 rounded-full bg-amber-300/80" />
+                <p className="mt-4 text-sm font-semibold uppercase tracking-[0.16em] text-amber-100">{item.area}</p>
                 <p className="mt-3 text-sm leading-7 text-slate-300">{item.detail}</p>
               </article>
             ))}
@@ -1175,27 +1272,22 @@ export const PublicProductsPage: React.FC = () => {
             {featureShowcaseCards.map((feature) => (
               <article
                 key={feature.title}
-                className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/78 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.22)]"
+                className="relative overflow-hidden rounded-[2rem] bg-zinc-900/78 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.22)]"
               >
                 <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${feature.accent}`} />
                 <div className="relative z-10">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                      {feature.keyword}
-                    </span>
-                    <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
-                      Product capability
-                    </span>
-                  </div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-100">{feature.keyword}</p>
+                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100/90">Product capability</p>
                   <h3 className="mt-4 text-2xl font-bold text-white">{feature.title}</h3>
                   <p className="mt-3 text-sm leading-7 text-slate-300">{feature.description}</p>
-                  <div className="mt-5 grid gap-2">
+                  <ul className="mt-5 space-y-3">
                     {feature.bullets.map((bullet) => (
-                      <div key={bullet} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-slate-200">
-                        {bullet}
-                      </div>
+                      <li key={bullet} className="flex items-start gap-3 rounded-xl bg-white/[0.05] px-4 py-3 text-sm leading-6 text-slate-200">
+                        <span className="mt-2 h-1.5 w-1.5 rounded-full bg-white/80" />
+                        <span>{bullet}</span>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                   <div className="mt-5 flex flex-wrap gap-3">
                     <Link
                       to={feature.manualTo}
@@ -1207,7 +1299,7 @@ export const PublicProductsPage: React.FC = () => {
                       to="/contact"
                       className="inline-flex items-center justify-center rounded-full border border-sky-400/25 bg-sky-400/12 px-4 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-400/18"
                     >
-                      Talk to Sarva
+                      Talk to {PUBLIC_BRAND_NAME}
                     </Link>
                   </div>
                 </div>
@@ -1225,25 +1317,27 @@ export const PublicProductsPage: React.FC = () => {
               tournaments. It is designed for organizers who need event-specific workflows without the full retail,
               HR, and complex-management stack.
             </p>
-            <div className="mt-5">
+            <div className="mt-5 rounded-[1.5rem] bg-black/20 p-5">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-100">Who it is for</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <ul className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 {sportsEventManagementAudience.map((item) => (
-                  <span
-                    key={item}
-                    className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-100"
-                  >
-                    {item}
-                  </span>
+                  <li key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-100">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-300" />
+                    <span>{item}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
-            <div className="mt-6 grid gap-3">
+            <div className="mt-6 rounded-[1.5rem] bg-slate-950/30 p-5">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-100">Why teams choose it</p>
+              <ul className="mt-4 space-y-3">
               {sportsEventManagementReasons.map((item) => (
-                <div key={item} className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm font-semibold text-slate-100">
-                  {item}
-                </div>
+                <li key={item} className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-100">
+                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-300" />
+                  <span>{item}</span>
+                </li>
               ))}
+              </ul>
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
@@ -1256,15 +1350,16 @@ export const PublicProductsPage: React.FC = () => {
                 to="/about"
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
               >
-                About Sarva
+                About {PUBLIC_BRAND_NAME}
               </Link>
             </div>
           </article>
 
           <div className="grid gap-3 sm:grid-cols-2">
             {sportsEventManagementCapabilitiesDetailed.map((item) => (
-              <article key={item.area} className="rounded-[1.7rem] border border-white/10 bg-zinc-900/78 p-5">
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-100">{item.area}</p>
+              <article key={item.area} className="rounded-[1.7rem] bg-zinc-900/78 p-5 shadow-[0_16px_34px_rgba(2,6,23,0.18)]">
+                <div className="h-1.5 w-10 rounded-full bg-sky-300/80" />
+                <p className="mt-4 text-sm font-semibold uppercase tracking-[0.16em] text-sky-100">{item.area}</p>
                 <p className="mt-3 text-sm leading-7 text-slate-300">{item.detail}</p>
               </article>
             ))}
@@ -1276,14 +1371,14 @@ export const PublicProductsPage: React.FC = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">How to Choose</p>
             <div className="mt-4 grid gap-3">
               {productComparisonRows.map((row) => (
-                <div key={row.label} className="rounded-3xl border border-white/10 bg-slate-950/35 p-5">
+                <div key={row.label} className="rounded-3xl bg-slate-950/35 p-5">
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-100">{row.label}</p>
                   <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                    <div className="rounded-2xl border border-amber-300/15 bg-amber-300/10 p-4">
+                    <div className="rounded-2xl bg-amber-300/10 p-4">
                       <p className="text-sm font-semibold text-white">Sports Complex Management Platform</p>
                       <p className="mt-2 text-sm leading-7 text-slate-300">{row.platform}</p>
                     </div>
-                    <div className="rounded-2xl border border-sky-400/15 bg-sky-400/10 p-4">
+                    <div className="rounded-2xl bg-sky-400/10 p-4">
                       <p className="text-sm font-semibold text-white">Sports Event Management</p>
                       <p className="mt-2 text-sm leading-7 text-slate-300">{row.events}</p>
                     </div>
@@ -1300,7 +1395,7 @@ export const PublicProductsPage: React.FC = () => {
               want the deeper screen-by-screen detail behind the sports complex platform, the public user manual is the
               best place to continue.
             </p>
-            <div className="mt-5 grid gap-3">
+            <ul className="mt-5 space-y-3">
               {[
                 { label: 'Operations and facility workflows', to: '/user-manual#operations-menu' },
                 { label: 'Event quotation and booking conversion', to: '/user-manual#transaction-event-quotation' },
@@ -1309,20 +1404,22 @@ export const PublicProductsPage: React.FC = () => {
                 { label: 'Accounting and settlements', to: '/user-manual#accounting' },
                 { label: 'Settings, users, and controls', to: '/user-manual#settings' },
               ].map((item) => (
-                <Link
-                  key={item.label}
-                  to={item.to}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                >
-                  {item.label}
-                </Link>
+                <li key={item.label}>
+                  <Link
+                    to={item.to}
+                    className="group flex items-start gap-3 rounded-xl bg-white/[0.05] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.08]"
+                  >
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-amber-300 transition group-hover:bg-sky-300" />
+                    <span>{item.label}</span>
+                  </Link>
+                </li>
               ))}
-            </div>
-            <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-5">
+            </ul>
+            <div className="mt-6 rounded-3xl bg-white/[0.06] p-5">
               <p className="text-sm font-semibold text-white">Need help choosing the right product?</p>
               <p className="mt-2 text-sm leading-7 text-slate-300">
                 We can walk through your venue workflow, event requirements, reporting needs, and rollout timeline to
-                recommend the best Sarva starting point.
+                recommend the best Sarva Horizon starting point.
               </p>
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
@@ -1352,19 +1449,38 @@ export const PublicAboutPage: React.FC = () => {
       <PublicSeo routeKey="about" />
       <PublicShell
         active="about"
-        eyebrow={`About ${PRODUCT_BRAND_NAME}`}
-        title={`${PRODUCT_BRAND_NAME} brings sports facility management software into one operating layer.`}
-        description={`${PRODUCT_BRAND_NAME} is positioned as the product, while each customer organization operates inside its own client workspace. That keeps the public brand clear while supporting day-to-day venue operations and dedicated sports event management use cases.`}
+        eyebrow={`About ${PUBLIC_BRAND_NAME}`}
+        title={`${PUBLIC_BRAND_NAME} brings products, campaigns, and event execution into one brand.`}
+        description={`${PUBLIC_BRAND_NAME} is the wider company identity across application development, digital marketing, event delivery, and service execution. Sarva remains the software product line inside that portfolio.`}
         primaryAction={{ label: 'View Contact', to: '/contact' }}
         secondaryAction={{ label: 'Client Login', to: '/login', variant: 'secondary' }}
         heroRight={
-          <section className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Core Modules</p>
-            <div className="mt-4 grid gap-3">
-              {moduleHighlights.map((module) => (
-                <div key={module.title} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <p className="text-sm font-semibold text-white">{module.title}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-300">{module.detail}</p>
+          <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+            <img
+              src={DECORATIVE_BLOB_AMBER_SKY}
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-16 -top-14 hidden h-40 w-40 opacity-70 md:block"
+            />
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">Brand Ecosystem</p>
+            <div className="mt-4 overflow-hidden rounded-[1.7rem] border border-white/10 bg-slate-950/45">
+              <img
+                src={ABOUT_ECOSYSTEM_VECTOR_IMAGE}
+                alt="Vector illustration showing Sarva Horizon connecting software products, application builds, marketing growth, and event delivery"
+                className="h-[255px] w-full object-cover object-center"
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[
+                { title: 'Software products', detail: 'Sarva product line for sports platform and event operations.' },
+                { title: 'Application builds', detail: 'Custom portals, dashboards, workflow tools, and websites.' },
+                { title: 'Marketing growth', detail: 'Campaign direction, digital visibility, and communication support.' },
+                { title: 'Event delivery', detail: 'Planning, logistics, activations, and managed execution.' },
+              ].map((item) => (
+                <div key={item.title} className="rounded-2xl bg-white/[0.05] px-4 py-3">
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">{item.detail}</p>
                 </div>
               ))}
             </div>
@@ -1382,15 +1498,15 @@ export const PublicAboutPage: React.FC = () => {
 
         <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
           <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Who {PRODUCT_BRAND_NAME} Supports</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Who {PUBLIC_BRAND_NAME} Supports</p>
             <div className="mt-4 grid gap-3">
               {[
-                'Front desk teams handling walk-in bookings, sales, and receipts',
-                'Operations teams managing courts, turfs, pools, schedules, and event coordination',
-                'Sales teams preparing quotations, orders, customer follow-up, and product transactions',
-                'HR and payroll teams maintaining employees, attendance, shifts, and payroll records',
-                'Accounts teams responsible for settlements, payment review, and reporting',
-                'Administrators managing permissions, company settings, print, mail, and overall system control',
+                'Sports venues, academies, and clubs needing operational software or digital execution',
+                'Startups and businesses looking for custom applications, websites, and internal workflow tools',
+                'Brands that need marketing, digital marketing, creative coordination, and launch support',
+                'Event organizers, associations, and schools managing programmes, tournaments, and activations',
+                'Teams that prefer one partner across build, launch, communication, and delivery follow-through',
+                'Organizations that want the Sarva software line as part of a wider service relationship',
               ].map((item) => (
                 <div key={item} className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm leading-7 text-slate-200">
                   {item}
@@ -1400,17 +1516,17 @@ export const PublicAboutPage: React.FC = () => {
           </article>
 
           <article className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Product Positioning</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Brand Structure</p>
             <p className="mt-4 text-sm leading-7 text-slate-300">
-              {PRODUCT_BRAND_NAME} should remain the public application identity. Client businesses such as sports centers, clubs, or
-              venue operators use the product inside their own tenant workspace, but the product itself should not be
-              hardcoded with a client name. This public site reflects that separation clearly.
+              Sarva Horizon is the public-facing company brand. Sarva remains the software product identity used for
+              the sports complex and sports event management applications. That keeps the company story broader while
+              letting the product line stay focused.
             </p>
             <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
-              <p className="text-sm font-semibold text-white">Professional public experience</p>
+              <p className="text-sm font-semibold text-white">Why that matters</p>
               <p className="mt-2 text-sm leading-7 text-slate-300">
-                The public site explains how one sports complex management platform can support bookings, memberships,
-                staff operations, finance, and administration without splitting work across disconnected systems.
+                The public site can now represent Sarva Horizon as a wider services brand, while the Products and User
+                Manual pages still give clear visibility into the Sarva software experience.
               </p>
             </div>
           </article>
@@ -1427,41 +1543,38 @@ export const PublicContactPage: React.FC = () => {
       <PublicShell
         active="contact"
         eyebrow="Contact"
-        title={`Book a demo of the ${PRODUCT_BRAND_NAME} ${PRIMARY_SEO_PHRASE}.`}
-        description={`Use ${PRODUCT_BRAND_NAME} for sports complexes that need one platform across front desk, operations, memberships, inventory, people, accounts, and admin workflows.`}
-        primaryAction={{ label: 'Client Login', to: '/login' }}
-        secondaryAction={{ label: 'Read the Manual', to: '/user-manual', variant: 'secondary' }}
+        title={`Talk to ${PUBLIC_BRAND_NAME} about products, applications, marketing, or event execution.`}
+        description={`${PUBLIC_BRAND_NAME} can support custom application development, the Sarva software line, digital marketing, creative delivery, and event management depending on what your team needs next.`}
+        primaryAction={{ label: 'Explore Products', to: '/products' }}
+        secondaryAction={{ label: 'Client Login', to: '/login', variant: 'secondary' }}
         heroRight={
-          <section className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+          <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)]">
+            <img
+              src={DECORATIVE_BLOB_EMERALD_ROSE}
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute -left-16 -top-16 hidden h-40 w-40 opacity-70 md:block"
+            />
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">How to Engage</p>
-            <div className="mt-4 space-y-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-semibold text-white">New implementation</p>
-                <p className="mt-2 text-sm leading-7 text-slate-300">
-                  Discuss rollout priorities, demo requirements, and the modules your sports complex needs first.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-semibold text-white">Existing client team</p>
-                <p className="mt-2 text-sm leading-7 text-slate-300">
-                  Use the login route with your tenant or company identifier to enter your own workspace securely.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <p className="text-sm font-semibold text-white">WhatsApp Contact</p>
-                <p className="mt-2 text-sm leading-7 text-slate-200">
-                  Reach {RIGHTS_HOLDER_NAME} directly on WhatsApp at {WHATSAPP_DISPLAY_PHONE} for quick product enquiries.
-                </p>
-                <a href={whatsappContactUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-semibold text-emerald-100 hover:text-white">
-                  Open WhatsApp
-                </a>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-semibold text-white">Training and documentation</p>
-                <p className="mt-2 text-sm leading-7 text-slate-300">
-                  The built-in user manual explains every major form, menu, and route with direct hyperlinks.
-                </p>
-              </div>
+            <div className="mt-4 overflow-hidden rounded-[1.7rem] border border-white/10 bg-slate-950/45">
+              <img
+                src={CONTACT_CONNECT_VECTOR_IMAGE}
+                alt="Vector illustration showing Sarva Horizon contact paths for products, applications, marketing, and events"
+                className="h-[255px] w-full object-cover object-center"
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[
+                'New project enquiry',
+                'Marketing and digital support',
+                'Events and activations',
+                'Existing client team',
+              ].map((item) => (
+                <div key={item} className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm font-semibold text-white">
+                  {item}
+                </div>
+              ))}
             </div>
           </section>
         }
@@ -1478,12 +1591,12 @@ export const PublicContactPage: React.FC = () => {
       <section className="overflow-hidden rounded-[2rem] border border-amber-300/20 bg-[linear-gradient(135deg,rgba(251,191,36,0.16),rgba(16,185,129,0.10),rgba(15,23,42,0.92))] p-6 shadow-[0_24px_70px_rgba(2,6,23,0.28)]">
         <div className="grid gap-6 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">One-Month Trial Offer</p>
-            <h2 className="mt-3 text-3xl font-bold text-white">Try Sarva for 30 days with guided onboarding support.</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">How We Can Start</p>
+            <h2 className="mt-3 text-3xl font-bold text-white">Start with the service mix that fits your next move.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-100">
-              If you want to evaluate the sports complex management platform before full rollout, ask for the
-              30-day guided trial. We can help you test facility booking system workflows, online court scheduling,
-              membership management, secure payment processing, and reporting with a practical demo-first setup.
+              Some teams need a product demo. Others need a custom application plan, digital marketing support, or
+              event execution help. We can start with the right scope instead of forcing every conversation into one
+              narrow path.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <a
@@ -1492,7 +1605,7 @@ export const PublicContactPage: React.FC = () => {
                 rel="noreferrer"
                 className="inline-flex items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-50"
               >
-                Ask for 30-Day Trial
+                Start on WhatsApp
               </a>
               <Link
                 to="/products"
@@ -1533,9 +1646,9 @@ export const PublicContactPage: React.FC = () => {
         <article className="rounded-[2rem] border border-white/10 bg-zinc-900/72 p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Contact Note</p>
           <p className="mt-4 text-sm leading-7 text-slate-300">
-            Use this public page when sharing the product with new prospects, venue operators, or implementation teams.
-            Existing client organizations can continue through the Login route, while {RIGHTS_HOLDER_NAME} remains the
-            published address and rights holder shown on the public-facing site.
+            Use this public page when you want to talk about Sarva Horizon more broadly, whether the need is a
+            software product, an application build, digital marketing support, or event delivery. Existing product
+            clients can continue through the Login route when they need direct workspace access.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a
@@ -1556,7 +1669,7 @@ export const PublicContactPage: React.FC = () => {
               to="/about"
               className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
             >
-              About {PRODUCT_BRAND_NAME}
+              About {PUBLIC_BRAND_NAME}
             </Link>
             <Link
               to="/products"
@@ -1572,8 +1685,9 @@ export const PublicContactPage: React.FC = () => {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">Need the product overview?</p>
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <p className="max-w-3xl text-sm leading-7 text-slate-300">
-            The Home and About pages explain what {PRODUCT_BRAND_NAME} does, while the User Manual goes deeper into each form, page,
-            and module. Existing clients can go straight to Login, and new prospects can start from Contact or About.
+            The Home and About pages explain what {PUBLIC_BRAND_NAME} does as a broader services brand, while the User
+            Manual goes deeper into the Sarva software workflows, forms, and modules. Existing clients can go straight
+            to Login, and new prospects can start from Contact or About.
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
@@ -1586,7 +1700,7 @@ export const PublicContactPage: React.FC = () => {
               to="/about"
               className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10"
             >
-              About {PRODUCT_BRAND_NAME}
+              About {PUBLIC_BRAND_NAME}
             </Link>
             <Link
               to="/products"
@@ -1610,9 +1724,10 @@ export const PublicLoginPage: React.FC<PublicLoginPageProps> = ({ children }) =>
         active="login"
         eyebrow="Client Access"
         title={`Secure login for ${PRODUCT_BRAND_NAME} client workspaces.`}
-        description={`Client organizations sign in with their user credentials and tenant or company identifier to access their own ${PRIMARY_SEO_PHRASE.toLowerCase()} workspace.`}
+        description={`Client organizations sign in with their user credentials and tenant or company identifier to access their Sarva software workspace securely.`}
         primaryAction={{ label: 'Back to Home', to: '/', variant: 'secondary' }}
         secondaryAction={{ label: 'Explore Products', to: '/products', variant: 'secondary' }}
+        heroCompact
         heroRight={children}
       >
       <section className="grid gap-4 lg:grid-cols-3">

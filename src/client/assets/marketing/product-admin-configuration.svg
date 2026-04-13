@@ -1,0 +1,37 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="adminBg" x1="50" y1="24" x2="598" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1728"/>
+      <stop offset="1" stop-color="#151B2F"/>
+    </linearGradient>
+    <linearGradient id="adminGear" x1="102" y1="92" x2="294" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="adminControl" x1="390" y1="96" x2="552" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="1" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#adminBg)"/>
+  <circle cx="104" cy="76" r="88" fill="#818CF8" fill-opacity="0.07"/>
+  <circle cx="540" cy="292" r="92" fill="#34D399" fill-opacity="0.07"/>
+
+  <rect x="86" y="92" width="248" height="176" rx="28" fill="#0B1220" stroke="#24324A"/>
+  <circle cx="170" cy="180" r="48" fill="url(#adminGear)" fill-opacity="0.16" stroke="#A5B4FC" stroke-width="2"/>
+  <circle cx="170" cy="180" r="18" fill="#111827" stroke="#C4B5FD" stroke-width="2"/>
+  <path d="M170 122V140M170 220V238M112 180H130M210 180H228M129 139L141 151M199 209L211 221M211 139L199 151M141 209L129 221" stroke="#C4B5FD" stroke-width="6" stroke-linecap="round"/>
+  <rect x="236" y="138" width="56" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="236" y="164" width="42" height="10" rx="5" fill="#64748B"/>
+  <rect x="236" y="194" width="64" height="36" rx="14" fill="#111827" stroke="#334155"/>
+  <path d="M252 212H284" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="388" y="92" width="172" height="176" rx="28" fill="#101827" stroke="#334155"/>
+  <rect x="414" y="122" width="120" height="34" rx="17" fill="#111827" stroke="#475569"/>
+  <circle cx="448" cy="139" r="14" fill="url(#adminControl)"/>
+  <rect x="414" y="170" width="120" height="34" rx="17" fill="#111827" stroke="#475569"/>
+  <circle cx="498" cy="187" r="14" fill="#38BDF8"/>
+  <rect x="414" y="218" width="120" height="34" rx="17" fill="#111827" stroke="#475569"/>
+  <circle cx="466" cy="235" r="14" fill="#FBBF24"/>
+</svg>
+

@@ -32,6 +32,31 @@ export const ensureDefaultTenant = async (): Promise<ITenantDocument> => {
   });
 };
 
+export const resolvePrimaryTenant = async (): Promise<ITenantDocument> => {
+  const defaultTenant = await ensureDefaultTenant();
+
+  const dominantUserTenant = await User.aggregate([
+    {
+      $match: {
+        isDeleted: { $ne: true },
+        tenantId: { $type: 'string', $ne: '' },
+      },
+    },
+    { $group: { _id: '$tenantId', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 1 },
+  ]);
+
+  const dominantTenantId = normalizeTenantValue(dominantUserTenant?.[0]?._id);
+  if (dominantTenantId) {
+    const dominantTenant = await Tenant.findOne({ _id: dominantTenantId, isActive: true });
+    if (dominantTenant) return dominantTenant;
+  }
+
+  const earliestActiveTenant = await Tenant.findOne({ isActive: true }).sort({ createdAt: 1 });
+  return earliestActiveTenant || defaultTenant;
+};
+
 export const ensureTenantBySlug = async (
   slugInput: string,
   nameHint?: string

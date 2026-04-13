@@ -14,6 +14,11 @@ export interface IReceiptVoucher extends Document {
   amount: number;
   unappliedAmount: number;
   mode: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque';
+  treasuryAccountId?: mongoose.Types.ObjectId;
+  treasuryAccountName?: string;
+  expectedSettlementDate?: Date;
+  paymentChannelLabel?: string;
+  processorName?: string;
   isAdvance: boolean;
   allocations: IReceiptAllocation[];
   notes?: string;
@@ -49,6 +54,15 @@ const ReceiptVoucherSchema = new Schema<IReceiptVoucher>(
       default: 'cash',
       index: true,
     },
+    treasuryAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TreasuryAccount',
+      index: true,
+    },
+    treasuryAccountName: { type: String, trim: true },
+    expectedSettlementDate: { type: Date, index: true },
+    paymentChannelLabel: { type: String, trim: true, lowercase: true },
+    processorName: { type: String, trim: true },
     isAdvance: { type: Boolean, default: false, index: true },
     allocations: [ReceiptAllocationSchema],
     notes: { type: String, trim: true },
@@ -58,5 +72,6 @@ const ReceiptVoucherSchema = new Schema<IReceiptVoucher>(
 );
 
 ReceiptVoucherSchema.index({ entryDate: 1, mode: 1 });
+ReceiptVoucherSchema.index({ treasuryAccountId: 1, entryDate: 1 });
 
 export const ReceiptVoucher = mongoose.model<IReceiptVoucher>('ReceiptVoucher', ReceiptVoucherSchema);

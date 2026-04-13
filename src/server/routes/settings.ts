@@ -5,6 +5,7 @@ import { AuthenticatedRequest } from '../middleware/auth.js';
 import { writeAuditLog } from '../services/audit.js';
 import { User } from '../models/User.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { decryptBackupPayload, encryptBackupPayload, isBackupEncryptionEnabled } from '../services/backupCrypto.js';
 
 const router = Router();
 const RESERVED_COLLECTION_PREFIX = 'system.';
@@ -89,13 +90,14 @@ router.get('/database-backup', async (req: AuthenticatedRequest, res: Response) 
       metadata: {
         dbName: db.databaseName,
         collections: names.length,
+        encrypted: isBackupEncryptionEnabled(),
       },
     });
 
-    const content = EJSON.stringify(backupPayload, undefined, 2, { relaxed: false });
+    const content = encryptBackupPayload(EJSON.stringify(backupPayload, undefined, 2, { relaxed: false }));
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="sarva-backup-${stamp}.json"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sarva-backup-${stamp}.${isBackupEncryptionEnabled() ? 'enc.json' : 'json'}"`);
     res.status(200).send(content);
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate database backup' });
@@ -159,7 +161,7 @@ router.post('/database-restore', async (req: AuthenticatedRequest, res: Response
     const rawBackupContent = req.body?.backupContent;
     const parsedPayload =
       typeof rawBackupContent === 'string'
-        ? EJSON.parse(rawBackupContent)
+        ? EJSON.parse(decryptBackupPayload(rawBackupContent))
         : req.body?.backupPayload;
 
     if (!parsedPayload || typeof parsedPayload !== 'object') {
@@ -198,6 +200,7 @@ router.post('/database-restore', async (req: AuthenticatedRequest, res: Response
         mode,
         collectionsRestored: result.length,
         collectionNames: result.map((item) => item.collection),
+        encrypted: typeof rawBackupContent === 'string' && rawBackupContent.includes('"algorithm":"aes-256-gcm"'),
       },
     });
 

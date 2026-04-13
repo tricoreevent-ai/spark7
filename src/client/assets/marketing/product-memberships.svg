@@ -1,0 +1,37 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="memberBg" x1="42" y1="30" x2="602" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101827"/>
+      <stop offset="1" stop-color="#161B30"/>
+    </linearGradient>
+    <linearGradient id="memberCard" x1="96" y1="82" x2="304" y2="246" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="memberBadge" x1="388" y1="98" x2="554" y2="246" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#FB7185"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#memberBg)"/>
+  <circle cx="108" cy="78" r="90" fill="#818CF8" fill-opacity="0.07"/>
+  <circle cx="536" cy="296" r="92" fill="#FBBF24" fill-opacity="0.07"/>
+
+  <rect x="84" y="92" width="250" height="164" rx="28" fill="url(#memberCard)" fill-opacity="0.16" stroke="#60A5FA" stroke-opacity="0.48"/>
+  <rect x="108" y="116" width="202" height="116" rx="20" fill="#0B1220" stroke="#24324A"/>
+  <circle cx="158" cy="174" r="28" fill="#0EA5E9" fill-opacity="0.25" stroke="#67E8F9" stroke-width="2"/>
+  <path d="M146 174H170" stroke="#A5F3FC" stroke-width="3" stroke-linecap="round"/>
+  <path d="M158 162V186" stroke="#A5F3FC" stroke-width="3" stroke-linecap="round"/>
+  <rect x="198" y="148" width="88" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="198" y="172" width="64" height="10" rx="5" fill="#64748B"/>
+  <rect x="198" y="194" width="94" height="10" rx="5" fill="#22D3EE" fill-opacity="0.45"/>
+  <path d="M118 244C150 214 186 220 220 244" stroke="#38BDF8" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="382" y="92" width="176" height="176" rx="28" fill="#101827" stroke="#334155"/>
+  <circle cx="470" cy="144" r="40" fill="url(#memberBadge)" fill-opacity="0.22" stroke="#FDE68A" stroke-width="2"/>
+  <path d="M470 120L477 135L494 137L482 149L485 166L470 158L455 166L458 149L446 137L463 135L470 120Z" fill="#FDE68A"/>
+  <path d="M432 222C452 184 504 182 526 220" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+  <path d="M519 208L530 220L518 232" stroke="#38BDF8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M421 232L410 220L422 208" stroke="#F59E0B" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+

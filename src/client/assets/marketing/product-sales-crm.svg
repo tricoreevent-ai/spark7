@@ -1,0 +1,40 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="crmBg" x1="52" y1="24" x2="594" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1627"/>
+      <stop offset="1" stop-color="#151B2F"/>
+    </linearGradient>
+    <linearGradient id="crmProfile" x1="98" y1="90" x2="290" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <linearGradient id="crmPipeline" x1="376" y1="90" x2="542" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#FB7185"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#crmBg)"/>
+  <circle cx="104" cy="74" r="92" fill="#38BDF8" fill-opacity="0.07"/>
+  <circle cx="544" cy="290" r="88" fill="#FB7185" fill-opacity="0.07"/>
+
+  <rect x="84" y="90" width="248" height="178" rx="28" fill="#0B1220" stroke="#223149"/>
+  <rect x="108" y="114" width="112" height="130" rx="18" fill="url(#crmProfile)" fill-opacity="0.15" stroke="#7DD3FC"/>
+  <circle cx="164" cy="154" r="24" fill="#38BDF8" fill-opacity="0.24" stroke="#BAE6FD" stroke-width="2"/>
+  <path d="M144 204C150 188 161 180 176 180C191 180 202 188 208 204" stroke="#BAE6FD" stroke-width="3" stroke-linecap="round"/>
+  <rect x="244" y="126" width="56" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="244" y="150" width="42" height="10" rx="5" fill="#64748B"/>
+  <rect x="244" y="180" width="58" height="46" rx="14" fill="#111827" stroke="#334155"/>
+  <path d="M258 196H288" stroke="#22D3EE" stroke-width="4" stroke-linecap="round"/>
+  <path d="M258 210H280" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M258 224H292" stroke="#FBBF24" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="376" y="90" width="180" height="178" rx="28" fill="#101827" stroke="#334155"/>
+  <rect x="404" y="124" width="46" height="96" rx="20" fill="#1E293B" stroke="#475569"/>
+  <rect x="472" y="104" width="46" height="136" rx="20" fill="url(#crmPipeline)" fill-opacity="0.18" stroke="#FDBA74"/>
+  <path d="M450 172H472" stroke="#38BDF8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M438 148L452 172L438 196" stroke="#38BDF8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="495" cy="150" r="14" fill="#FBBF24"/>
+  <path d="M488 150L493 155L503 144" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="420" y="248" width="92" height="10" rx="5" fill="#F8FAFC" fill-opacity="0.6"/>
+</svg>
+

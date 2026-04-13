@@ -1,6 +1,8 @@
 import {
   APPLICATION_RIGHTS_NOTE,
   DEFAULT_PUBLIC_SUPPORT_EMAIL,
+  PUBLIC_BRAND_NAME,
+  PUBLIC_BRAND_TAGLINE,
   DEFAULT_SITE_URL,
   PRIMARY_SEO_PHRASE,
   PRODUCT_BRAND_NAME,
@@ -9,6 +11,7 @@ import {
   WHATSAPP_DISPLAY_PHONE,
   WHATSAPP_PHONE_E164,
 } from './publicBrand';
+import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
 
 export type PublicSeoRouteKey = 'home' | 'products' | 'about' | 'contact' | 'login' | 'user-manual';
 
@@ -93,6 +96,7 @@ const absoluteUrl = (siteUrl: string, path: string): string => {
 const buildHomeStructuredData = ({ site, canonicalUrl, imageUrl }: PublicSeoBuildContext): JsonLdRecord[] => {
   const organizationId = `${site.siteUrl}/#organization`;
   const softwareId = `${canonicalUrl}#software`;
+  const logoUrl = absoluteUrl(site.siteUrl, DEFAULT_BRAND_LOGO_PATH);
 
   return [
     {
@@ -102,8 +106,10 @@ const buildHomeStructuredData = ({ site, canonicalUrl, imageUrl }: PublicSeoBuil
       name: site.rightsHolderName,
       brand: {
         '@type': 'Brand',
-        name: PRODUCT_BRAND_NAME,
+        name: PUBLIC_BRAND_NAME,
+        logo: logoUrl,
       },
+      logo: logoUrl,
       url: site.siteUrl,
       email: site.businessEmail,
       telephone: `+${site.whatsappPhoneE164}`,
@@ -133,9 +139,9 @@ const buildHomeStructuredData = ({ site, canonicalUrl, imageUrl }: PublicSeoBuil
       applicationCategory: 'BusinessApplication',
       operatingSystem: 'Web',
       description:
-        'Sports complex management platform for bookings, facility scheduling, memberships, secure payments, staff operations, and reporting.',
+        'Sports operations software from Sarva Horizon for bookings, facility scheduling, memberships, secure payments, staff operations, and reporting.',
       url: canonicalUrl,
-      keywords: [PRIMARY_SEO_PHRASE, 'sports facility management software', 'facility booking system'].join(', '),
+      keywords: [PRIMARY_SEO_PHRASE, PUBLIC_BRAND_TAGLINE, 'sports facility management software', 'facility booking system'].join(', '),
       provider: {
         '@id': organizationId,
       },
@@ -148,19 +154,18 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
   home: {
     key: 'home',
     path: '/',
-    title: `${PRIMARY_SEO_PHRASE} | ${PRODUCT_BRAND_NAME}`,
+    title: `${PUBLIC_BRAND_NAME} | ${PUBLIC_BRAND_TAGLINE}`,
     description:
-      'Sports Complex Management Platform for bookings, facility scheduling, memberships, secure payments, staff operations, reporting, and multi-sport event management.',
+      'Sarva Horizon delivers custom application development, software products, digital marketing, branding support, and event management services for growing teams and organizations.',
     keywords: [
-      PRIMARY_SEO_PHRASE,
-      'sports facility management software',
-      'facility booking system',
-      'online court scheduling',
-      'membership management',
-      'secure payment processing',
-      'sports event management application',
-      'multi sport event management software',
-      'Sarva',
+      PUBLIC_BRAND_NAME,
+      PUBLIC_BRAND_TAGLINE,
+      'application development company',
+      'digital marketing services',
+      'event management services',
+      'custom software development',
+      'sports software products',
+      PRODUCT_BRAND_NAME,
     ],
     robots: 'index,follow',
     prerender: true,
@@ -188,15 +193,15 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
   about: {
     key: 'about',
     path: '/about',
-    title: `Sports Facility Management Software | ${PRODUCT_BRAND_NAME}`,
+    title: `About ${PUBLIC_BRAND_NAME} | Products, Marketing, and Event Services`,
     description:
-      'See how Sarva sports facility management software connects bookings, memberships, staff operations, inventory, accounts, reporting, and sports event management.',
+      'Learn how Sarva Horizon brings together application development, software products, digital marketing, creative execution, and event management under one brand.',
     keywords: [
-      'sports facility management software',
-      PRIMARY_SEO_PHRASE,
-      'sports complex software',
-      'facility booking system',
-      'sports event management application',
+      PUBLIC_BRAND_NAME,
+      PUBLIC_BRAND_TAGLINE,
+      'application development',
+      'digital marketing company',
+      'event management company',
       `${PRODUCT_BRAND_NAME} software`,
     ],
     robots: 'index,follow',
@@ -205,14 +210,15 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
   contact: {
     key: 'contact',
     path: '/contact',
-    title: `Book a Demo | ${PRODUCT_BRAND_NAME} ${PRIMARY_SEO_PHRASE}`,
+    title: `Contact ${PUBLIC_BRAND_NAME} | Products, Marketing, and Event Services`,
     description:
-      'Book a demo of Sarva sports complex management platform for facility booking, memberships, secure payments, and daily venue operations.',
+      'Contact Sarva Horizon for software products, custom application development, digital marketing support, or event management services.',
     keywords: [
-      'sports complex management platform demo',
-      'sports facility management software contact',
-      'facility booking system demo',
-      'Sarva contact',
+      `${PUBLIC_BRAND_NAME} contact`,
+      'application development enquiry',
+      'digital marketing consultation',
+      'event management enquiry',
+      `${PRODUCT_BRAND_NAME} demo`,
     ],
     robots: 'index,follow',
     prerender: true,
@@ -220,11 +226,12 @@ export const PUBLIC_SEO_ENTRIES: Record<PublicSeoRouteKey, PublicSeoEntry> = {
   login: {
     key: 'login',
     path: '/login',
-    title: `Client Login | ${PRODUCT_BRAND_NAME}`,
+    title: `Client Login | ${PUBLIC_BRAND_NAME}`,
     description:
-      'Secure login for Sarva client workspaces managing sports complex bookings, memberships, staff operations, payments, and reporting.',
+      'Secure client login for Sarva software workspaces managed under Sarva Horizon.',
     keywords: [
-      'Sarva login',
+      `${PRODUCT_BRAND_NAME} login`,
+      `${PUBLIC_BRAND_NAME} login`,
       'sports complex software login',
       'client workspace access',
       PRIMARY_SEO_PHRASE,
@@ -255,7 +262,7 @@ export const getPublicSeoEntry = (key: PublicSeoRouteKey): PublicSeoEntry => PUB
 
 export const resolvePublicSiteConfig = (input: PublicSiteConfigInput = {}): PublicSiteConfig => ({
   siteUrl: normalizeSiteUrl(input.siteUrl),
-  siteName: PRODUCT_BRAND_NAME,
+  siteName: PUBLIC_BRAND_NAME,
   businessEmail: String(input.businessEmail || DEFAULT_PUBLIC_SUPPORT_EMAIL).trim() || DEFAULT_PUBLIC_SUPPORT_EMAIL,
   businessPhone: String(input.businessPhone || WHATSAPP_DISPLAY_PHONE).trim() || WHATSAPP_DISPLAY_PHONE,
   gaMeasurementId: String(input.gaMeasurementId || '').trim() || undefined,
@@ -313,6 +320,8 @@ export const renderPublicSeoHeadMarkup = (model: PublicSeoModel): string => {
     `    <meta name="description" content="${escapeHtml(model.description)}" />`,
     `    <meta name="keywords" content="${escapeHtml(model.keywordsContent)}" />`,
     `    <meta name="robots" content="${escapeHtml(model.robots)}" />`,
+    `    <link rel="icon" type="image/png" href="${escapeHtml(DEFAULT_BRAND_LOGO_PATH)}" />`,
+    `    <link rel="apple-touch-icon" href="${escapeHtml(DEFAULT_BRAND_LOGO_PATH)}" />`,
     `    <link rel="canonical" href="${escapeHtml(model.canonicalUrl)}" />`,
     `    <meta property="og:type" content="${escapeHtml(model.ogType)}" />`,
     `    <meta property="og:site_name" content="${escapeHtml(model.siteName)}" />`,
@@ -327,7 +336,7 @@ export const renderPublicSeoHeadMarkup = (model: PublicSeoModel): string => {
   if (model.imageUrl) {
     lines.push(`    <meta property="og:image" content="${escapeHtml(model.imageUrl)}" />`);
     lines.push(
-      `    <meta property="og:image:alt" content="${escapeHtml(`${PRODUCT_BRAND_NAME} ${PRIMARY_SEO_PHRASE} dashboard`)}" />`
+      `    <meta property="og:image:alt" content="${escapeHtml(`${model.siteName} brand and services overview`)}" />`
     );
     lines.push(`    <meta name="twitter:image" content="${escapeHtml(model.imageUrl)}" />`);
   }

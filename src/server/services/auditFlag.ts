@@ -1,6 +1,7 @@
 import { AuditFlag, type AuditFlagSeverity, type AuditFlagStatus } from '../models/AuditFlag.js';
 import { deriveStoreScope } from './audit.js';
 import { User } from '../models/User.js';
+import { redactSensitiveData } from '../utils/redaction.js';
 
 interface WriteAuditFlagInput {
   storeKey?: string;
@@ -74,7 +75,7 @@ export const writeAuditFlag = async (input: WriteAuditFlagInput): Promise<void> 
       referenceNo: input.referenceNo,
       message,
       dedupeKey: dedupeKey || undefined,
-      metadata: input.metadata,
+      metadata: redactSensitiveData(input.metadata || {}),
       detectedBy: input.detectedBy,
       detectedAt: input.detectedAt || new Date(),
     });

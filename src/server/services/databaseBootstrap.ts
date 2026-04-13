@@ -11,6 +11,7 @@ import { User } from '../models/User.js';
 import { ensureDefaultRolesAndPermissions } from './rbac.js';
 import { backfillLegacyTenantIds } from './tenant.js';
 import { runWithTenantContext } from './tenantContext.js';
+import { encryptBackupPayload, isBackupEncryptionEnabled } from './backupCrypto.js';
 
 const RESERVED_COLLECTION_PREFIX = 'system.';
 
@@ -123,9 +124,10 @@ const backupDatabaseSnapshot = async (): Promise<string | null> => {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filePath = path.join(backupDir, `db-backup-${db.databaseName}-${stamp}.json`);
+  const extension = isBackupEncryptionEnabled() ? 'enc.json' : 'json';
+  const filePath = path.join(backupDir, `db-backup-${db.databaseName}-${stamp}.${extension}`);
   const serialized = JSON.stringify(EJSON.serialize(payload), null, 2);
-  await fs.writeFile(filePath, serialized, 'utf8');
+  await fs.writeFile(filePath, encryptBackupPayload(serialized), 'utf8');
   return filePath;
 };
 
@@ -179,7 +181,39 @@ const ensureChartAccountIndexes = async (): Promise<void> => {
   }
 };
 
+const ensureNumberSequenceIndexes = async (): Promise<void> => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+
+  try {
+    const collection = db.collection('numbersequences');
+    const indexes = await collection.indexes();
+    const hasLegacyUniqueKey = indexes.some(
+      (index) => index.name === 'key_1' && index.unique === true
+    );
+    if (hasLegacyUniqueKey) {
+      await collection.dropIndex('key_1');
+      console.log('Dropped legacy index numbersequences.key_1');
+    }
+
+    const hasTenantScopedUnique = indexes.some(
+      (index) =>
+        index.name === 'tenantId_1_key_1'
+        && index.unique === true
+        && index.key?.tenantId === 1
+        && index.key?.key === 1
+    );
+    if (!hasTenantScopedUnique) {
+      await collection.createIndex({ tenantId: 1, key: 1 }, { unique: true, name: 'tenantId_1_key_1' });
+      console.log('Created index numbersequences.tenantId_1_key_1');
+    }
+  } catch (error) {
+    console.warn('Number sequence index migration warning:', error);
+  }
+};
+
 const ensureBaselineSequences = async (): Promise<void> => {
+  await ensureNumberSequenceIndexes();
   for (const key of REQUIRED_SEQUENCE_KEYS) {
     await NumberSequence.findOneAndUpdate(
       { key },

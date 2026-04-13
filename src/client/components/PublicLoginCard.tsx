@@ -1,4 +1,5 @@
 import React from 'react';
+import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
 
 type PublicLoginCardProps = {
   loginFormRef?: React.RefObject<HTMLFormElement | null>;
@@ -50,21 +51,24 @@ export const PublicLoginCard: React.FC<PublicLoginCardProps> = ({
   onResetLoading,
 }) => {
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-slate-900/80 p-6 shadow-[0_24px_70px_rgba(2,6,23,0.32)] backdrop-blur-xl sm:p-8">
-      <div className="flex items-start justify-between gap-4">
+    <section className="mx-auto w-full max-w-[760px] rounded-[1.8rem] border border-white/10 bg-slate-900/82 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.32)] backdrop-blur-xl sm:p-6">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">Client Login</p>
-          <h2 className="mt-3 text-2xl font-bold text-white">Sign in to your Sarva workspace</h2>
-          <p className="mt-3 text-sm leading-7 text-slate-300">
-            Use your email, password, and tenant or company identifier to enter the correct client environment.
+          <h2 className="mt-2 text-xl font-bold text-white sm:text-[1.7rem]">Sign in to your client workspace</h2>
+          <p className="mt-2 text-sm leading-7 text-slate-300">
+            Use your email, password, and tenant or company identifier to enter the correct Sarva software environment.
           </p>
         </div>
-        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
-          Secure Access
-        </span>
+        <div className="flex flex-col items-end gap-2">
+          <img src={DEFAULT_BRAND_LOGO_PATH} alt="Sarva Horizon logo" className="h-11 w-11 object-contain drop-shadow-[0_12px_28px_rgba(2,6,23,0.28)] sm:h-12 sm:w-12" />
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100">
+            Secure Access
+          </span>
+        </div>
       </div>
 
-      <form ref={loginFormRef} onSubmit={onSubmit} className="mt-6 space-y-4">
+      <form ref={loginFormRef} onSubmit={onSubmit} className="mt-5 space-y-3.5">
         {pendingOtpChallengeId ? (
           <>
             <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">

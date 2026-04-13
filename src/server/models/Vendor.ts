@@ -5,6 +5,7 @@ export interface IVendor extends Document {
   contact?: string;
   email?: string;
   phone?: string;
+  gstin?: string;
   address?: string;
   ledgerAccountId: mongoose.Types.ObjectId;
   isActive: boolean;
@@ -19,6 +20,7 @@ const VendorSchema = new Schema<IVendor>(
     contact: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     phone: { type: String, trim: true },
+    gstin: { type: String, trim: true, uppercase: true, index: true },
     address: { type: String, trim: true },
     ledgerAccountId: {
       type: mongoose.Schema.Types.ObjectId,

@@ -6,6 +6,7 @@ export interface ISupplierDocument extends Document {
   contactPerson?: string;
   phone?: string;
   email?: string;
+  gstin?: string;
   address?: string;
   notes?: string;
   isActive: boolean;
@@ -43,6 +44,13 @@ const supplierSchema = new Schema<ISupplierDocument>(
       trim: true,
       lowercase: true,
       default: '',
+    },
+    gstin: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: '',
+      index: true,
     },
     address: {
       type: String,

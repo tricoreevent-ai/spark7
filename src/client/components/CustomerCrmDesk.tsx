@@ -20,6 +20,7 @@ interface CustomerRow {
   name: string;
   phone?: string;
   email?: string;
+  gstin?: string;
   profilePhotoUrl?: string;
   customerCategory?: CustomerCategory;
   address?: string;
@@ -320,6 +321,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
     name: '',
     phone: '',
     email: '',
+    gstin: '',
     profilePhotoUrl: '',
     customerCategory: 'individual' as CustomerCategory,
     address: '',
@@ -510,6 +512,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
       name: '',
       phone: '',
       email: '',
+      gstin: '',
       profilePhotoUrl: '',
       customerCategory: 'individual',
       address: '',
@@ -560,6 +563,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
       name: row.name || '',
       phone: row.phone || '',
       email: row.email || '',
+      gstin: row.gstin || '',
       profilePhotoUrl: row.profilePhotoUrl || '',
       customerCategory: (row.customerCategory || 'individual') as CustomerCategory,
       address: row.address || '',
@@ -606,6 +610,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         name: form.name.trim(),
         phone: normalizedPhone,
         email: form.email.trim(),
+        gstin: form.gstin.trim().toUpperCase(),
         profilePhotoUrl: form.profilePhotoUrl,
         customerCategory: form.customerCategory,
         address: form.address.trim(),
@@ -1030,6 +1035,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
                 <input className={inputClass} placeholder="Customer name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
                 <input className={inputClass} placeholder="Phone" value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
                 <input className={inputClass} type="email" placeholder="Email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+                <input className={inputClass} placeholder="GSTIN" value={form.gstin} onChange={(e) => setForm((prev) => ({ ...prev, gstin: e.target.value.toUpperCase() }))} />
                 <select className={inputClass} value={form.customerCategory} onChange={(e) => setForm((prev) => ({ ...prev, customerCategory: e.target.value as CustomerCategory }))}>
                   <option value="individual">Individual</option>
                   <option value="group_team">Group / Team</option>

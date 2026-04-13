@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { ProductCenterInsights } from '../components/ProductCenterInsights';
 import { formatCurrency } from '../config';
 import { Product, useProducts } from '../hooks/useProducts';
 
@@ -147,6 +148,8 @@ export const ProductCenter: React.FC = () => {
           <p className="mt-2 text-xs text-gray-400">Approximate cost-based inventory value</p>
         </div>
       </div>
+
+      <ProductCenterInsights products={products} />
 
       <div className="mb-8 grid grid-cols-1 gap-4 xl:grid-cols-5">
         {quickLinks.map((link) => (

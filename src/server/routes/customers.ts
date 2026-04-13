@@ -6,10 +6,12 @@ import { Sale } from '../models/Sale.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
+import { validateGstinLocally } from '../services/gstCompliance.js';
 
 const router = Router();
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const normalizeGstin = (value: any): string => String(value || '').trim().toUpperCase();
 const normalizeCustomerCategory = (value: any): 'individual' | 'group_team' | 'corporate' | 'regular_member' | 'walk_in' => {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'group_team') return 'group_team';
@@ -85,6 +87,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
         { name: { $regex: String(q), $options: 'i' } },
         { phone: { $regex: String(q), $options: 'i' } },
         { email: { $regex: String(q), $options: 'i' } },
+        { gstin: { $regex: String(q), $options: 'i' } },
         ...(phone ? [{ phone }] : []),
       ];
     }
@@ -243,6 +246,14 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     const normalizedPhone = normalizePhone(phone);
     const normalizedEmail = normalizeEmail(email);
+    const normalizedGstin = normalizeGstin(gstin);
+
+    if (normalizedGstin) {
+      const gstValidation = validateGstinLocally(normalizedGstin);
+      if (!gstValidation.isValid) {
+        return res.status(400).json({ success: false, error: gstValidation.message });
+      }
+    }
 
     if (normalizedPhone) {
       const duplicateByPhone = await Customer.findOne({ phone: normalizedPhone }).select('_id name customerCode');
@@ -270,7 +281,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       email: normalizedEmail || undefined,
       profilePhotoUrl: String(profilePhotoUrl || '').trim(),
       customerCategory: normalizeCustomerCategory(customerCategory),
-      gstin,
+      gstin: normalizedGstin || undefined,
       address,
       accountType: String(accountType) === 'credit' ? 'credit' : 'cash',
       creditLimit: Number(creditLimit || 0),
@@ -506,6 +517,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
 
     const normalizedPhone = req.body.phone !== undefined ? normalizePhone(req.body.phone) : current.phone;
     const normalizedEmail = req.body.email !== undefined ? normalizeEmail(req.body.email) : current.email;
+    const normalizedGstin = req.body.gstin !== undefined ? normalizeGstin(req.body.gstin) : normalizeGstin(current.gstin);
 
     if (normalizedPhone) {
       const duplicateByPhone = await Customer.findOne({
@@ -521,6 +533,13 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       }
     }
 
+    if (normalizedGstin) {
+      const gstValidation = validateGstinLocally(normalizedGstin);
+      if (!gstValidation.isValid) {
+        return res.status(400).json({ success: false, error: gstValidation.message });
+      }
+    }
+
     const updates = {
       ...req.body,
       customerCode: req.body.customerCode ? String(req.body.customerCode).toUpperCase() : current.customerCode,
@@ -528,6 +547,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       email: normalizedEmail || undefined,
       profilePhotoUrl: req.body.profilePhotoUrl !== undefined ? String(req.body.profilePhotoUrl || '').trim() : current.profilePhotoUrl,
       customerCategory: req.body.customerCategory !== undefined ? normalizeCustomerCategory(req.body.customerCategory) : current.customerCategory,
+      gstin: normalizedGstin || undefined,
       accountType: req.body.accountType === 'credit' ? 'credit' : req.body.accountType === 'cash' ? 'cash' : current.accountType,
       creditLimit: req.body.creditLimit !== undefined ? Number(req.body.creditLimit) : current.creditLimit,
       creditDays: req.body.creditDays !== undefined ? Number(req.body.creditDays) : current.creditDays,

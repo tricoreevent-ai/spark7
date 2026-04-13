@@ -41,6 +41,11 @@ export interface ISale {
   roundOffAmount?: number;
   totalAmount: number; // Final amount including GST
   paymentMethod: 'cash' | 'card' | 'upi' | 'cheque' | 'online' | 'bank_transfer';
+  treasuryAccountId?: string;
+  treasuryAccountName?: string;
+  expectedSettlementDate?: Date;
+  paymentChannelLabel?: string;
+  processorName?: string;
   paymentStatus: 'pending' | 'completed' | 'failed';
   saleStatus: 'draft' | 'completed' | 'cancelled' | 'returned';
   outstandingAmount?: number;
@@ -142,6 +147,11 @@ const SaleSchema = new Schema<ISale>(
       enum: ['cash', 'card', 'upi', 'cheque', 'online', 'bank_transfer'],
       default: 'cash',
     },
+    treasuryAccountId: { type: String, trim: true, index: true },
+    treasuryAccountName: { type: String, trim: true },
+    expectedSettlementDate: { type: Date, index: true },
+    paymentChannelLabel: { type: String, trim: true, lowercase: true },
+    processorName: { type: String, trim: true },
     paymentStatus: {
       type: String,
       enum: ['pending', 'completed', 'failed'],

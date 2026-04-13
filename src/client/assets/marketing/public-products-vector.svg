@@ -1,0 +1,65 @@
+<svg width="720" height="440" viewBox="0 0 720 440" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="440" rx="36" fill="#09090B"/>
+  <rect x="22" y="22" width="676" height="396" rx="28" fill="url(#bg)"/>
+  <g opacity="0.82">
+    <path d="M86 122C86 78.9807 120.981 44 164 44H286C329.019 44 364 78.9807 364 122V250C364 293.019 329.019 328 286 328H164C120.981 328 86 293.019 86 250V122Z" fill="#101827" stroke="#374151" stroke-width="2"/>
+    <path d="M414 158C414 114.981 448.981 80 492 80H572C615.019 80 650 114.981 650 158V274C650 317.019 615.019 352 572 352H492C448.981 352 414 317.019 414 274V158Z" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  </g>
+  <path d="M356 188C392 188 410 188 446 188" stroke="#FBBF24" stroke-width="6" stroke-linecap="round" stroke-dasharray="10 10"/>
+  <path d="M356 232C390 232 416 246 446 268" stroke="#38BDF8" stroke-width="6" stroke-linecap="round" stroke-dasharray="10 10"/>
+  <circle cx="506" cy="68" r="52" fill="url(#goldGlow)"/>
+  <circle cx="148" cy="336" r="68" fill="url(#skyGlow)"/>
+  <circle cx="602" cy="344" r="60" fill="url(#roseGlow)"/>
+
+  <rect x="112" y="78" width="226" height="36" rx="18" fill="#172033"/>
+  <circle cx="136" cy="96" r="6" fill="#FBBF24"/>
+  <circle cx="156" cy="96" r="6" fill="#38BDF8"/>
+  <circle cx="176" cy="96" r="6" fill="#F8FAFC" fill-opacity="0.7"/>
+  <rect x="118" y="146" width="98" height="70" rx="18" fill="#172033"/>
+  <rect x="234" y="146" width="82" height="70" rx="18" fill="#172033"/>
+  <rect x="118" y="232" width="198" height="64" rx="18" fill="#172033"/>
+  <path d="M150 184H184" stroke="#FBBF24" stroke-width="10" stroke-linecap="round"/>
+  <path d="M266 174C277.046 174 286 182.954 286 194C286 205.046 277.046 214 266 214C254.954 214 246 205.046 246 194C246 182.954 254.954 174 266 174Z" fill="#38BDF8"/>
+  <rect x="138" y="248" width="120" height="10" rx="5" fill="#F8FAFC"/>
+  <rect x="138" y="268" width="154" height="8" rx="4" fill="#64748B"/>
+  <rect x="138" y="282" width="96" height="8" rx="4" fill="#334155"/>
+  <rect x="118" y="122" width="154" height="10" rx="5" fill="#F8FAFC"/>
+  <rect x="118" y="126" width="194" height="8" rx="4" fill="#64748B" fill-opacity="0.25"/>
+  <text x="118" y="382" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">Sports Complex Platform</text>
+  <text x="118" y="408" fill="#94A3B8" font-family="Arial, sans-serif" font-size="16">Bookings, memberships, CRM, inventory, HR, and accounts.</text>
+
+  <rect x="438" y="112" width="188" height="34" rx="17" fill="#172033"/>
+  <rect x="438" y="168" width="188" height="104" rx="22" fill="#172033"/>
+  <rect x="438" y="288" width="188" height="40" rx="20" fill="#172033"/>
+  <circle cx="470" cy="129" r="7" fill="#FBBF24"/>
+  <path d="M486 129H592" stroke="#F8FAFC" stroke-width="10" stroke-linecap="round"/>
+  <path d="M466 194L500 218L466 242" stroke="#38BDF8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M592 194L558 218L592 242" stroke="#FBBF24" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="529" cy="218" r="22" fill="#1D4ED8"/>
+  <path d="M518 218H540" stroke="#F8FAFC" stroke-width="6" stroke-linecap="round"/>
+  <path d="M529 207V229" stroke="#F8FAFC" stroke-width="6" stroke-linecap="round"/>
+  <rect x="458" y="304" width="66" height="8" rx="4" fill="#F8FAFC"/>
+  <rect x="534" y="304" width="72" height="8" rx="4" fill="#64748B"/>
+  <text x="438" y="382" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="26" font-weight="700">Sports Event Management</text>
+  <text x="438" y="408" fill="#94A3B8" font-family="Arial, sans-serif" font-size="16">Registrations, event schedules, quotations, and organizer control.</text>
+
+  <defs>
+    <linearGradient id="bg" x1="44" y1="36" x2="676" y2="404" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.48" stop-color="#09090B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <radialGradient id="goldGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(506 68) rotate(90) scale(52)">
+      <stop stop-color="#FBBF24" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#FBBF24" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="skyGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(148 336) rotate(90) scale(68)">
+      <stop stop-color="#38BDF8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="roseGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(602 344) rotate(90) scale(60)">
+      <stop stop-color="#FB7185" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#FB7185" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>

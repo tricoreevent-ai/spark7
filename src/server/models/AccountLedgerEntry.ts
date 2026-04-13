@@ -24,6 +24,10 @@ export interface IAccountLedgerEntry extends Document {
   debit: number;
   credit: number;
   runningBalance: number;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
+  deletionReason?: string;
   isReconciled: boolean;
   reconciledAt?: Date;
   createdBy?: string;
@@ -62,6 +66,10 @@ const AccountLedgerEntrySchema = new Schema<IAccountLedgerEntry>(
     debit: { type: Number, default: 0, min: 0 },
     credit: { type: Number, default: 0, min: 0 },
     runningBalance: { type: Number, default: 0 },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: String, index: true },
+    deletionReason: { type: String, trim: true },
     isReconciled: { type: Boolean, default: false, index: true },
     reconciledAt: { type: Date },
     createdBy: { type: String, index: true },
@@ -71,5 +79,16 @@ const AccountLedgerEntrySchema = new Schema<IAccountLedgerEntry>(
 );
 
 AccountLedgerEntrySchema.index({ accountId: 1, entryDate: 1, createdAt: 1 });
+
+const excludeDeletedLedgerEntries = function (this: any) {
+  const filter = this.getFilter ? this.getFilter() : {};
+  if (filter?.isDeleted !== undefined) return;
+  this.where({ isDeleted: { $ne: true } });
+};
+
+AccountLedgerEntrySchema.pre('find', excludeDeletedLedgerEntries);
+AccountLedgerEntrySchema.pre('findOne', excludeDeletedLedgerEntries);
+AccountLedgerEntrySchema.pre('countDocuments', excludeDeletedLedgerEntries);
+AccountLedgerEntrySchema.pre('findOneAndUpdate', excludeDeletedLedgerEntries);
 
 export const AccountLedgerEntry = mongoose.model<IAccountLedgerEntry>('AccountLedgerEntry', AccountLedgerEntrySchema);

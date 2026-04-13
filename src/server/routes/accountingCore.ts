@@ -11,6 +11,7 @@ import { AuditFlag } from '../models/AuditFlag.js';
 import { RecordVersion } from '../models/RecordVersion.js';
 import { writeAuditLog } from '../services/audit.js';
 import { writeAuditFlags } from '../services/auditFlag.js';
+import { writeAuditFlag } from '../services/auditFlag.js';
 import { writeRecordVersion } from '../services/recordVersion.js';
 import {
   buildDashboardSummary,
@@ -30,8 +31,42 @@ import {
   toCsv,
 } from '../services/accountingEngine.js';
 import { ChartAccount } from '../models/ChartAccount.js';
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js';
+import { executeIdempotentRequest } from '../services/idempotency.js';
+import { validateGstinLocally } from '../services/gstCompliance.js';
+import { TreasuryAccount } from '../models/TreasuryAccount.js';
+import { PaymentMethodRouting } from '../models/PaymentMethodRouting.js';
+import {
+  applyManualMatch,
+  autoMatchTreasuryTransactions,
+  buildTreasuryDashboard,
+  createExpenseFromBankTransaction,
+  ensureTreasuryDefaults,
+  importBankFeed,
+  parseTreasuryCsv,
+  recordCashFloatCount,
+  setBankTransactionIgnored,
+  setBookEntryState,
+  upsertPaymentMethodRoute,
+  upsertTreasuryAccount,
+  writeTreasuryAudit,
+} from '../services/treasury.js';
 
 const router = Router();
+const accountingExportRateLimit = createRateLimitMiddleware({
+  bucket: 'accounting-export',
+  limit: 8,
+  windowMs: 60_000,
+  message: 'Too many accounting exports were requested in a short time. Please wait a minute before exporting again.',
+  auditFlagType: 'accounting_export_rate_limit',
+});
+const accountingIntegrityRateLimit = createRateLimitMiddleware({
+  bucket: 'accounting-integrity-check',
+  limit: 6,
+  windowMs: 60_000,
+  message: 'Too many integrity checks were requested in a short time. Please wait a minute and retry.',
+  auditFlagType: 'accounting_integrity_rate_limit',
+});
 
 const isWriterRole = (req: AuthenticatedRequest): boolean => {
   const role = String(req.userRole || '').trim().toLowerCase();
@@ -51,6 +86,8 @@ const canUnlockFinancialPeriod = (req: AuthenticatedRequest): boolean => {
 
 const round2 = (value: number): number => Number(Number(value || 0).toFixed(2));
 const toIso = (value?: Date): string | undefined => (value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : undefined);
+const extractIdempotencyKey = (req: AuthenticatedRequest): string =>
+  String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
 
 const toDateWindow = (startDate?: string, endDate?: string): { $gte?: Date; $lte?: Date } | undefined => {
   if (!startDate && !endDate) return undefined;
@@ -130,6 +167,17 @@ const toClientErrorMessage = (error: unknown, fallback: string): string => {
   if (!raw) return fallback;
   const lower = raw.toLowerCase();
 
+  if ((lower.includes('e11000') || lower.includes('duplicate key')) && lower.includes('treasuryaccounts')) {
+    if (lower.includes('displayname')) {
+      return 'A treasury account with this name already exists. Use a different label like "HDFC Sports Store" or edit the existing account instead.';
+    }
+    return 'A duplicate treasury account was detected. Refresh the page and check whether this bank or cash account already exists.';
+  }
+
+  if ((lower.includes('e11000') || lower.includes('duplicate key')) && lower.includes('paymentmethodroutings')) {
+    return 'A payment route already exists for the same payment method and channel label. Edit the existing route or change the channel label.';
+  }
+
   if (lower.includes('plan executor error during findandmodify')) {
     return 'A database save conflict occurred. Please refresh and retry.';
   }
@@ -143,6 +191,34 @@ const toClientErrorMessage = (error: unknown, fallback: string): string => {
 
   if (lower.includes('e11000') || lower.includes('duplicate key')) {
     return 'Duplicate record detected. Please verify existing data and try again.';
+  }
+
+  if (lower.includes('treasury account name is required')) {
+    return 'Treasury account name is required. Enter the bank or cash label that users will choose during collection and reporting.';
+  }
+
+  if (lower.includes('bank account number is required')) {
+    return 'Bank account number is required for a bank treasury account. Enter the real account number once. Later edits can leave the number blank to keep the saved masked value.';
+  }
+
+  if (lower.includes('bank account number must contain at least 4 digits')) {
+    return 'Bank account number is too short. Enter at least the last 4 digits so the bank account can be identified correctly.';
+  }
+
+  if (lower.includes('selected treasury account was not found')) {
+    return 'The treasury account you tried to edit was not found. It may have been deleted or changed by another user. Refresh the treasury list and try again.';
+  }
+
+  if (lower.includes('selected payment route was not found')) {
+    return 'The payment route you tried to edit no longer exists. Refresh the route list and try again.';
+  }
+
+  if (lower.includes('treasury account is required for payment routing')) {
+    return 'Payment route setup is incomplete. Select the bank or cash account that should receive this route, then save again.';
+  }
+
+  if (lower.includes('treasury account not found')) {
+    return 'The selected treasury account is not available anymore. Refresh the treasury setup and choose an active account.';
   }
 
   if (lower.includes('validation failed')) {
@@ -274,28 +350,45 @@ router.get('/invoices', async (req: AuthenticatedRequest, res: Response) => {
 router.post('/invoices', async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!requireWriter(req, res)) return;
-    const result = await createInvoice({
-      invoiceDate: req.body?.invoiceDate ? new Date(req.body.invoiceDate) : new Date(),
-      dueDate: req.body?.dueDate ? new Date(req.body.dueDate) : undefined,
-      customerId: req.body?.customerId,
-      customerName: String(req.body?.customerName || '').trim(),
-      referenceType: req.body?.referenceType || 'manual',
-      referenceId: req.body?.referenceId,
-      description: req.body?.description,
-      baseAmount: Number(req.body?.baseAmount || 0),
-      gstAmount: Number(req.body?.gstAmount || 0),
-      gstRate: Number(req.body?.gstRate || 0),
-      gstTreatment: req.body?.gstTreatment || 'none',
-      paymentAmount: Number(req.body?.paymentAmount || 0),
-      paymentMode: req.body?.paymentMode || 'cash',
-      revenueAccountKey: req.body?.revenueAccountKey || 'booking_revenue',
+    const execution = await executeIdempotentRequest({
+      scope: 'accounting_invoice_create',
+      key: extractIdempotencyKey(req),
+      method: 'POST',
+      route: '/api/accounting/core/invoices',
+      body: req.body,
       createdBy: req.userId,
-      metadata: {
-        ip: req.ip,
-        userAgent: req.get('user-agent'),
+      execute: async () => {
+        const result = await createInvoice({
+          invoiceDate: req.body?.invoiceDate ? new Date(req.body.invoiceDate) : new Date(),
+          dueDate: req.body?.dueDate ? new Date(req.body.dueDate) : undefined,
+          customerId: req.body?.customerId,
+          customerName: String(req.body?.customerName || '').trim(),
+          referenceType: req.body?.referenceType || 'manual',
+          referenceId: req.body?.referenceId,
+          description: req.body?.description,
+          baseAmount: Number(req.body?.baseAmount || 0),
+          gstAmount: Number(req.body?.gstAmount || 0),
+          gstRate: Number(req.body?.gstRate || 0),
+          gstTreatment: req.body?.gstTreatment || 'none',
+          paymentAmount: Number(req.body?.paymentAmount || 0),
+          paymentMode: req.body?.paymentMode || 'cash',
+          revenueAccountKey: req.body?.revenueAccountKey || 'booking_revenue',
+          createdBy: req.userId,
+          metadata: {
+            ip: req.ip,
+            userAgent: req.get('user-agent'),
+          },
+        });
+        return {
+          status: 201,
+          body: { success: true, data: result, message: 'Invoice created' },
+        };
       },
     });
-    res.status(201).json({ success: true, data: result, message: 'Invoice created' });
+    if (execution.replayed) {
+      res.setHeader('X-Idempotent-Replayed', 'true');
+    }
+    res.status(execution.status).json(execution.body);
   } catch (error: any) {
     res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to create invoice') });
   }
@@ -304,19 +397,36 @@ router.post('/invoices', async (req: AuthenticatedRequest, res: Response) => {
 router.post('/invoices/:id/payments', async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!requireWriter(req, res)) return;
-    const result = await recordPayment({
-      invoiceId: String(req.params.id),
-      amount: Number(req.body?.amount || 0),
-      mode: req.body?.mode || req.body?.paymentMode || 'cash',
-      description: req.body?.description,
+    const execution = await executeIdempotentRequest({
+      scope: `accounting_invoice_payment:${String(req.params.id)}`,
+      key: extractIdempotencyKey(req),
+      method: 'POST',
+      route: `/api/accounting/core/invoices/${String(req.params.id)}/payments`,
+      body: req.body,
       createdBy: req.userId,
-      paymentDate: req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date(),
-      metadata: {
-        ip: req.ip,
-        userAgent: req.get('user-agent'),
+      execute: async () => {
+        const result = await recordPayment({
+          invoiceId: String(req.params.id),
+          amount: Number(req.body?.amount || 0),
+          mode: req.body?.mode || req.body?.paymentMode || 'cash',
+          description: req.body?.description,
+          createdBy: req.userId,
+          paymentDate: req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date(),
+          metadata: {
+            ip: req.ip,
+            userAgent: req.get('user-agent'),
+          },
+        });
+        return {
+          status: 201,
+          body: { success: true, data: result, message: 'Payment recorded' },
+        };
       },
     });
-    res.status(201).json({ success: true, data: result, message: 'Payment recorded' });
+    if (execution.replayed) {
+      res.setHeader('X-Idempotent-Replayed', 'true');
+    }
+    res.status(execution.status).json(execution.body);
   } catch (error: any) {
     res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to record payment') });
   }
@@ -420,6 +530,7 @@ router.post('/vendors', async (req: AuthenticatedRequest, res: Response) => {
       contact: req.body?.contact,
       email: req.body?.email,
       phone: req.body?.phone,
+      gstin: req.body?.gstin,
       address: req.body?.address,
       createdBy: req.userId,
       metadata: {
@@ -461,6 +572,14 @@ router.put('/vendors/:id', async (req: AuthenticatedRequest, res: Response) => {
     vendor.contact = String(req.body?.contact ?? vendor.contact ?? '').trim() || undefined;
     vendor.phone = String(req.body?.phone ?? vendor.phone ?? '').trim() || undefined;
     vendor.email = String(req.body?.email ?? vendor.email ?? '').trim().toLowerCase() || undefined;
+    const nextGstin = String(req.body?.gstin ?? vendor.gstin ?? '').trim().toUpperCase();
+    if (nextGstin) {
+      const gstValidation = validateGstinLocally(nextGstin);
+      if (!gstValidation.isValid) {
+        return res.status(400).json({ success: false, error: gstValidation.message });
+      }
+    }
+    vendor.gstin = nextGstin || undefined;
     vendor.address = String(req.body?.address ?? vendor.address ?? '').trim() || undefined;
     await vendor.save();
 
@@ -693,6 +812,244 @@ router.post('/reconciliation/import', async (req: AuthenticatedRequest, res: Res
   }
 });
 
+router.get('/treasury/accounts', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ensureTreasuryDefaults();
+    const rows = await TreasuryAccount.find({}).sort({ accountType: 1, isPrimary: -1, displayName: 1 });
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to load treasury accounts') });
+  }
+});
+
+router.post('/treasury/accounts', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await upsertTreasuryAccount({
+      accountType: String(req.body?.accountType || 'bank') === 'cash_float' ? 'cash_float' : 'bank',
+      displayName: String(req.body?.displayName || '').trim(),
+      bankName: req.body?.bankName,
+      accountNumber: req.body?.accountNumber,
+      branchName: req.body?.branchName,
+      ifscCode: req.body?.ifscCode,
+      walletProvider: req.body?.walletProvider,
+      processorName: req.body?.processorName,
+      isPrimary: Boolean(req.body?.isPrimary),
+      openingBalance: Number(req.body?.openingBalance || 0),
+      notes: req.body?.notes,
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_account_created', entityType: 'treasury_account', entityId: row?._id?.toString(), userId: req.userId });
+    res.status(201).json({ success: true, data: row, message: 'Treasury account saved' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to save treasury account') });
+  }
+});
+
+router.put('/treasury/accounts/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await upsertTreasuryAccount({
+      id: String(req.params.id),
+      accountType: String(req.body?.accountType || 'bank') === 'cash_float' ? 'cash_float' : 'bank',
+      displayName: String(req.body?.displayName || '').trim(),
+      bankName: req.body?.bankName,
+      accountNumber: req.body?.accountNumber,
+      branchName: req.body?.branchName,
+      ifscCode: req.body?.ifscCode,
+      walletProvider: req.body?.walletProvider,
+      processorName: req.body?.processorName,
+      isPrimary: Boolean(req.body?.isPrimary),
+      openingBalance: Number(req.body?.openingBalance || 0),
+      notes: req.body?.notes,
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_account_updated', entityType: 'treasury_account', entityId: row?._id?.toString(), userId: req.userId });
+    res.json({ success: true, data: row, message: 'Treasury account updated' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to update treasury account') });
+  }
+});
+
+router.get('/treasury/payment-routes', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ensureTreasuryDefaults();
+    const rows = await PaymentMethodRouting.find({}).populate('treasuryAccountId', 'displayName accountType isPrimary');
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to load payment routing') });
+  }
+});
+
+router.post('/treasury/payment-routes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await upsertPaymentMethodRoute({
+      paymentMethod: req.body?.paymentMethod,
+      treasuryAccountId: String(req.body?.treasuryAccountId || ''),
+      channelLabel: req.body?.channelLabel,
+      processorName: req.body?.processorName,
+      settlementDays: Number(req.body?.settlementDays || 0),
+      feePercent: Number(req.body?.feePercent || 0),
+      fixedFee: Number(req.body?.fixedFee || 0),
+      isDefault: Boolean(req.body?.isDefault ?? true),
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'payment_route_created', entityType: 'payment_method_route', entityId: row?._id?.toString(), userId: req.userId });
+    res.status(201).json({ success: true, data: row, message: 'Payment route saved' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to save payment route') });
+  }
+});
+
+router.put('/treasury/payment-routes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await upsertPaymentMethodRoute({
+      id: String(req.params.id),
+      paymentMethod: req.body?.paymentMethod,
+      treasuryAccountId: String(req.body?.treasuryAccountId || ''),
+      channelLabel: req.body?.channelLabel,
+      processorName: req.body?.processorName,
+      settlementDays: Number(req.body?.settlementDays || 0),
+      feePercent: Number(req.body?.feePercent || 0),
+      fixedFee: Number(req.body?.fixedFee || 0),
+      isDefault: Boolean(req.body?.isDefault ?? true),
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'payment_route_updated', entityType: 'payment_method_route', entityId: row?._id?.toString(), userId: req.userId });
+    res.json({ success: true, data: row, message: 'Payment route updated' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to update payment route') });
+  }
+});
+
+router.get('/treasury/dashboard', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = await buildTreasuryDashboard({
+      startDate: req.query?.startDate as string | undefined,
+      endDate: req.query?.endDate as string | undefined,
+    });
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to load reconciliation dashboard') });
+  }
+});
+
+router.post('/treasury/bank-feed/import', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const treasuryAccountId = String(req.body?.treasuryAccountId || '').trim();
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : parseTreasuryCsv(String(req.body?.csvText || ''));
+    const created = await importBankFeed({ treasuryAccountId, rows, createdBy: req.userId });
+    await writeTreasuryAudit({
+      action: 'bank_feed_imported',
+      entityType: 'bank_feed_import',
+      userId: req.userId,
+      metadata: { treasuryAccountId, importedRows: created.length },
+    });
+    res.status(201).json({ success: true, data: created, message: `Imported ${created.length} bank row(s)` });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to import bank feed') });
+  }
+});
+
+router.post('/treasury/auto-match', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const data = await autoMatchTreasuryTransactions({
+      treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
+      startDate: req.body?.startDate,
+      endDate: req.body?.endDate,
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_auto_match', entityType: 'bank_reconciliation', userId: req.userId, metadata: { matchedCount: data.length } });
+    res.json({ success: true, data, message: `Auto-matched ${data.length} bank row(s)` });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to auto-match transactions') });
+  }
+});
+
+router.post('/treasury/bank-transactions/:id/match', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const result = await applyManualMatch({
+      bankTransactionId: String(req.params.id),
+      bookEntryKeys: Array.isArray(req.body?.bookEntryKeys) ? req.body.bookEntryKeys.map((row: any) => String(row)) : [],
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_manual_match', entityType: 'bank_reconciliation', entityId: String(req.params.id), userId: req.userId });
+    res.json({ success: true, data: result, message: 'Bank transaction matched' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to match bank transaction') });
+  }
+});
+
+router.post('/treasury/bank-transactions/:id/ignore', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await setBankTransactionIgnored({
+      bankTransactionId: String(req.params.id),
+      ignored: Boolean(req.body?.ignored ?? true),
+    });
+    await writeTreasuryAudit({ action: 'treasury_bank_txn_ignored', entityType: 'bank_feed_transaction', entityId: String(req.params.id), userId: req.userId, metadata: { ignored: row.isIgnored } });
+    res.json({ success: true, data: row, message: row.isIgnored ? 'Bank transaction ignored' : 'Bank transaction restored' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to update bank transaction state') });
+  }
+});
+
+router.post('/treasury/book-entry/state', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await setBookEntryState({
+      treasuryAccountId: String(req.body?.treasuryAccountId || ''),
+      bookEntryKey: String(req.body?.bookEntryKey || ''),
+      action: String(req.body?.action || 'ignore') === 'manual_deposit' ? 'manual_deposit' : 'ignore',
+      notes: req.body?.notes,
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_book_state_set', entityType: 'book_entry_state', entityId: row?._id?.toString(), userId: req.userId });
+    res.json({ success: true, data: row, message: 'Book entry state saved' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to save book entry state') });
+  }
+});
+
+router.post('/treasury/bank-transactions/:id/create-expense', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await createExpenseFromBankTransaction({
+      bankTransactionId: String(req.params.id),
+      category: String(req.body?.category || 'Bank Expense').trim(),
+      narration: req.body?.narration,
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'treasury_bank_txn_expensed', entityType: 'daybook_entry', entityId: row?._id?.toString(), userId: req.userId });
+    res.status(201).json({ success: true, data: row, message: 'Expense created and matched' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to create expense from bank transaction') });
+  }
+});
+
+router.post('/treasury/cash-counts', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const row = await recordCashFloatCount({
+      treasuryAccountId: String(req.body?.treasuryAccountId || ''),
+      countDate: req.body?.countDate,
+      physicalAmount: Number(req.body?.physicalAmount || 0),
+      notes: req.body?.notes,
+      createAdjustment: Boolean(req.body?.createAdjustment),
+      createdBy: req.userId,
+    });
+    await writeTreasuryAudit({ action: 'cash_float_count_recorded', entityType: 'cash_float_count', entityId: row?._id?.toString(), userId: req.userId, metadata: { variance: row?.varianceAmount } });
+    res.status(201).json({ success: true, data: row, message: 'Cash count saved' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to save cash count') });
+  }
+});
+
 router.get('/audit/flags', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { status = 'open', severity, module = 'accounting', limit = 200, skip = 0 } = req.query;
@@ -724,7 +1081,7 @@ router.get('/audit/flags', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-router.get('/audit/integrity-check', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const entryDateRange = toDateWindow(req.query?.startDate as string, req.query?.endDate as string);
     const invoiceDateRange = toDateWindow(req.query?.startDate as string, req.query?.endDate as string);
@@ -1130,7 +1487,7 @@ router.get('/audit/integrity-check', async (req: AuthenticatedRequest, res: Resp
   }
 });
 
-router.get('/exports/:reportType', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/exports/:reportType', accountingExportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const reportType = String(req.params.reportType || '').toLowerCase();
     const startDate = req.query?.startDate ? new Date(String(req.query.startDate)) : undefined;
@@ -1225,6 +1582,24 @@ router.get('/exports/:reportType', async (req: AuthenticatedRequest, res: Respon
     }
 
     const csv = toCsv(rows);
+    if (reportType === 'invoices' && rows.length > 100) {
+      await writeAuditFlag({
+        module: 'security',
+        flagType: 'bulk_invoice_export',
+        severity: 'critical',
+        message: `Invoice export exceeded 100 rows (${rows.length})`,
+        dedupeKey: `bulk_invoice_export:${String(req.userId || req.ip || 'anonymous')}:${new Date().toISOString().slice(0, 16)}`,
+        detectedBy: req.userId,
+        metadata: {
+          reportType,
+          rowCount: rows.length,
+          startDate: startDate ? startDate.toISOString() : undefined,
+          endDate: endDate ? endDate.toISOString() : undefined,
+          ip: req.ip,
+          userAgent: req.get('user-agent'),
+        },
+      });
+    }
     await writeAuditLog({
       module: 'accounting',
       action: 'report_exported',

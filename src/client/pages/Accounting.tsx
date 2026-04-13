@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { CardTabs } from '../components/CardTabs';
+import { AccountingGstWorkspace } from '../components/AccountingGstWorkspace';
+import { AccountingTreasuryWorkspace } from '../components/AccountingTreasuryWorkspace';
 import { ReportDataTable } from '../components/ReportDataTable';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
@@ -9,7 +11,7 @@ import { apiUrl } from '../utils/api';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
 import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
 
-type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'ledger' | 'reports';
+type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'treasury' | 'ledger' | 'gst' | 'reports';
 type MastersTabKey = 'vendors' | 'assets' | 'periods';
 type InvoicesTabKey = 'invoice_entry' | 'expense_entry' | 'invoice_list';
 type PaymentsTabKey = 'salary_entry' | 'contract_entry' | 'history';
@@ -120,7 +122,9 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'expenses', label: 'Expenses & Income' },
   { key: 'vouchers', label: 'Vouchers' },
   { key: 'books', label: 'Cash & Bank Book' },
+  { key: 'treasury', label: 'Treasury & Banks' },
   { key: 'ledger', label: 'Chart & Ledger' },
+  { key: 'gst', label: 'GST & Filing' },
   { key: 'reports', label: 'Reports' },
 ];
 const masterTabs: Array<{ key: MastersTabKey; label: string }> = [
@@ -260,6 +264,7 @@ const createVendorFormState = () => ({
   contact: '',
   phone: '',
   email: '',
+  gstin: '',
   address: '',
 });
 
@@ -468,6 +473,7 @@ export const Accounting: React.FC = () => {
   const [bankCsvText, setBankCsvText] = useState('');
   const [bankImportResult, setBankImportResult] = useState<any>(null);
   const [periodYear, setPeriodYear] = useState(new Date().getFullYear());
+  const [treasuryRefreshKey, setTreasuryRefreshKey] = useState(0);
   const isSuperAdmin = currentUserRole === 'super_admin';
 
   const [dayBookDate, setDayBookDate] = useState(new Date().toISOString().slice(0, 10));
@@ -707,6 +713,13 @@ export const Accounting: React.FC = () => {
     throw new Error(`Request failed for ${method} ${path}.`);
   };
 
+  const createIdempotencyKey = (prefix: string) => {
+    const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `${prefix}-${randomPart}`;
+  };
+
   useEffect(() => {
     const loadCurrentUserRole = async () => {
       try {
@@ -944,6 +957,10 @@ export const Accounting: React.FC = () => {
   }, [periodYear]);
 
   const handleRefreshCurrentTab = () => {
+    if (activeTab === 'treasury') {
+      setTreasuryRefreshKey((prev) => prev + 1);
+      return;
+    }
     withLoading(async () => {
       await loadTabData(activeTab);
     });
@@ -1257,10 +1274,13 @@ export const Accounting: React.FC = () => {
   const submitInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     await withLoading(async () => {
+      const idempotencyKey = createIdempotencyKey('accounting-invoice');
       await apiJson('/api/accounting/core/invoices', {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
           ...invoiceForm,
+          idempotencyKey,
           baseAmount: Number(invoiceForm.baseAmount || 0),
           gstAmount: Number(invoiceForm.gstAmount || 0),
           paymentAmount: Number(invoiceForm.paymentAmount || 0),
@@ -1283,9 +1303,11 @@ export const Accounting: React.FC = () => {
     });
     if (!amount) return;
     await withLoading(async () => {
+      const idempotencyKey = createIdempotencyKey(`invoice-payment-${invoiceId}`);
       await apiJson(`/api/accounting/core/invoices/${invoiceId}/payments`, {
         method: 'POST',
-        body: JSON.stringify({ amount: Number(amount), mode: invoiceForm.paymentMode }),
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ amount: Number(amount), mode: invoiceForm.paymentMode, idempotencyKey }),
       });
       setMessage('Payment posted against invoice');
       await refreshDashboard();
@@ -1418,10 +1440,22 @@ export const Accounting: React.FC = () => {
   };
 
   const deleteDaybook = async (row: DayBookEntry) => {
-    if (!(await showConfirmDialog('Cancel this entry?', { title: 'Cancel Entry', confirmText: 'Cancel Entry' }))) return;
+    if (!(await showConfirmDialog('Archive this entry from active accounting views?', { title: 'Archive Entry', confirmText: 'Archive Entry' }))) return;
+    const reason = await showPromptDialog('Enter the archive reason for this entry.', {
+      title: 'Archive Reason',
+      label: 'Reason',
+      defaultValue: 'Archived from accounting console',
+      confirmText: 'Archive Entry',
+      inputType: 'textarea',
+      required: true,
+    });
+    if (!reason) return;
     await withLoading(async () => {
-      await apiJson(`/api/accounting/day-book/entry/${row._id}`, { method: 'DELETE' });
-      setMessage('Entry cancelled');
+      await apiJson(`/api/accounting/day-book/entry/${row._id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      setMessage('Entry archived');
       await refreshPayments();
       await refreshBooks();
       await refreshReports();
@@ -1477,6 +1511,7 @@ export const Accounting: React.FC = () => {
       contact: row.contact || '',
       phone: row.phone || '',
       email: row.email || '',
+      gstin: row.gstin || '',
       address: row.address || '',
     });
     setMastersTab('vendors');
@@ -1822,14 +1857,26 @@ export const Accounting: React.FC = () => {
 
   const deleteVoucher = async (row: VoucherRow) => {
     if (!isSuperAdmin) {
-      setError('Only super admin can delete vouchers.');
+      setError('Only super admin can archive vouchers.');
       return;
     }
-    if (!(await showConfirmDialog(`Delete voucher ${row.voucherNumber}? This cannot be undone.`, { title: 'Delete Voucher', confirmText: 'Delete', severity: 'warning' }))) return;
+    if (!(await showConfirmDialog(`Archive voucher ${row.voucherNumber} from active accounting views?`, { title: 'Archive Voucher', confirmText: 'Archive', severity: 'warning' }))) return;
+    const reason = await showPromptDialog('Enter the archive reason for this voucher.', {
+      title: 'Archive Reason',
+      label: 'Reason',
+      defaultValue: `Archived voucher ${row.voucherNumber}`,
+      confirmText: 'Archive Voucher',
+      inputType: 'textarea',
+      required: true,
+    });
+    if (!reason) return;
 
     await withLoading(async () => {
-      await apiJson(`/api/accounting/vouchers/${row._id}`, { method: 'DELETE' });
-      setMessage('Voucher deleted');
+      await apiJson(`/api/accounting/vouchers/${row._id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      setMessage('Voucher archived');
       await refreshVouchers();
       await refreshBooks();
       await refreshReports();
@@ -2484,6 +2531,7 @@ export const Accounting: React.FC = () => {
                 <input className={inputClass} placeholder="Contact Person" value={vendorForm.contact} onChange={(e) => setVendorForm((prev) => ({ ...prev, contact: e.target.value }))} />
                 <input className={inputClass} placeholder="Phone" value={vendorForm.phone} onChange={(e) => setVendorForm((prev) => ({ ...prev, phone: e.target.value }))} />
                 <input className={inputClass} placeholder="Email" value={vendorForm.email} onChange={(e) => setVendorForm((prev) => ({ ...prev, email: e.target.value }))} />
+                <input className={inputClass} placeholder="GSTIN" value={vendorForm.gstin} onChange={(e) => setVendorForm((prev) => ({ ...prev, gstin: e.target.value.toUpperCase() }))} />
                 <textarea className={inputClass} rows={3} placeholder="Address" value={vendorForm.address} onChange={(e) => setVendorForm((prev) => ({ ...prev, address: e.target.value }))} />
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={buttonClass}>
@@ -2502,12 +2550,13 @@ export const Accounting: React.FC = () => {
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
                 <h3 className="mb-2 text-white font-semibold">Vendor Balances</h3>
                 <table className="min-w-full text-sm">
-                  <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Vendor</th><th className="px-2 py-1 text-left">Contact</th><th className="px-2 py-1 text-left">Email</th><th className="px-2 py-1 text-left">Total Payable</th><th className="px-2 py-1 text-left">Paid</th><th className="px-2 py-1 text-left">Balance</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
+                  <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Vendor</th><th className="px-2 py-1 text-left">Contact</th><th className="px-2 py-1 text-left">GSTIN</th><th className="px-2 py-1 text-left">Email</th><th className="px-2 py-1 text-left">Total Payable</th><th className="px-2 py-1 text-left">Paid</th><th className="px-2 py-1 text-left">Balance</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
                   <tbody>
                     {vendors.map((row) => (
                       <tr key={row._id} className="border-t border-white/10">
                         <td className="px-2 py-1">{row.name}</td>
                         <td className="px-2 py-1">{row.contact || row.phone || '-'}</td>
+                        <td className="px-2 py-1">{row.gstin || '-'}</td>
                         <td className="px-2 py-1">{row.email || '-'}</td>
                         <td className="px-2 py-1">{formatCurrency(row.totalPayable || 0)}</td>
                         <td className="px-2 py-1">{formatCurrency(row.paid || 0)}</td>
@@ -2520,7 +2569,7 @@ export const Accounting: React.FC = () => {
                         </td>
                       </tr>
                     ))}
-                    {!vendors.length && <tr><td colSpan={7} className="px-2 py-3 text-center text-gray-400">No vendors available yet.</td></tr>}
+                    {!vendors.length && <tr><td colSpan={8} className="px-2 py-3 text-center text-gray-400">No vendors available yet.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -2937,7 +2986,7 @@ export const Accounting: React.FC = () => {
                         </button>
                         <button className="inline-flex items-center gap-1 text-red-300 hover:text-red-200" onClick={() => deleteDaybook(row)}>
                           <CancelIcon />
-                          Cancel
+                          Archive
                         </button>
                       </td>
                     </tr>
@@ -3206,7 +3255,7 @@ export const Accounting: React.FC = () => {
                         {isSuperAdmin && (
                           <button className="inline-flex items-center gap-1 text-red-300 hover:text-red-200" onClick={() => deleteVoucher(row)}>
                             <CancelIcon />
-                            Delete
+                          Archive
                           </button>
                         )}
                       </td>
@@ -3458,6 +3507,14 @@ export const Accounting: React.FC = () => {
         </div>
       )}
 
+      {activeTab === 'treasury' && (
+        <AccountingTreasuryWorkspace
+          startDate={startDate}
+          endDate={endDate}
+          refreshKey={treasuryRefreshKey}
+        />
+      )}
+
       {activeTab === 'ledger' && (
         <div className="space-y-4">
           <CardTabs
@@ -3533,6 +3590,8 @@ export const Accounting: React.FC = () => {
           )}
         </div>
       )}
+
+      {activeTab === 'gst' && <AccountingGstWorkspace />}
 
       {activeTab === 'reports' && (
         <div className="space-y-4">

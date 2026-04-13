@@ -1,0 +1,38 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="peopleBg" x1="56" y1="30" x2="594" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F1728"/>
+      <stop offset="1" stop-color="#121A2C"/>
+    </linearGradient>
+    <linearGradient id="peopleGps" x1="98" y1="86" x2="292" y2="252" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="peopleClock" x1="390" y1="92" x2="548" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#FB7185"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="url(#peopleBg)"/>
+  <circle cx="98" cy="78" r="86" fill="#34D399" fill-opacity="0.07"/>
+  <circle cx="542" cy="292" r="92" fill="#FBBF24" fill-opacity="0.07"/>
+
+  <rect x="84" y="92" width="252" height="176" rx="28" fill="#0B1220" stroke="#24324A"/>
+  <path d="M160 236C126 196 110 170 110 146C110 114 135 92 166 92C197 92 222 114 222 146C222 170 206 196 172 236L166 244L160 236Z" fill="url(#peopleGps)" fill-opacity="0.18" stroke="#6EE7B7" stroke-width="2"/>
+  <circle cx="166" cy="146" r="24" fill="#111827" stroke="#A7F3D0" stroke-width="2"/>
+  <path d="M156 146H176" stroke="#A7F3D0" stroke-width="3" stroke-linecap="round"/>
+  <rect x="240" y="122" width="64" height="12" rx="6" fill="#CBD5E1"/>
+  <rect x="240" y="146" width="48" height="10" rx="5" fill="#64748B"/>
+  <rect x="240" y="176" width="64" height="52" rx="16" fill="#111827" stroke="#334155"/>
+  <path d="M258 192H286" stroke="#22D3EE" stroke-width="4" stroke-linecap="round"/>
+  <path d="M258 208H280" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="384" y="92" width="176" height="176" rx="28" fill="#101827" stroke="#334155"/>
+  <circle cx="472" cy="154" r="44" fill="url(#peopleClock)" fill-opacity="0.18" stroke="#FDE68A" stroke-width="2"/>
+  <path d="M472 128V156L490 168" stroke="#FDE68A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M420 226H524" stroke="#334155" stroke-width="2"/>
+  <rect x="426" y="206" width="24" height="20" rx="8" fill="#38BDF8" fill-opacity="0.32"/>
+  <rect x="458" y="192" width="24" height="34" rx="8" fill="#34D399" fill-opacity="0.38"/>
+  <rect x="490" y="178" width="24" height="48" rx="8" fill="#FBBF24" fill-opacity="0.42"/>
+</svg>
+

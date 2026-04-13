@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import mongoose from 'mongoose';
 import { ChartAccount, type AccountSubType, type AccountType, type IChartAccount } from '../models/ChartAccount.js';
 import { AccountLedgerEntry, type LedgerVoucherType } from '../models/AccountLedgerEntry.js';
@@ -11,6 +12,7 @@ import { Vendor, type IVendor } from '../models/Vendor.js';
 import { generateNumber } from './numbering.js';
 import { writeAuditLog } from './audit.js';
 import { writeRecordVersion } from './recordVersion.js';
+import { validateGstinLocally } from './gstCompliance.js';
 import {
   buildBankReconciliationMatches,
   buildDepreciationPostingPlan,
@@ -93,6 +95,7 @@ interface CreateInvoiceInput {
   gstTreatment?: GstTreatment;
   paymentAmount?: number;
   paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   revenueAccountKey?: SystemAccountKey | string;
   invoiceNumber?: string;
   createdBy?: string;
@@ -103,6 +106,7 @@ interface RecordPaymentInput {
   invoiceId: string;
   amount: number;
   mode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
   description?: string;
   createdBy?: string;
   paymentDate?: Date;
@@ -114,6 +118,7 @@ interface CreateVendorInput {
   contact?: string;
   email?: string;
   phone?: string;
+  gstin?: string;
   address?: string;
   createdBy?: string;
   metadata?: Record<string, any>;
@@ -159,6 +164,11 @@ interface CreateFixedAssetInput {
   createdBy?: string;
 }
 
+interface TransactionOptions {
+  session?: mongoose.ClientSession;
+  skipTransaction?: boolean;
+}
+
 const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
   { key: 'assets', code: '1000', name: 'Assets', type: 'asset' },
   { key: 'cash_in_hand', code: '1010', name: 'Cash In Hand', type: 'asset', subType: 'cash', parentKey: 'assets' },
@@ -196,6 +206,36 @@ const normalizePaymentMode = (value?: string): AccountingPaymentMode => {
   return 'cash';
 };
 
+const createDocument = async <T>(
+  model: any,
+  payload: Record<string, any>,
+  session?: mongoose.ClientSession
+): Promise<T> => {
+  if (session) {
+    const [created] = await model.create([payload], { session });
+    return created as T;
+  }
+  return model.create(payload) as Promise<T>;
+};
+
+const withOptionalSession = <T extends { session: (session: mongoose.ClientSession) => T }>(
+  query: T,
+  session?: mongoose.ClientSession
+): T => (session ? query.session(session) : query);
+
+const runInAccountingTransaction = async <T>(work: (session: mongoose.ClientSession) => Promise<T>): Promise<T> => {
+  const session = await mongoose.startSession();
+  try {
+    let result!: T;
+    await session.withTransaction(async () => {
+      result = await work(session);
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+};
+
 const journalReferenceToLedgerType = (referenceType: JournalReferenceType): LedgerVoucherType => {
   if (referenceType === 'payment') return 'receipt';
   if (referenceType === 'expense' || referenceType === 'refund') return 'payment';
@@ -210,10 +250,17 @@ const getPeriodDates = (month: number, year: number) => {
   return { startDate, endDate };
 };
 
-const getAccountClosing = async (accountId: mongoose.Types.ObjectId | string, endDate?: Date) => {
+const getAccountClosing = async (
+  accountId: mongoose.Types.ObjectId | string,
+  endDate?: Date,
+  session?: mongoose.ClientSession
+) => {
   const filter: Record<string, any> = { accountId };
   if (endDate) filter.entryDate = { $lte: endDate };
-  const last = await AccountLedgerEntry.findOne(filter).sort({ entryDate: -1, createdAt: -1, _id: -1 });
+  const last = await withOptionalSession(
+    AccountLedgerEntry.findOne(filter).sort({ entryDate: -1, createdAt: -1, _id: -1 }),
+    session
+  );
   return Number(last?.runningBalance || 0);
 };
 
@@ -229,11 +276,14 @@ const postLedgerEntry = async (input: {
   credit: number;
   description?: string;
   createdBy?: string;
+  session?: mongoose.ClientSession;
 }) => {
   const runningBalance = round2(
-    (await getAccountClosing(input.account._id as mongoose.Types.ObjectId, input.entryDate)) + input.debit - input.credit
+    (await getAccountClosing(input.account._id as mongoose.Types.ObjectId, input.entryDate, input.session)) + input.debit - input.credit
   );
-  return AccountLedgerEntry.create({
+  return createDocument(
+    AccountLedgerEntry,
+    {
     accountId: input.account._id,
     entryDate: input.entryDate,
     voucherType: journalReferenceToLedgerType(input.referenceType),
@@ -250,7 +300,9 @@ const postLedgerEntry = async (input: {
       sourceId: input.journalEntryId.toString(),
       referenceType: input.referenceType,
     },
-  });
+    },
+    input.session
+  );
 };
 
 const escapeRegex = (value: string): string => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -547,6 +599,8 @@ const buildAuditAfterSnapshot = (
   status: entry.status,
   totalDebit: entry.totalDebit,
   totalCredit: entry.totalCredit,
+  previousEntryHash: entry.previousEntryHash,
+  entryHash: entry.entryHash,
   lines: lines.map((line) => ({
     lineNumber: line.lineNumber,
     accountCode: line.accountCode,
@@ -557,7 +611,44 @@ const buildAuditAfterSnapshot = (
   })),
 });
 
-export const createJournalEntry = async (input: CreateJournalEntryInput): Promise<{
+const buildJournalHash = (input: {
+  previousEntryHash?: string;
+  entryNumber: string;
+  entryDate: Date;
+  referenceType: JournalReferenceType;
+  referenceId?: string;
+  referenceNo?: string;
+  description: string;
+  totalDebit: number;
+  totalCredit: number;
+  lines: Array<{ accountCode: string; accountName: string; debit: number; credit: number; description?: string }>;
+}): string => {
+  const payload = {
+    previousEntryHash: String(input.previousEntryHash || 'GENESIS'),
+    entryNumber: input.entryNumber,
+    entryDate: input.entryDate.toISOString(),
+    referenceType: input.referenceType,
+    referenceId: input.referenceId || '',
+    referenceNo: input.referenceNo || '',
+    description: input.description,
+    totalDebit: round2(input.totalDebit),
+    totalCredit: round2(input.totalCredit),
+    lines: input.lines.map((line) => ({
+      accountCode: line.accountCode,
+      accountName: line.accountName,
+      debit: round2(line.debit),
+      credit: round2(line.credit),
+      description: line.description || '',
+    })),
+  };
+
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+};
+
+export const createJournalEntry = async (
+  input: CreateJournalEntryInput,
+  options: TransactionOptions = {}
+): Promise<{
   entry: IJournalEntry;
   lines: IJournalLine[];
 }> => {
@@ -565,104 +656,159 @@ export const createJournalEntry = async (input: CreateJournalEntryInput): Promis
   await assertPeriodOpen(entryDate);
   await ensureAccountingChart(input.createdBy);
 
-  const resolvedLines = await Promise.all(
-    (input.lines || []).map(async (line) => {
-      const account = await resolveAccount({
-        accountId: line.accountId,
-        accountKey: line.accountKey,
-        createdBy: input.createdBy,
-      });
-      return {
-        account,
-        debit: round2(Number(line.debit || 0)),
-        credit: round2(Number(line.credit || 0)),
+  const execute = async (session?: mongoose.ClientSession): Promise<{
+    entry: IJournalEntry;
+    lines: IJournalLine[];
+  }> => {
+    const resolvedLines = await Promise.all(
+      (input.lines || []).map(async (line) => {
+        const account = await resolveAccount({
+          accountId: line.accountId,
+          accountKey: line.accountKey,
+          createdBy: input.createdBy,
+        });
+        return {
+          account,
+          debit: round2(Number(line.debit || 0)),
+          credit: round2(Number(line.credit || 0)),
+          description: line.description,
+        };
+      })
+    );
+
+    const validation = validateJournalLines(
+      resolvedLines.map((line) => ({
+        accountKey: line.account.systemKey || line.account.accountCode,
+        debit: line.debit,
+        credit: line.credit,
         description: line.description,
-      };
-    })
-  );
+      }))
+    );
 
-  const validation = validateJournalLines(
-    resolvedLines.map((line) => ({
-      accountKey: line.account.systemKey || line.account.accountCode,
-      debit: line.debit,
-      credit: line.credit,
-      description: line.description,
-    }))
-  );
-
-  const entryNumber = await generateNumber('journal_entry', { prefix: 'JE-', datePart: true, padTo: 5 });
-  const entry = await JournalEntry.create({
-    entryNumber,
-    entryDate,
-    referenceType: input.referenceType,
-    referenceId: input.referenceId,
-    referenceNo: input.referenceNo,
-    description: input.description,
-    status: 'posted',
-    totalDebit: validation.totalDebit,
-    totalCredit: validation.totalCredit,
-    createdBy: input.createdBy,
-    metadata: input.metadata,
-  });
-
-  const inserted = await JournalLine.insertMany(
-    resolvedLines.map((line, index) => ({
-      journalId: entry._id,
-      entryDate,
-      lineNumber: index + 1,
-      accountId: line.account._id,
-      accountCode: line.account.accountCode,
-      accountName: line.account.accountName,
-      description: line.description,
-      debitAmount: line.debit,
-      creditAmount: line.credit,
-    }))
-  );
-
-  for (const line of resolvedLines) {
-    await postLedgerEntry({
-      account: line.account,
+    const entryNumber = await generateNumber('journal_entry', { prefix: 'JE-', datePart: true, padTo: 5 }, session);
+    const previousEntry = await withOptionalSession(
+      JournalEntry.findOne({ entryHash: { $exists: true, $ne: '' } })
+        .sort({ createdAt: -1, _id: -1 })
+        .select('entryHash'),
+      session
+    );
+    const previousEntryHash = String(previousEntry?.entryHash || 'GENESIS');
+    const entryHash = buildJournalHash({
+      previousEntryHash,
+      entryNumber,
       entryDate,
       referenceType: input.referenceType,
-      journalEntryId: entry._id as mongoose.Types.ObjectId,
-      journalEntryNumber: entry.entryNumber,
+      referenceId: input.referenceId,
       referenceNo: input.referenceNo,
-      paymentMode: input.paymentMode,
-      debit: line.debit,
-      credit: line.credit,
-      description: line.description || input.description,
-      createdBy: input.createdBy,
+      description: input.description,
+      totalDebit: validation.totalDebit,
+      totalCredit: validation.totalCredit,
+      lines: resolvedLines.map((line) => ({
+        accountCode: line.account.accountCode,
+        accountName: line.account.accountName,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description,
+      })),
     });
+
+    const entry = await createDocument<IJournalEntry>(
+      JournalEntry,
+      {
+        entryNumber,
+        entryDate,
+        referenceType: input.referenceType,
+        referenceId: input.referenceId,
+        referenceNo: input.referenceNo,
+        description: input.description,
+        status: 'posted',
+        totalDebit: validation.totalDebit,
+        totalCredit: validation.totalCredit,
+        previousEntryHash,
+        entryHash,
+        hashVersion: 1,
+        createdBy: input.createdBy,
+        metadata: input.metadata,
+      },
+      session
+    );
+
+    const inserted = await JournalLine.insertMany(
+      resolvedLines.map((line, index) => ({
+        journalId: entry._id,
+        entryDate,
+        lineNumber: index + 1,
+        accountId: line.account._id,
+        accountCode: line.account.accountCode,
+        accountName: line.account.accountName,
+        description: line.description,
+        debitAmount: line.debit,
+        creditAmount: line.credit,
+      })),
+      session ? { session } : {}
+    );
+
+    for (const line of resolvedLines) {
+      await postLedgerEntry({
+        account: line.account,
+        entryDate,
+        referenceType: input.referenceType,
+        journalEntryId: entry._id as mongoose.Types.ObjectId,
+        journalEntryNumber: entry.entryNumber,
+        referenceNo: input.referenceNo,
+        paymentMode: input.paymentMode,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description || input.description,
+        createdBy: input.createdBy,
+        session,
+      });
+    }
+
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'journal_entry_created',
+      entityType: 'journal_entry',
+      entityId: entry._id.toString(),
+      referenceNo: entry.entryNumber,
+      userId: input.createdBy,
+      metadata: input.metadata,
+      after: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
+    });
+
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'journal_entry',
+      recordId: entry._id.toString(),
+      action: 'CREATE',
+      changedBy: input.createdBy,
+      dataSnapshot: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
+      metadata: input.metadata,
+    });
+
+    return { entry, lines: inserted as unknown as IJournalLine[] };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
   }
 
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'journal_entry_created',
-    entityType: 'journal_entry',
-    entityId: entry._id.toString(),
-    referenceNo: entry.entryNumber,
-    userId: input.createdBy,
-    metadata: input.metadata,
-    after: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
-  });
-
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'journal_entry',
-    recordId: entry._id.toString(),
-    action: 'CREATE',
-    changedBy: input.createdBy,
-    dataSnapshot: buildAuditAfterSnapshot(entry, inserted as unknown as IJournalLine[]),
-    metadata: input.metadata,
-  });
-
-  return { entry, lines: inserted as unknown as IJournalLine[] };
+  return runInAccountingTransaction(execute);
 };
 
 export const createVendor = async (input: CreateVendorInput): Promise<IVendor> => {
   await ensureAccountingChart(input.createdBy);
   const existing = await Vendor.findOne({ name: { $regex: `^${input.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
   if (existing) return existing;
+  const normalizedGstin = String(input.gstin || '').trim().toUpperCase();
+  if (normalizedGstin) {
+    const gstValidation = validateGstinLocally(normalizedGstin);
+    if (!gstValidation.isValid) {
+      throw new Error(gstValidation.message);
+    }
+  }
 
   const ledgerAccount = await resolveAccount({
     fallbackName: `Vendor - ${input.name}`,
@@ -677,6 +823,7 @@ export const createVendor = async (input: CreateVendorInput): Promise<IVendor> =
     contact: input.contact,
     email: input.email,
     phone: input.phone,
+    gstin: normalizedGstin || undefined,
     address: input.address,
     ledgerAccountId: ledgerAccount._id,
     isActive: true,
@@ -713,7 +860,10 @@ const buildInvoiceStatus = (paidAmount: number, totalAmount: number): IAccountin
   return 'posted';
 };
 
-export const createInvoice = async (input: CreateInvoiceInput): Promise<{
+export const createInvoice = async (
+  input: CreateInvoiceInput,
+  options: TransactionOptions = {}
+): Promise<{
   invoice: IAccountingInvoice;
   journalEntry: IJournalEntry;
   payment?: IAccountingPayment | null;
@@ -722,232 +872,283 @@ export const createInvoice = async (input: CreateInvoiceInput): Promise<{
   await assertPeriodOpen(invoiceDate);
   await ensureAccountingChart(input.createdBy);
 
-  const postingPlan = buildInvoicePostingPlan({
-    baseAmount: input.baseAmount,
-    gstAmount: input.gstAmount,
-    gstRate: input.gstRate,
-    gstTreatment: input.gstTreatment,
-    paymentAmount: input.paymentAmount,
-    paymentMode: normalizePaymentMode(input.paymentMode),
-    revenueAccountKey: input.revenueAccountKey || 'booking_revenue',
-  });
-
-  const invoiceNumber = input.invoiceNumber || await generateNumber('accounting_invoice', {
-    prefix: 'AINV-',
-    datePart: true,
-    padTo: 5,
-  });
-
-  const initialPaidAmount = Math.min(round2(Number(input.paymentAmount || 0)), postingPlan.gst.totalAmount);
-  const invoice = await AccountingInvoice.create({
-    invoiceNumber,
-    invoiceDate,
-    dueDate: input.dueDate,
-    customerId: input.customerId,
-    customerName: String(input.customerName || '').trim() || 'Walk-in Customer',
-    referenceType: input.referenceType || 'manual',
-    referenceId: input.referenceId,
-    description: input.description,
-    baseAmount: postingPlan.gst.baseAmount,
-    gstAmount: postingPlan.gst.gstAmount,
-    cgstAmount: postingPlan.gst.cgstAmount,
-    sgstAmount: postingPlan.gst.sgstAmount,
-    igstAmount: postingPlan.gst.igstAmount,
-    totalAmount: postingPlan.gst.totalAmount,
-    paidAmount: initialPaidAmount,
-    balanceAmount: round2(Math.max(0, postingPlan.gst.totalAmount - initialPaidAmount)),
-    status: buildInvoiceStatus(initialPaidAmount, postingPlan.gst.totalAmount),
-    gstTreatment: postingPlan.gst.gstTreatment,
-    createdBy: input.createdBy,
-    metadata: {
-      postingMode: postingPlan.postingMode,
-      ...input.metadata,
-    },
-  });
-
-  const invoiceJournal = await createJournalEntry({
-    entryDate: invoiceDate,
-    referenceType: 'invoice',
-    referenceId: invoice._id.toString(),
-    referenceNo: invoice.invoiceNumber,
-    description: input.description || `Invoice ${invoice.invoiceNumber}`,
-    paymentMode: normalizePaymentMode(input.paymentMode),
-    createdBy: input.createdBy,
-    metadata: {
-      sourceReferenceType: input.referenceType || 'manual',
-      sourceReferenceId: input.referenceId,
-      ...input.metadata,
-    },
-    lines: postingPlan.invoiceLines.map((line) => ({
-      accountKey: line.accountKey,
-      debit: line.debit,
-      credit: line.credit,
-      description: line.description,
-    })),
-  });
-
-  invoice.journalEntryId = invoiceJournal.entry._id as mongoose.Types.ObjectId;
-  await invoice.save();
-
-  let payment: IAccountingPayment | null = null;
-  if (postingPlan.postingMode === 'cash_sale') {
-    const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 });
-    payment = await AccountingPayment.create({
-      paymentNumber,
-      paymentDate: invoiceDate,
-      amount: invoice.totalAmount,
-      mode: normalizePaymentMode(input.paymentMode),
-      invoiceId: invoice._id,
-      customerId: invoice.customerId,
-      customerName: invoice.customerName,
-      description: `Immediate settlement for ${invoice.invoiceNumber}`,
-      journalEntryId: invoiceJournal.entry._id,
-      status: 'posted',
-      createdBy: input.createdBy,
-      metadata: { embeddedInInvoiceEntry: true },
+  const execute = async (session?: mongoose.ClientSession): Promise<{
+    invoice: IAccountingInvoice;
+    journalEntry: IJournalEntry;
+    payment?: IAccountingPayment | null;
+  }> => {
+    const postingPlan = buildInvoicePostingPlan({
+      baseAmount: input.baseAmount,
+      gstAmount: input.gstAmount,
+      gstRate: input.gstRate,
+      gstTreatment: input.gstTreatment,
+      paymentAmount: input.paymentAmount,
+      paymentMode: normalizePaymentMode(input.paymentMode),
+      settlementAccountKey: input.settlementAccountKey,
+      revenueAccountKey: input.revenueAccountKey || 'booking_revenue',
     });
-  } else if (initialPaidAmount > 0) {
-    const recorded = await recordPayment({
-      invoiceId: invoice._id.toString(),
-      amount: initialPaidAmount,
-      mode: normalizePaymentMode(input.paymentMode),
-      description: `Initial payment for ${invoice.invoiceNumber}`,
+
+    const invoiceNumber = input.invoiceNumber || await generateNumber('accounting_invoice', {
+      prefix: 'AINV-',
+      datePart: true,
+      padTo: 5,
+    }, session);
+
+    const requestedPaymentAmount = Math.min(round2(Number(input.paymentAmount || 0)), postingPlan.gst.totalAmount);
+    const initialPaidAmount = postingPlan.postingMode === 'cash_sale' ? requestedPaymentAmount : 0;
+    const deferredPaymentAmount = postingPlan.postingMode === 'invoice_plus_payment' ? requestedPaymentAmount : 0;
+    const invoice = await createDocument<IAccountingInvoice>(
+      AccountingInvoice,
+      {
+        invoiceNumber,
+        invoiceDate,
+        dueDate: input.dueDate,
+        customerId: input.customerId,
+        customerName: String(input.customerName || '').trim() || 'Walk-in Customer',
+        referenceType: input.referenceType || 'manual',
+        referenceId: input.referenceId,
+        description: input.description,
+        baseAmount: postingPlan.gst.baseAmount,
+        gstAmount: postingPlan.gst.gstAmount,
+        cgstAmount: postingPlan.gst.cgstAmount,
+        sgstAmount: postingPlan.gst.sgstAmount,
+        igstAmount: postingPlan.gst.igstAmount,
+        totalAmount: postingPlan.gst.totalAmount,
+        paidAmount: initialPaidAmount,
+        balanceAmount: round2(Math.max(0, postingPlan.gst.totalAmount - initialPaidAmount)),
+        status: buildInvoiceStatus(initialPaidAmount, postingPlan.gst.totalAmount),
+        gstTreatment: postingPlan.gst.gstTreatment,
+        createdBy: input.createdBy,
+        metadata: {
+          postingMode: postingPlan.postingMode,
+          ...input.metadata,
+        },
+      },
+      session
+    );
+
+    const invoiceJournal = await createJournalEntry({
+      entryDate: invoiceDate,
+      referenceType: 'invoice',
+      referenceId: invoice._id.toString(),
+      referenceNo: invoice.invoiceNumber,
+      description: input.description || `Invoice ${invoice.invoiceNumber}`,
+      paymentMode: normalizePaymentMode(input.paymentMode),
       createdBy: input.createdBy,
-      paymentDate: invoiceDate,
-      metadata: { initialInvoicePayment: true },
+      metadata: {
+        sourceReferenceType: input.referenceType || 'manual',
+        sourceReferenceId: input.referenceId,
+        ...input.metadata,
+      },
+      lines: postingPlan.invoiceLines.map((line) => ({
+        accountKey: line.accountKey,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description,
+      })),
+    }, { session, skipTransaction: true });
+
+    invoice.journalEntryId = invoiceJournal.entry._id as mongoose.Types.ObjectId;
+    await invoice.save(session ? { session } : undefined);
+
+    let payment: IAccountingPayment | null = null;
+    if (postingPlan.postingMode === 'cash_sale') {
+      const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 }, session);
+      payment = await createDocument<IAccountingPayment>(
+        AccountingPayment,
+        {
+          paymentNumber,
+          paymentDate: invoiceDate,
+          amount: invoice.totalAmount,
+          mode: normalizePaymentMode(input.paymentMode),
+          invoiceId: invoice._id,
+          customerId: invoice.customerId,
+          customerName: invoice.customerName,
+          description: `Immediate settlement for ${invoice.invoiceNumber}`,
+          journalEntryId: invoiceJournal.entry._id,
+          status: 'posted',
+          createdBy: input.createdBy,
+          metadata: { embeddedInInvoiceEntry: true, ...input.metadata },
+        },
+        session
+      );
+    } else if (deferredPaymentAmount > 0) {
+      const recorded = await recordPayment({
+        invoiceId: invoice._id.toString(),
+        amount: deferredPaymentAmount,
+        mode: normalizePaymentMode(input.paymentMode),
+        settlementAccountKey: input.settlementAccountKey,
+        description: `Initial payment for ${invoice.invoiceNumber}`,
+        createdBy: input.createdBy,
+        paymentDate: invoiceDate,
+        metadata: { initialInvoicePayment: true },
+      }, { session, skipTransaction: true });
+      payment = recorded.payment;
+    }
+
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'invoice_created',
+      entityType: 'accounting_invoice',
+      entityId: invoice._id.toString(),
+      referenceNo: invoice.invoiceNumber,
+      userId: input.createdBy,
+      metadata: {
+        postingMode: postingPlan.postingMode,
+        sourceReferenceType: input.referenceType || 'manual',
+        sourceReferenceId: input.referenceId,
+        ...input.metadata,
+      },
+      after: invoice.toObject(),
     });
-    payment = recorded.payment;
+
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'accounting_invoice',
+      recordId: invoice._id.toString(),
+      action: 'CREATE',
+      changedBy: input.createdBy,
+      dataSnapshot: invoice.toObject(),
+      metadata: {
+        postingMode: postingPlan.postingMode,
+        sourceReferenceType: input.referenceType || 'manual',
+        sourceReferenceId: input.referenceId,
+        ...input.metadata,
+      },
+    });
+
+    return { invoice, journalEntry: invoiceJournal.entry, payment };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
   }
 
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'invoice_created',
-    entityType: 'accounting_invoice',
-    entityId: invoice._id.toString(),
-    referenceNo: invoice.invoiceNumber,
-    userId: input.createdBy,
-    metadata: {
-      postingMode: postingPlan.postingMode,
-      sourceReferenceType: input.referenceType || 'manual',
-      sourceReferenceId: input.referenceId,
-      ...input.metadata,
-    },
-    after: invoice.toObject(),
-  });
-
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'accounting_invoice',
-    recordId: invoice._id.toString(),
-    action: 'CREATE',
-    changedBy: input.createdBy,
-    dataSnapshot: invoice.toObject(),
-    metadata: {
-      postingMode: postingPlan.postingMode,
-      sourceReferenceType: input.referenceType || 'manual',
-      sourceReferenceId: input.referenceId,
-      ...input.metadata,
-    },
-  });
-
-  return { invoice, journalEntry: invoiceJournal.entry, payment };
+  return runInAccountingTransaction(execute);
 };
 
-export const recordPayment = async (input: RecordPaymentInput): Promise<{
+export const recordPayment = async (
+  input: RecordPaymentInput,
+  options: TransactionOptions = {}
+): Promise<{
   invoice: IAccountingInvoice;
   payment: IAccountingPayment;
   journalEntry: IJournalEntry;
 }> => {
-  const invoice = await AccountingInvoice.findById(input.invoiceId);
-  if (!invoice) throw new Error('Invoice not found');
-  if (invoice.status === 'cancelled') throw new Error('Cancelled invoice cannot accept payments');
-
   const paymentDate = input.paymentDate ? new Date(input.paymentDate) : new Date();
   await assertPeriodOpen(paymentDate);
   await ensureAccountingChart(input.createdBy);
 
-  const outstanding = round2(
-    Number(invoice.balanceAmount || Math.max(0, Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0)))
-  );
-  if (outstanding <= 0) {
-    throw new Error('Invoice has no outstanding balance');
+  const execute = async (session?: mongoose.ClientSession): Promise<{
+    invoice: IAccountingInvoice;
+    payment: IAccountingPayment;
+    journalEntry: IJournalEntry;
+  }> => {
+    const invoiceQuery = AccountingInvoice.findById(input.invoiceId);
+    const invoice = session ? await invoiceQuery.session(session) : await invoiceQuery;
+    if (!invoice) throw new Error('Invoice not found');
+    if (invoice.status === 'cancelled') throw new Error('Cancelled invoice cannot accept payments');
+
+    const outstanding = round2(
+      Number(invoice.balanceAmount || Math.max(0, Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0)))
+    );
+    if (outstanding <= 0) {
+      throw new Error('Invoice has no outstanding balance');
+    }
+
+    const amount = round2(Math.min(outstanding, Number(input.amount || 0)));
+    if (amount <= 0) throw new Error('Payment amount must be greater than 0');
+
+    const cashAccountKey = paymentModeToAccountKey(normalizePaymentMode(input.mode), input.settlementAccountKey);
+    const journal = await createJournalEntry({
+      entryDate: paymentDate,
+      referenceType: 'payment',
+      referenceId: invoice._id.toString(),
+      referenceNo: invoice.invoiceNumber,
+      description: input.description || `Payment for ${invoice.invoiceNumber}`,
+      paymentMode: normalizePaymentMode(input.mode),
+      createdBy: input.createdBy,
+      metadata: input.metadata,
+      lines: [
+        { accountKey: cashAccountKey, debit: amount, credit: 0, description: 'Payment received' },
+        { accountKey: 'accounts_receivable', debit: 0, credit: amount, description: 'Reduce receivable' },
+      ],
+    }, { session, skipTransaction: true });
+
+    const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 }, session);
+    const payment = await createDocument<IAccountingPayment>(
+      AccountingPayment,
+      {
+        paymentNumber,
+        paymentDate,
+        amount,
+        mode: normalizePaymentMode(input.mode),
+        invoiceId: invoice._id,
+        customerId: invoice.customerId,
+        customerName: invoice.customerName,
+        description: input.description || `Payment for ${invoice.invoiceNumber}`,
+        journalEntryId: journal.entry._id,
+        status: 'posted',
+        createdBy: input.createdBy,
+        metadata: input.metadata,
+      },
+      session
+    );
+
+    invoice.paidAmount = round2(Number(invoice.paidAmount || 0) + amount);
+    invoice.balanceAmount = round2(Math.max(0, Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0)));
+    invoice.status = buildInvoiceStatus(Number(invoice.paidAmount || 0), Number(invoice.totalAmount || 0));
+    await invoice.save(session ? { session } : undefined);
+
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'invoice_payment_recorded',
+      entityType: 'accounting_payment',
+      entityId: payment._id.toString(),
+      referenceNo: payment.paymentNumber,
+      userId: input.createdBy,
+      metadata: {
+        invoiceNumber: invoice.invoiceNumber,
+        amount,
+        paymentMode: payment.mode,
+        ...input.metadata,
+      },
+      after: payment.toObject(),
+    });
+
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'accounting_payment',
+      recordId: payment._id.toString(),
+      action: 'CREATE',
+      changedBy: input.createdBy,
+      dataSnapshot: payment.toObject(),
+      metadata: {
+        invoiceNumber: invoice.invoiceNumber,
+        amount,
+        paymentMode: payment.mode,
+        ...input.metadata,
+      },
+    });
+
+    return { invoice, payment, journalEntry: journal.entry };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
   }
 
-  const amount = round2(Math.min(outstanding, Number(input.amount || 0)));
-  if (amount <= 0) throw new Error('Payment amount must be greater than 0');
-
-  const cashAccountKey = paymentModeToAccountKey(normalizePaymentMode(input.mode));
-  const journal = await createJournalEntry({
-    entryDate: paymentDate,
-    referenceType: 'payment',
-    referenceId: invoice._id.toString(),
-    referenceNo: invoice.invoiceNumber,
-    description: input.description || `Payment for ${invoice.invoiceNumber}`,
-    paymentMode: normalizePaymentMode(input.mode),
-    createdBy: input.createdBy,
-    metadata: input.metadata,
-    lines: [
-      { accountKey: cashAccountKey, debit: amount, credit: 0, description: 'Payment received' },
-      { accountKey: 'accounts_receivable', debit: 0, credit: amount, description: 'Reduce receivable' },
-    ],
-  });
-
-  const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 });
-  const payment = await AccountingPayment.create({
-    paymentNumber,
-    paymentDate,
-    amount,
-    mode: normalizePaymentMode(input.mode),
-    invoiceId: invoice._id,
-    customerId: invoice.customerId,
-    customerName: invoice.customerName,
-    description: input.description || `Payment for ${invoice.invoiceNumber}`,
-    journalEntryId: journal.entry._id,
-    status: 'posted',
-    createdBy: input.createdBy,
-    metadata: input.metadata,
-  });
-
-  invoice.paidAmount = round2(Number(invoice.paidAmount || 0) + amount);
-  invoice.balanceAmount = round2(Math.max(0, Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0)));
-  invoice.status = buildInvoiceStatus(Number(invoice.paidAmount || 0), Number(invoice.totalAmount || 0));
-  await invoice.save();
-
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'invoice_payment_recorded',
-    entityType: 'accounting_payment',
-    entityId: payment._id.toString(),
-    referenceNo: payment.paymentNumber,
-    userId: input.createdBy,
-    metadata: {
-      invoiceNumber: invoice.invoiceNumber,
-      amount,
-      paymentMode: payment.mode,
-      ...input.metadata,
-    },
-    after: payment.toObject(),
-  });
-
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'accounting_payment',
-    recordId: payment._id.toString(),
-    action: 'CREATE',
-    changedBy: input.createdBy,
-    dataSnapshot: payment.toObject(),
-    metadata: {
-      invoiceNumber: invoice.invoiceNumber,
-      amount,
-      paymentMode: payment.mode,
-      ...input.metadata,
-    },
-  });
-
-  return { invoice, payment, journalEntry: journal.entry };
+  return runInAccountingTransaction(execute);
 };
 
-export const recordExpense = async (input: RecordExpenseInput): Promise<{
+export const recordExpense = async (
+  input: RecordExpenseInput,
+  options: TransactionOptions = {}
+): Promise<{
   expenseEntry: IJournalEntry;
   paymentEntry?: IJournalEntry | null;
   vendor?: IVendor | null;
@@ -998,27 +1199,15 @@ export const recordExpense = async (input: RecordExpenseInput): Promise<{
           { accountId: payableAccount._id, debit: 0, credit: amount, description: 'Expense payable' },
         ];
 
-  const expenseEntry = await createJournalEntry({
-    entryDate: expenseDate,
-    referenceType: 'expense',
-    description: input.description,
-    paymentMode: normalizePaymentMode(input.paymentMode),
-    createdBy: input.createdBy,
-    metadata: {
-      vendorId: vendor?._id?.toString(),
-      vendorName: vendor?.name,
-      ...input.metadata,
-    },
-    lines: expenseLines,
-  });
-
-  let paymentEntry: IJournalEntry | null = null;
-  if (paidAmount > 0 && paidAmount < amount) {
-    const paymentJournal = await createJournalEntry({
+  const execute = async (session?: mongoose.ClientSession): Promise<{
+    expenseEntry: IJournalEntry;
+    paymentEntry?: IJournalEntry | null;
+    vendor?: IVendor | null;
+  }> => {
+    const expenseEntry = await createJournalEntry({
       entryDate: expenseDate,
-      referenceType: 'payment',
-      referenceId: vendor?._id?.toString(),
-      description: `${input.description} payment`,
+      referenceType: 'expense',
+      description: input.description,
       paymentMode: normalizePaymentMode(input.paymentMode),
       createdBy: input.createdBy,
       metadata: {
@@ -1026,66 +1215,96 @@ export const recordExpense = async (input: RecordExpenseInput): Promise<{
         vendorName: vendor?.name,
         ...input.metadata,
       },
-      lines: [
-        { accountId: payableAccount._id, debit: paidAmount, credit: 0, description: 'Reduce payable' },
-        { accountKey: settlementKey, debit: 0, credit: paidAmount, description: 'Vendor payment' },
-      ],
-    });
+      lines: expenseLines,
+    }, { session, skipTransaction: true });
 
-    paymentEntry = paymentJournal.entry;
+    let paymentEntry: IJournalEntry | null = null;
+    if (paidAmount > 0 && paidAmount < amount) {
+      const paymentJournal = await createJournalEntry({
+        entryDate: expenseDate,
+        referenceType: 'payment',
+        referenceId: vendor?._id?.toString(),
+        description: `${input.description} payment`,
+        paymentMode: normalizePaymentMode(input.paymentMode),
+        createdBy: input.createdBy,
+        metadata: {
+          vendorId: vendor?._id?.toString(),
+          vendorName: vendor?.name,
+          ...input.metadata,
+        },
+        lines: [
+          { accountId: payableAccount._id, debit: paidAmount, credit: 0, description: 'Reduce payable' },
+          { accountKey: settlementKey, debit: 0, credit: paidAmount, description: 'Vendor payment' },
+        ],
+      }, { session, skipTransaction: true });
 
-    const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 });
-    await AccountingPayment.create({
-      paymentNumber,
-      paymentDate: expenseDate,
-      amount: paidAmount,
-      mode: normalizePaymentMode(input.paymentMode),
-      vendorId: vendor?._id,
-      description: `${input.description} payment`,
-      journalEntryId: paymentEntry._id,
-      status: 'posted',
-      createdBy: input.createdBy,
+      paymentEntry = paymentJournal.entry;
+
+      const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 }, session);
+      await createDocument(
+        AccountingPayment,
+        {
+          paymentNumber,
+          paymentDate: expenseDate,
+          amount: paidAmount,
+          mode: normalizePaymentMode(input.paymentMode),
+          vendorId: vendor?._id,
+          description: `${input.description} payment`,
+          journalEntryId: paymentEntry._id,
+          status: 'posted',
+          createdBy: input.createdBy,
+          metadata: {
+            vendorId: vendor?._id?.toString(),
+            vendorName: vendor?.name,
+          },
+        },
+        session
+      );
+    }
+
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'expense_recorded',
+      entityType: 'journal_entry',
+      entityId: expenseEntry.entry._id.toString(),
+      referenceNo: expenseEntry.entry.entryNumber,
+      userId: input.createdBy,
       metadata: {
         vendorId: vendor?._id?.toString(),
         vendorName: vendor?.name,
+        amount,
+        paidAmount: Math.min(amount, paidAmount),
+        ...input.metadata,
+      },
+      after: expenseEntry.entry.toObject(),
+    });
+
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'journal_entry',
+      recordId: expenseEntry.entry._id.toString(),
+      action: 'CREATE',
+      changedBy: input.createdBy,
+      dataSnapshot: expenseEntry.entry.toObject(),
+      metadata: {
+        vendorId: vendor?._id?.toString(),
+        vendorName: vendor?.name,
+        amount,
+        paidAmount: Math.min(amount, paidAmount),
+        ...input.metadata,
       },
     });
+
+    return { expenseEntry: expenseEntry.entry, paymentEntry, vendor };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
   }
 
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'expense_recorded',
-    entityType: 'journal_entry',
-    entityId: expenseEntry.entry._id.toString(),
-    referenceNo: expenseEntry.entry.entryNumber,
-    userId: input.createdBy,
-    metadata: {
-      vendorId: vendor?._id?.toString(),
-      vendorName: vendor?.name,
-      amount,
-      paidAmount: Math.min(amount, paidAmount),
-      ...input.metadata,
-    },
-    after: expenseEntry.entry.toObject(),
-  });
-
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'journal_entry',
-    recordId: expenseEntry.entry._id.toString(),
-    action: 'CREATE',
-    changedBy: input.createdBy,
-    dataSnapshot: expenseEntry.entry.toObject(),
-    metadata: {
-      vendorId: vendor?._id?.toString(),
-      vendorName: vendor?.name,
-      amount,
-      paidAmount: Math.min(amount, paidAmount),
-      ...input.metadata,
-    },
-  });
-
-  return { expenseEntry: expenseEntry.entry, paymentEntry, vendor };
+  return runInAccountingTransaction(execute);
 };
 
 export const recordRefund = async (input: RecordRefundInput): Promise<{
@@ -1124,147 +1343,177 @@ export const recordRefund = async (input: RecordRefundInput): Promise<{
   return { journalEntry: journal.entry };
 };
 
-export const cancelJournalEntry = async (input: {
+export const cancelJournalEntry = async (
+  input: {
   journalEntryId: string;
   reason?: string;
   createdBy?: string;
   metadata?: Record<string, any>;
-}): Promise<{ original: IJournalEntry; reversal: IJournalEntry }> => {
-  const original = await JournalEntry.findById(input.journalEntryId);
-  if (!original) throw new Error('Journal entry not found');
-  if (original.status === 'cancelled') throw new Error('Journal entry is already cancelled');
+  },
+  options: TransactionOptions = {}
+): Promise<{ original: IJournalEntry; reversal: IJournalEntry }> => {
+  const execute = async (session?: mongoose.ClientSession): Promise<{ original: IJournalEntry; reversal: IJournalEntry }> => {
+    const originalQuery = JournalEntry.findById(input.journalEntryId);
+    const original = session ? await originalQuery.session(session) : await originalQuery;
+    if (!original) throw new Error('Journal entry not found');
+    if (original.status === 'cancelled') throw new Error('Journal entry is already cancelled');
 
-  const lines = await JournalLine.find({ journalId: original._id }).sort({ lineNumber: 1 });
-  if (!lines.length) throw new Error('Journal entry has no lines to reverse');
+    const linesQuery = JournalLine.find({ journalId: original._id }).sort({ lineNumber: 1 });
+    const lines = session ? await linesQuery.session(session) : await linesQuery;
+    if (!lines.length) throw new Error('Journal entry has no lines to reverse');
 
-  const reversal = await createJournalEntry({
-    entryDate: new Date(),
-    referenceType: 'reversal',
-    referenceId: original._id.toString(),
-    referenceNo: original.entryNumber,
-    description: `Reversal of ${original.entryNumber}`,
-    paymentMode: 'adjustment',
-    createdBy: input.createdBy,
-    metadata: { reversalOf: original._id.toString(), cancellationReason: input.reason, ...input.metadata },
-    lines: lines.map((line) => ({
-      accountId: line.accountId,
-      debit: Number(line.creditAmount || 0),
-      credit: Number(line.debitAmount || 0),
-      description: `Reversal - ${line.description || original.description}`,
-    })),
-  });
+    const reversal = await createJournalEntry({
+      entryDate: new Date(),
+      referenceType: 'reversal',
+      referenceId: original._id.toString(),
+      referenceNo: original.entryNumber,
+      description: `Reversal of ${original.entryNumber}`,
+      paymentMode: 'adjustment',
+      createdBy: input.createdBy,
+      metadata: { reversalOf: original._id.toString(), cancellationReason: input.reason, ...input.metadata },
+      lines: lines.map((line) => ({
+        accountId: line.accountId,
+        debit: Number(line.creditAmount || 0),
+        credit: Number(line.debitAmount || 0),
+        description: `Reversal - ${line.description || original.description}`,
+      })),
+    }, { session, skipTransaction: true });
 
-  original.status = 'cancelled';
-  original.reversedEntryId = reversal.entry._id as mongoose.Types.ObjectId;
-  original.cancellationReason = input.reason;
-  original.cancelledAt = new Date();
-  original.cancelledBy = input.createdBy;
-  await original.save();
+    original.status = 'cancelled';
+    original.reversedEntryId = reversal.entry._id as mongoose.Types.ObjectId;
+    original.cancellationReason = input.reason;
+    original.cancelledAt = new Date();
+    original.cancelledBy = input.createdBy;
+    await original.save(session ? { session } : undefined);
 
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'journal_entry_cancelled',
-    entityType: 'journal_entry',
-    entityId: original._id.toString(),
-    referenceNo: original.entryNumber,
-    userId: input.createdBy,
-    metadata: {
-      reversalEntryNumber: reversal.entry.entryNumber,
-      reason: input.reason,
-      ...input.metadata,
-    },
-    after: {
-      originalEntry: original.toObject(),
-      reversalEntry: reversal.entry.toObject(),
-    },
-  });
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'journal_entry_cancelled',
+      entityType: 'journal_entry',
+      entityId: original._id.toString(),
+      referenceNo: original.entryNumber,
+      userId: input.createdBy,
+      metadata: {
+        reversalEntryNumber: reversal.entry.entryNumber,
+        reason: input.reason,
+        ...input.metadata,
+      },
+      after: {
+        originalEntry: original.toObject(),
+        reversalEntry: reversal.entry.toObject(),
+      },
+    });
 
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'journal_entry',
-    recordId: original._id.toString(),
-    action: 'CANCEL',
-    changedBy: input.createdBy,
-    dataSnapshot: original.toObject(),
-    metadata: {
-      reason: input.reason,
-      reversalEntryNumber: reversal.entry.entryNumber,
-      ...input.metadata,
-    },
-  });
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'journal_entry',
+      recordId: original._id.toString(),
+      action: 'CANCEL',
+      changedBy: input.createdBy,
+      dataSnapshot: original.toObject(),
+      metadata: {
+        reason: input.reason,
+        reversalEntryNumber: reversal.entry.entryNumber,
+        ...input.metadata,
+      },
+    });
 
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'journal_entry',
-    recordId: reversal.entry._id.toString(),
-    action: 'CREATE_REVERSAL',
-    changedBy: input.createdBy,
-    dataSnapshot: reversal.entry.toObject(),
-    metadata: {
-      reversalOf: original._id.toString(),
-      reason: input.reason,
-      ...input.metadata,
-    },
-  });
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'journal_entry',
+      recordId: reversal.entry._id.toString(),
+      action: 'CREATE_REVERSAL',
+      changedBy: input.createdBy,
+      dataSnapshot: reversal.entry.toObject(),
+      metadata: {
+        reversalOf: original._id.toString(),
+        reason: input.reason,
+        ...input.metadata,
+      },
+    });
 
-  return { original, reversal: reversal.entry };
+    return { original, reversal: reversal.entry };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
+  }
+
+  return runInAccountingTransaction(execute);
 };
 
-export const cancelInvoice = async (input: {
+export const cancelInvoice = async (
+  input: {
   invoiceId: string;
   reason?: string;
   createdBy?: string;
   metadata?: Record<string, any>;
-}) => {
-  const invoice = await AccountingInvoice.findById(input.invoiceId);
-  if (!invoice) throw new Error('Invoice not found');
-  if (invoice.status === 'cancelled') throw new Error('Invoice already cancelled');
-  const before = invoice.toObject();
+  },
+  options: TransactionOptions = {}
+) => {
+  const execute = async (session?: mongoose.ClientSession) => {
+    const invoiceQuery = AccountingInvoice.findById(input.invoiceId);
+    const invoice = session ? await invoiceQuery.session(session) : await invoiceQuery;
+    if (!invoice) throw new Error('Invoice not found');
+    if (invoice.status === 'cancelled') throw new Error('Invoice already cancelled');
+    const before = invoice.toObject();
 
-  if (invoice.balanceAmount > 0 && invoice.journalEntryId) {
-    await cancelJournalEntry({
-      journalEntryId: invoice.journalEntryId.toString(),
-      reason: input.reason || `Cancel invoice ${invoice.invoiceNumber}`,
-      createdBy: input.createdBy,
-      metadata: input.metadata,
+    if (invoice.balanceAmount > 0 && invoice.journalEntryId) {
+      await cancelJournalEntry({
+        journalEntryId: invoice.journalEntryId.toString(),
+        reason: input.reason || `Cancel invoice ${invoice.invoiceNumber}`,
+        createdBy: input.createdBy,
+        metadata: input.metadata,
+      }, { session, skipTransaction: true });
+    }
+
+    invoice.status = 'cancelled';
+    invoice.cancelledAt = new Date();
+    invoice.cancelledBy = input.createdBy;
+    invoice.cancellationReason = input.reason;
+    await invoice.save(session ? { session } : undefined);
+
+    await writeAuditLog({
+      session,
+      module: 'accounting',
+      action: 'invoice_cancelled',
+      entityType: 'accounting_invoice',
+      entityId: invoice._id.toString(),
+      referenceNo: invoice.invoiceNumber,
+      userId: input.createdBy,
+      metadata: {
+        reason: input.reason,
+        ...input.metadata,
+      },
+      before,
+      after: invoice.toObject(),
     });
+
+    await writeRecordVersion({
+      session,
+      module: 'accounting',
+      entityType: 'accounting_invoice',
+      recordId: invoice._id.toString(),
+      action: 'CANCEL',
+      changedBy: input.createdBy,
+      dataSnapshot: invoice.toObject(),
+      metadata: {
+        reason: input.reason,
+        ...input.metadata,
+      },
+    });
+
+    return invoice;
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
   }
 
-  invoice.status = 'cancelled';
-  invoice.cancelledAt = new Date();
-  invoice.cancelledBy = input.createdBy;
-  invoice.cancellationReason = input.reason;
-  await invoice.save();
-
-  await writeAuditLog({
-    module: 'accounting',
-    action: 'invoice_cancelled',
-    entityType: 'accounting_invoice',
-    entityId: invoice._id.toString(),
-    referenceNo: invoice.invoiceNumber,
-    userId: input.createdBy,
-    metadata: {
-      reason: input.reason,
-      ...input.metadata,
-    },
-    before,
-    after: invoice.toObject(),
-  });
-
-  await writeRecordVersion({
-    module: 'accounting',
-    entityType: 'accounting_invoice',
-    recordId: invoice._id.toString(),
-    action: 'CANCEL',
-    changedBy: input.createdBy,
-    dataSnapshot: invoice.toObject(),
-    metadata: {
-      reason: input.reason,
-      ...input.metadata,
-    },
-  });
-
-  return invoice;
+  return runInAccountingTransaction(execute);
 };
 
 export const createFixedAsset = async (input: CreateFixedAssetInput): Promise<IFixedAsset> => {
@@ -1283,46 +1532,59 @@ export const createFixedAsset = async (input: CreateFixedAssetInput): Promise<IF
   });
 };
 
-export const runAssetDepreciation = async (assetId: string, input: { postingDate?: Date; createdBy?: string }) => {
-  const asset = await FixedAsset.findById(assetId);
-  if (!asset) throw new Error('Asset not found');
-  if (asset.status !== 'active') throw new Error('Only active assets can be depreciated');
-
+export const runAssetDepreciation = async (
+  assetId: string,
+  input: { postingDate?: Date; createdBy?: string },
+  options: TransactionOptions = {}
+) => {
   const postingDate = input.postingDate ? new Date(input.postingDate) : new Date();
   await assertPeriodOpen(postingDate);
   await ensureAccountingChart(input.createdBy);
 
-  const plan = buildDepreciationPostingPlan({ cost: Number(asset.cost || 0), lifeYears: Number(asset.lifeYears || 0) });
-  const journal = await createJournalEntry({
-    entryDate: postingDate,
-    referenceType: 'depreciation',
-    referenceId: asset._id.toString(),
-    referenceNo: asset.assetName,
-    description: `Monthly depreciation - ${asset.assetName}`,
-    paymentMode: 'adjustment',
-    createdBy: input.createdBy,
-    metadata: { assetId: asset._id.toString(), assetName: asset.assetName },
-    lines: [
-      {
-        accountId: asset.depreciationExpenseAccountId,
-        debit: plan.monthlyDepreciation,
-        credit: 0,
-        description: 'Depreciation expense',
-      },
-      {
-        accountId: asset.accumulatedDepreciationAccountId,
-        debit: 0,
-        credit: plan.monthlyDepreciation,
-        description: 'Accumulated depreciation',
-      },
-    ],
-  });
+  const execute = async (session?: mongoose.ClientSession) => {
+    const assetQuery = FixedAsset.findById(assetId);
+    const asset = session ? await assetQuery.session(session) : await assetQuery;
+    if (!asset) throw new Error('Asset not found');
+    if (asset.status !== 'active') throw new Error('Only active assets can be depreciated');
 
-  asset.totalDepreciationPosted = round2(Number(asset.totalDepreciationPosted || 0) + plan.monthlyDepreciation);
-  asset.lastDepreciationDate = postingDate;
-  await asset.save();
+    const plan = buildDepreciationPostingPlan({ cost: Number(asset.cost || 0), lifeYears: Number(asset.lifeYears || 0) });
+    const journal = await createJournalEntry({
+      entryDate: postingDate,
+      referenceType: 'depreciation',
+      referenceId: asset._id.toString(),
+      referenceNo: asset.assetName,
+      description: `Monthly depreciation - ${asset.assetName}`,
+      paymentMode: 'adjustment',
+      createdBy: input.createdBy,
+      metadata: { assetId: asset._id.toString(), assetName: asset.assetName },
+      lines: [
+        {
+          accountId: asset.depreciationExpenseAccountId,
+          debit: plan.monthlyDepreciation,
+          credit: 0,
+          description: 'Depreciation expense',
+        },
+        {
+          accountId: asset.accumulatedDepreciationAccountId,
+          debit: 0,
+          credit: plan.monthlyDepreciation,
+          description: 'Accumulated depreciation',
+        },
+      ],
+    }, { session, skipTransaction: true });
 
-  return { asset, journalEntry: journal.entry, monthlyDepreciation: plan.monthlyDepreciation };
+    asset.totalDepreciationPosted = round2(Number(asset.totalDepreciationPosted || 0) + plan.monthlyDepreciation);
+    asset.lastDepreciationDate = postingDate;
+    await asset.save(session ? { session } : undefined);
+
+    return { asset, journalEntry: journal.entry, monthlyDepreciation: plan.monthlyDepreciation };
+  };
+
+  if (options.session || options.skipTransaction) {
+    return execute(options.session);
+  }
+
+  return runInAccountingTransaction(execute);
 };
 
 export const listVendorBalances = async (): Promise<Array<Record<string, any>>> => {
@@ -1332,11 +1594,11 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
       const ledgerAccount = await ChartAccount.findById(vendor.ledgerAccountId);
       const closing = ledgerAccount ? await getAccountClosing(ledgerAccount._id as mongoose.Types.ObjectId) : 0;
       const totalCredits = await AccountLedgerEntry.aggregate([
-        { $match: { accountId: ledgerAccount?._id } },
+        { $match: { accountId: ledgerAccount?._id, isDeleted: { $ne: true } } },
         { $group: { _id: null, total: { $sum: '$credit' } } },
       ]);
       const totalDebits = await AccountLedgerEntry.aggregate([
-        { $match: { accountId: ledgerAccount?._id } },
+        { $match: { accountId: ledgerAccount?._id, isDeleted: { $ne: true } } },
         { $group: { _id: null, total: { $sum: '$debit' } } },
       ]);
       return {
@@ -1345,6 +1607,7 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
         contact: vendor.contact,
         phone: vendor.phone,
         email: vendor.email,
+        gstin: vendor.gstin,
         ledgerAccountId: vendor.ledgerAccountId,
         totalPayable: round2(Number(totalCredits[0]?.total || 0)),
         paid: round2(Number(totalDebits[0]?.total || 0)),

@@ -1,7 +1,10 @@
+import mongoose from 'mongoose';
 import { AuditLog } from '../models/AuditLog.js';
 import { User } from '../models/User.js';
+import { redactSensitiveData } from '../utils/redaction.js';
 
 interface AuditPayload {
+  session?: mongoose.ClientSession;
   storeKey?: string;
   storeName?: string;
   storeGstin?: string;
@@ -96,15 +99,17 @@ export const isAdminAuditViewerRole = (role?: string): boolean => {
 
 export const writeAuditLog = async (payload: AuditPayload): Promise<void> => {
   try {
+    const { session, ...auditPayload } = payload;
     let scoped = {
-      storeKey: payload.storeKey,
-      storeName: payload.storeName,
-      storeGstin: payload.storeGstin,
+      storeKey: auditPayload.storeKey,
+      storeName: auditPayload.storeName,
+      storeGstin: auditPayload.storeGstin,
     };
 
-    if ((!scoped.storeKey || (!scoped.storeName && !scoped.storeGstin)) && payload.userId) {
-      const user = await User.findById(payload.userId).select('businessName gstin');
-      const derived = deriveStoreScope(user, payload.userId);
+    if ((!scoped.storeKey || (!scoped.storeName && !scoped.storeGstin)) && auditPayload.userId) {
+      const userQuery = User.findById(auditPayload.userId).select('businessName gstin');
+      const user = session ? await userQuery.session(session) : await userQuery;
+      const derived = deriveStoreScope(user, auditPayload.userId);
       scoped = {
         storeKey: scoped.storeKey || derived.storeKey,
         storeName: scoped.storeName || derived.storeName,
@@ -113,19 +118,29 @@ export const writeAuditLog = async (payload: AuditPayload): Promise<void> => {
     }
 
     if (!scoped.storeKey) {
-      scoped = { ...scoped, ...deriveStoreScope(null, payload.userId) };
+      scoped = { ...scoped, ...deriveStoreScope(null, auditPayload.userId) };
     }
 
-    const metadataIp = normalizeIpAddress(payload?.metadata?.ip || payload?.metadata?.ipAddress);
-    const ipAddress = normalizeIpAddress(payload.ipAddress) || metadataIp || undefined;
+    const metadataIp = normalizeIpAddress(auditPayload?.metadata?.ip || auditPayload?.metadata?.ipAddress);
+    const ipAddress = normalizeIpAddress(auditPayload.ipAddress) || metadataIp || undefined;
 
-    await AuditLog.create({
-      ...payload,
+    const document = {
+      ...auditPayload,
       storeKey: scoped.storeKey,
       storeName: scoped.storeName,
       storeGstin: scoped.storeGstin,
       ipAddress,
-    });
+      metadata: redactSensitiveData(payload.metadata || {}),
+      before: redactSensitiveData(payload.before || {}),
+      after: redactSensitiveData(payload.after || {}),
+    };
+
+    if (session) {
+      await AuditLog.create([document], { session });
+      return;
+    }
+
+    await AuditLog.create(document);
   } catch (error) {
     console.error('Failed to write audit log:', error);
   }

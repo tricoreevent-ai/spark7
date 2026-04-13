@@ -20,6 +20,7 @@ export const AddProduct: React.FC = () => {
     promotionStartDate: '',
     promotionEndDate: '',
     cost: '',
+    hsnCode: '',
     gstRate: '18',
     stock: '',
     minStock: '5',
@@ -102,6 +103,7 @@ export const AddProduct: React.FC = () => {
           promotionStartDate: formData.promotionStartDate || undefined,
           promotionEndDate: formData.promotionEndDate || undefined,
           cost: Number(formData.cost),
+          hsnCode: formData.hsnCode.trim() || undefined,
           stock: Number(formData.stock),
           minStock: Number(formData.minStock),
           reorderQuantity: Number(formData.reorderQuantity || 0),
@@ -132,6 +134,7 @@ export const AddProduct: React.FC = () => {
           promotionStartDate: '',
           promotionEndDate: '',
           cost: '',
+          hsnCode: '',
           gstRate: '18',
           stock: '',
           minStock: '5',
@@ -380,6 +383,17 @@ export const AddProduct: React.FC = () => {
                   value={formData.wholesalePrice}
                   onChange={handleChange}
                   min="0"
+                  className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">HSN / SAC Code</label>
+                <input
+                  type="text"
+                  name="hsnCode"
+                  value={formData.hsnCode}
+                  onChange={handleChange}
+                  placeholder="9506 / 9983"
                   className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
                 />
               </div>

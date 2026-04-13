@@ -4,6 +4,7 @@ import { PageKey, PermissionMatrix } from '@shared/rbac';
 import { IUser } from '@shared/types';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
 
 type ModuleCard = {
@@ -125,8 +126,8 @@ export const HomeDashboard: React.FC<{
 }> = ({ user, todaySales, permissions }) => {
   const navigate = useNavigate();
   const [now, setNow] = useState(new Date());
-  const [brandName, setBrandName] = useState('Spark');
-  const [homeLogo, setHomeLogo] = useState('');
+  const [brandName, setBrandName] = useState('Sarva');
+  const [homeLogo, setHomeLogo] = useState(DEFAULT_BRAND_LOGO_PATH);
   const [homeBackgrounds, setHomeBackgrounds] = useState<string[]>([]);
   const [backgroundRotationSeconds, setBackgroundRotationSeconds] = useState(8);
   const [activeBackgroundIndex, setActiveBackgroundIndex] = useState(0);
@@ -144,8 +145,8 @@ export const HomeDashboard: React.FC<{
   useEffect(() => {
     const refreshBrand = () => {
       const settings = getGeneralSettings();
-      setBrandName(settings.business.tradeName || settings.business.legalName || user.businessName || 'Spark');
-      setHomeLogo(resolveGeneralSettingsAssetUrl(settings.business.reportLogoDataUrl || settings.business.invoiceLogoDataUrl || ''));
+      setBrandName(settings.business.tradeName || settings.business.legalName || user.businessName || 'Sarva');
+      setHomeLogo(DEFAULT_BRAND_LOGO_PATH);
       setHomeBackgrounds(
         Array.isArray(settings.appearance.homeBackgrounds)
           ? settings.appearance.homeBackgrounds.map((image) => resolveGeneralSettingsAssetUrl(image.url)).filter(Boolean)
@@ -377,7 +378,7 @@ export const HomeDashboard: React.FC<{
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">{roleLabel}</span>
             </div>
             <div className="flex flex-col gap-4 md:flex-row md:items-start">
-              {homeLogo ? <img src={homeLogo} alt="Business logo" className="h-20 w-20 rounded-2xl bg-white/8 object-contain p-2" /> : <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400/20 to-indigo-500/20 text-2xl font-semibold text-white">{String(brandName || 'S').slice(0, 1).toUpperCase()}</div>}
+              <img src={homeLogo} alt="Sarva logo" className="h-20 w-20 rounded-2xl border border-white/10 bg-white/8 object-contain p-2" />
               <div className="max-w-3xl">
                 <p className="text-sm font-medium text-cyan-100">{greeting}</p>
                 <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{user.firstName ? `${user.firstName}, here’s your control center.` : 'Your control center is ready.'}</h1>

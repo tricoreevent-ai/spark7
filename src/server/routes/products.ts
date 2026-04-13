@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { Product } from '../models/Product.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { getCurrentTenantId } from '../services/tenantContext.js';
+import { validateHsnSacCode } from '../services/gstCompliance.js';
 
 const router = Router();
 
@@ -16,6 +17,8 @@ const normalizePriceTiers = (value: any): Array<{ tierName: string; minQuantity:
     .filter((row) => row.unitPrice > 0)
     .sort((a, b) => a.minQuantity - b.minQuantity || a.tierName.localeCompare(b.tierName));
 };
+
+const normalizeOptionalHsnCode = (value: any): string => String(value || '').trim().replace(/\s+/g, '');
 
 // Get all products
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
@@ -151,6 +154,17 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       });
     }
 
+    const normalizedHsnCode = normalizeOptionalHsnCode(hsnCode);
+    if (normalizedHsnCode) {
+      const hsnValidation = validateHsnSacCode(normalizedHsnCode);
+      if (!hsnValidation.isValid) {
+        return res.status(400).json({
+          success: false,
+          error: hsnValidation.message,
+        });
+      }
+    }
+
     const tenantId = req.tenantId || getCurrentTenantId();
     if (!tenantId) {
       return res.status(401).json({
@@ -214,7 +228,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       autoReorder: Boolean(autoReorder),
       reorderQuantity: Number(reorderQuantity || 0),
       unit: unit || 'piece',
-      hsnCode: hsnCode || '',
+      hsnCode: normalizedHsnCode,
       allowNegativeStock: Boolean(allowNegativeStock),
       batchTracking: Boolean(batchTracking),
       expiryRequired: Boolean(expiryRequired),
@@ -357,6 +371,20 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
         }
       }
       updates.barcode = normalizedBarcode || undefined;
+    }
+
+    if (hsnCode !== undefined) {
+      const normalizedHsnCode = normalizeOptionalHsnCode(hsnCode);
+      if (normalizedHsnCode) {
+        const hsnValidation = validateHsnSacCode(normalizedHsnCode);
+        if (!hsnValidation.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: hsnValidation.message,
+          });
+        }
+      }
+      updates.hsnCode = normalizedHsnCode;
     }
 
     const product = await Product.findOneAndUpdate(

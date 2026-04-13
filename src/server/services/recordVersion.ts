@@ -1,6 +1,8 @@
+import mongoose from 'mongoose';
 import { RecordVersion } from '../models/RecordVersion.js';
 
 interface WriteRecordVersionInput {
+  session?: mongoose.ClientSession;
   module: string;
   entityType: string;
   recordId: string;
@@ -17,14 +19,15 @@ export const writeRecordVersion = async (input: WriteRecordVersionInput): Promis
     const recordId = String(input.recordId || '').trim();
     if (!module || !entityType || !recordId) return;
 
-    const latest = await RecordVersion.findOne({ module, entityType, recordId })
+    const latestQuery = RecordVersion.findOne({ module, entityType, recordId })
       .sort({ versionNumber: -1 })
       .select('versionNumber')
       .lean();
+    const latest = input.session ? await latestQuery.session(input.session) : await latestQuery;
 
     const nextVersion = Math.max(1, Number(latest?.versionNumber || 0) + 1);
 
-    await RecordVersion.create({
+    const document = {
       module,
       entityType,
       recordId,
@@ -34,7 +37,14 @@ export const writeRecordVersion = async (input: WriteRecordVersionInput): Promis
       changedBy: input.changedBy,
       changedAt: new Date(),
       metadata: input.metadata,
-    });
+    };
+
+    if (input.session) {
+      await RecordVersion.create([document], { session: input.session });
+      return;
+    }
+
+    await RecordVersion.create(document);
   } catch (error) {
     console.error('Failed to write record version:', error);
   }
