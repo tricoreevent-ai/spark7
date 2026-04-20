@@ -771,21 +771,25 @@ Clears accounting-facing transaction data for testing while preserving master/se
 What it clears  
 The reset utility clears transaction collections such as ledger entries, journal entries, customer ledger entries, accounting invoices, payments, vouchers, day-book rows, salary and contract payments, sales, returns, orders, quotations, facility/event booking transactions, member subscriptions, attendance rows used for payroll testing, purchase transactions, inventory balance/batch records, stock movement, bank feed/reconciliation rows, TDS/GST working records, payroll statutory outputs, and validation reports.
 
+What the batch file also resets  
+When run through `clear-accounting-transactions.bat`, the utility also resets derived and opening-balance style fields so the accounting workspace becomes clean again for testing. This includes customer outstanding balances, product stock-style totals, chart account opening balances, vendor opening balances, customer opening balances, treasury opening balances, product opening stock values, and the opening-balance setup lock or initialized state.
+
 What it preserves  
 It does not delete master/setup collections such as users, tenants, chart accounts, account groups, vendors, customers, products, categories, suppliers, employees, facilities, fixed assets, financial periods, stock locations, inventory valuation settings, membership plans, TDS sections, TDS deductee profiles, treasury accounts, app settings, and validation settings.
 
 Safe usage  
 
 1. Take a backup first.
-2. Run `node scripts\clear-accounting-transactions.cjs --dry-run` to preview counts.
+2. Run `clear-accounting-transactions.bat --dry-run` or `node scripts\clear-accounting-transactions.cjs --dry-run --full-reset` to preview counts.
 3. Run `clear-accounting-transactions.bat`.
 4. Enter a tenant ID if only one tenant must be cleared, or leave blank for all tenants.
 5. Type the confirmation phrase exactly when prompted.
 
-Optional reset choices  
+Direct CLI options  
 
-- `Reset derived balances` resets customer/vendor/product balance-style fields for a clean test cycle.
-- `Reset opening balances` resets chart account and vendor opening balances. Use this only when the opening balances should also be rebuilt from scratch.
+- `--dry-run` previews the delete plan without removing data.
+- `--full-reset` runs transaction deletion plus derived/opening balance reset together.
+- `--tenant=<tenantId>` limits the reset to one tenant.
 
 ## 12. Transaction Screen Guides
 

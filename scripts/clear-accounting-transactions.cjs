@@ -15,8 +15,9 @@ const getArgValue = (prefix) => {
 const dryRun = args.has('--dry-run');
 const yes = args.has('--yes');
 const tenantId = getArgValue('--tenant=');
-const resetDerivedBalances = args.has('--reset-derived-balances');
-const resetOpeningBalances = args.has('--reset-opening-balances');
+const fullReset = args.has('--full-reset');
+const resetDerivedBalances = fullReset || args.has('--reset-derived-balances');
+const resetOpeningBalances = fullReset || args.has('--reset-opening-balances');
 
 const mongoUrl = process.env.DATABASE_URL || '';
 
@@ -37,6 +38,7 @@ const transactionCollections = [
   'returns',
   'orders',
   'quotes',
+  'serviceorders',
   'facilitybookings',
   'eventbookings',
   'eventquotations',
@@ -108,6 +110,16 @@ const collectionExists = async (db, name) => {
   return rows.length > 0;
 };
 
+const countDocumentsIfExists = async (db, name, filter) => {
+  if (!(await collectionExists(db, name))) return null;
+  return db.collection(name).countDocuments(filter);
+};
+
+const updateManyIfExists = async (db, name, filter, update) => {
+  if (!(await collectionExists(db, name))) return { matchedCount: 0, modifiedCount: 0 };
+  return db.collection(name).updateMany(filter, update);
+};
+
 const formatFilter = (filter) => (Object.keys(filter).length ? JSON.stringify(filter) : 'ALL DOCUMENTS');
 
 const main = async () => {
@@ -124,6 +136,8 @@ const main = async () => {
   console.log('Database:', mongoose.connection.name);
   console.log('Filter:', formatFilter(filter));
   console.log('Mode:', dryRun ? 'DRY RUN - no data will be deleted' : 'DELETE TRANSACTION DATA');
+  console.log('Derived reset:', resetDerivedBalances ? 'YES' : 'NO');
+  console.log('Opening-balance reset:', resetOpeningBalances ? 'YES' : 'NO');
   console.log('');
   console.log('Transaction collections targeted:');
   transactionCollections.forEach((name) => console.log(`- ${name}`));
@@ -144,6 +158,38 @@ const main = async () => {
   existingCollections.forEach((row) => console.log(`- ${row.collectionName}: ${row.count}`));
   if (!existingCollections.length) {
     console.log('No matching transaction collections found.');
+  }
+
+  const additionalActions = [];
+  if (resetDerivedBalances) {
+    const customerCount = await countDocumentsIfExists(db, 'customers', filter);
+    const productCount = await countDocumentsIfExists(db, 'products', filter);
+    additionalActions.push(`- reset customers.outstandingBalance: ${customerCount ?? 0}`);
+    additionalActions.push(`- reset product stock-style fields: ${productCount ?? 0}`);
+  }
+  if (resetOpeningBalances) {
+    const chartAccountCount = await countDocumentsIfExists(db, 'chartaccounts', filter);
+    const vendorCount = await countDocumentsIfExists(db, 'vendors', filter);
+    const customerCount = await countDocumentsIfExists(db, 'customers', filter);
+    const productCount = await countDocumentsIfExists(db, 'products', filter);
+    const treasuryCount = await countDocumentsIfExists(db, 'treasuryaccounts', filter);
+    const openingSetupCount = await countDocumentsIfExists(db, 'openingbalancesetups', filter);
+    additionalActions.push(`- reset chart account opening balances: ${chartAccountCount ?? 0}`);
+    additionalActions.push(`- reset vendor opening balances: ${vendorCount ?? 0}`);
+    additionalActions.push(`- reset customer opening balances: ${customerCount ?? 0}`);
+    additionalActions.push(`- reset product opening stock values: ${productCount ?? 0}`);
+    additionalActions.push(`- reset treasury account opening balances: ${treasuryCount ?? 0}`);
+    additionalActions.push(`- unlock/clear opening balance setup state: ${openingSetupCount ?? 0}`);
+  }
+
+  if (additionalActions.length) {
+    console.log('');
+    console.log('Additional reset actions:');
+    additionalActions.forEach((line) => console.log(line));
+  }
+
+  if (!existingCollections.length && !additionalActions.length) {
+    console.log('Nothing matched the requested reset scope.');
     return;
   }
 
@@ -162,24 +208,37 @@ const main = async () => {
     }
 
     if (resetDerivedBalances) {
-      await db.collection('customers').updateMany(filter, { $set: { outstandingBalance: 0 } });
-      await db.collection('vendors').updateMany(filter, { $set: { openingBalance: 0 } });
-      await db.collection('products').updateMany(filter, {
+      await updateManyIfExists(db, 'customers', filter, { $set: { outstandingBalance: 0 } });
+      await updateManyIfExists(db, 'products', filter, {
         $set: {
           stock: 0,
           currentStock: 0,
           quantity: 0,
           reservedQuantity: 0,
           availableQuantity: 0,
+          returnStock: 0,
+          damagedStock: 0,
         },
       });
-      console.log('Reset derived customer/vendor/product balance fields.');
+      console.log('Reset derived customer/product balance and stock fields.');
     }
 
     if (resetOpeningBalances) {
-      await db.collection('chartaccounts').updateMany(filter, { $set: { openingBalance: 0, openingSide: 'debit' } });
-      await db.collection('vendors').updateMany(filter, { $set: { openingBalance: 0, openingSide: 'credit' } });
-      console.log('Reset chart account and vendor opening balances.');
+      await updateManyIfExists(db, 'chartaccounts', filter, { $set: { openingBalance: 0, openingSide: 'debit' } });
+      await updateManyIfExists(db, 'vendors', filter, { $set: { openingBalance: 0, openingSide: 'credit' } });
+      await updateManyIfExists(db, 'customers', filter, { $set: { openingBalance: 0 } });
+      await updateManyIfExists(db, 'products', filter, { $set: { openingStockValue: 0 } });
+      await updateManyIfExists(db, 'treasuryaccounts', filter, { $set: { openingBalance: 0 } });
+      await updateManyIfExists(db, 'openingbalancesetups', filter, {
+        $set: { isLocked: false },
+        $unset: {
+          initializedAt: '',
+          initializedBy: '',
+          lockedAt: '',
+          lockedBy: '',
+        },
+      });
+      console.log('Reset ledger/customer/product/treasury opening balances and cleared opening balance setup state.');
     }
   }
 
