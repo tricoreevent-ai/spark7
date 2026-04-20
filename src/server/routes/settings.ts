@@ -6,10 +6,92 @@ import { writeAuditLog } from '../services/audit.js';
 import { User } from '../models/User.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { decryptBackupPayload, encryptBackupPayload, isBackupEncryptionEnabled } from '../services/backupCrypto.js';
+import {
+  deriveCloudflareR2CredentialsFromApiToken,
+  extractBucketNameFromS3Endpoint,
+  loadCloudStorageConfigRow,
+  normalizeCloudStorageConfig,
+  sanitizeCloudStorageConfigForClient,
+  saveCloudStorageConfig,
+  testCloudStorageConnection,
+} from '../services/cloudStorage.js';
+import { migrateExistingImagesToManagedStorage } from '../services/imageStorageMigration.js';
 
 const router = Router();
 const RESERVED_COLLECTION_PREFIX = 'system.';
 const BACKUP_AUDIT_ACTIONS = ['database_backup_generated', 'database_restore_executed'];
+
+interface CollectionUsageStats {
+  name: string;
+  documents: number;
+  avgObjSize: number;
+  dataSize: number;
+  storageSize: number;
+  indexSize: number;
+  totalSize: number;
+  percentageOfDatabase: number;
+}
+
+const buildCloudStorageConfigFromInput = async (
+  input: any,
+  existingConfig?: ReturnType<typeof normalizeCloudStorageConfig>
+) => {
+  const current = existingConfig || normalizeCloudStorageConfig({});
+  const rawInput = input && typeof input === 'object' ? input : {};
+  const accountId = String(rawInput.accountId || current.accountId || '').trim();
+  const bucketName = String(
+    rawInput.bucketName
+    || extractBucketNameFromS3Endpoint(rawInput.s3Endpoint)
+    || current.bucketName
+    || ''
+  ).trim();
+  const apiToken = String(rawInput.apiToken || '').trim();
+  const directAccessKeyId = String(rawInput.accessKeyId || '').trim();
+  const directSecretAccessKey = String(rawInput.secretAccessKey || '').trim();
+
+  if ((directAccessKeyId && !directSecretAccessKey) || (!directAccessKeyId && directSecretAccessKey)) {
+    throw new Error('Provide both Access Key ID and Secret Access Key together.');
+  }
+
+  let config = normalizeCloudStorageConfig({
+    ...current,
+    ...rawInput,
+    accountId,
+    bucketName,
+    accessKeyId: current.accessKeyId,
+    secretAccessKey: current.secretAccessKey,
+  });
+
+  if (directAccessKeyId && directSecretAccessKey) {
+    config = normalizeCloudStorageConfig({
+      ...config,
+      accessKeyId: directAccessKeyId,
+      secretAccessKey: directSecretAccessKey,
+    });
+  } else if (apiToken) {
+    const derived = await deriveCloudflareR2CredentialsFromApiToken({
+      accountId: config.accountId,
+      apiToken,
+    });
+    config = normalizeCloudStorageConfig({
+      ...config,
+      accessKeyId: derived.accessKeyId,
+      secretAccessKey: derived.secretAccessKey,
+    });
+  }
+
+  if (config.enabled) {
+    if (!config.accountId) throw new Error('Cloudflare account ID is required.');
+    if (!config.bucketName) throw new Error('Bucket name is required.');
+    if (!config.s3Endpoint) throw new Error('S3 API endpoint is required.');
+    if (!config.publicBaseUrl) throw new Error('Public base URL is required.');
+    if (!config.accessKeyId || !config.secretAccessKey) {
+      throw new Error('Provide a valid API token or save existing credentials before enabling cloud storage.');
+    }
+  }
+
+  return config;
+};
 
 const flattenObject = (
   value: Record<string, any>,
@@ -45,6 +127,61 @@ const requireSuperAdmin = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   return user;
+};
+
+const listUserCollectionNames = async (db: NonNullable<typeof mongoose.connection.db>) => {
+  const collections = await db.listCollections({}, { nameOnly: false }).toArray();
+  return collections
+    .map((entry) => ({
+      name: String(entry.name || ''),
+      type: String((entry as { type?: string }).type || 'collection').toLowerCase(),
+    }))
+    .filter(
+      (entry) =>
+        Boolean(entry.name) &&
+        !entry.name.startsWith(RESERVED_COLLECTION_PREFIX) &&
+        entry.type !== 'view'
+    )
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+};
+
+const loadCollectionUsageStats = async (
+  db: NonNullable<typeof mongoose.connection.db>,
+  names: string[],
+  databaseFootprintSize: number
+): Promise<CollectionUsageStats[]> => {
+  const settled = await Promise.allSettled(
+    names.map(async (name) => {
+      const stats = await db.command({ collStats: name, scale: 1 });
+      const documents = Number(stats.count || 0);
+      const avgObjSize = Number(stats.avgObjSize || 0);
+      const dataSize = Number(stats.size || 0);
+      const storageSize = Number(stats.storageSize || 0);
+      const indexSize = Number(stats.totalIndexSize || stats.indexSize || 0);
+      const totalSize = (storageSize > 0 ? storageSize : dataSize) + indexSize;
+
+      return {
+        name,
+        documents,
+        avgObjSize,
+        dataSize,
+        storageSize,
+        indexSize,
+        totalSize,
+        percentageOfDatabase:
+          databaseFootprintSize > 0 ? (totalSize / databaseFootprintSize) * 100 : 0,
+      } satisfies CollectionUsageStats;
+    })
+  );
+
+  return settled
+    .flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
+    .sort((a, b) => {
+      if (b.totalSize !== a.totalSize) return b.totalSize - a.totalSize;
+      if (b.documents !== a.documents) return b.documents - a.documents;
+      return a.name.localeCompare(b.name);
+    });
 };
 
 router.get('/database-backup', async (req: AuthenticatedRequest, res: Response) => {
@@ -114,15 +251,13 @@ router.get('/database-stats', async (req: AuthenticatedRequest, res: Response) =
       return res.status(500).json({ success: false, error: 'Database connection not ready' });
     }
 
-    const [dbStats, collections] = await Promise.all([
+    const [dbStats, names] = await Promise.all([
       db.command({ dbStats: 1, scale: 1 }),
-      db.listCollections({}, { nameOnly: true }).toArray(),
+      listUserCollectionNames(db),
     ]);
 
-    const names = collections
-      .map((entry) => String(entry.name || ''))
-      .filter((name) => Boolean(name) && !name.startsWith(RESERVED_COLLECTION_PREFIX))
-      .sort((a, b) => a.localeCompare(b));
+    const databaseFootprintSize = Number((dbStats.storageSize || 0) + (dbStats.indexSize || 0));
+    const collectionUsage = await loadCollectionUsageStats(db, names, databaseFootprintSize);
 
     res.json({
       success: true,
@@ -138,6 +273,7 @@ router.get('/database-stats', async (req: AuthenticatedRequest, res: Response) =
         fsUsedSize: Number(dbStats.fsUsedSize || 0),
         fsTotalSize: Number(dbStats.fsTotalSize || 0),
         collectionNames: names,
+        collectionUsage,
         checkedAt: new Date(),
         connectionState: mongoose.connection.readyState,
       },
@@ -279,6 +415,133 @@ router.get('/database-history', async (req: AuthenticatedRequest, res: Response)
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to load backup history' });
+  }
+});
+
+router.get('/cloud-storage', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await requireSuperAdmin(req, res);
+    if (!user) return;
+
+    const { config, updatedAt } = await loadCloudStorageConfigRow();
+    res.json({
+      success: true,
+      data: {
+        config: sanitizeCloudStorageConfigForClient(config, updatedAt),
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to load cloud storage settings' });
+  }
+});
+
+router.put('/cloud-storage', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await requireSuperAdmin(req, res);
+    if (!user) return;
+
+    const existing = await loadCloudStorageConfigRow();
+    const config = await buildCloudStorageConfigFromInput(req.body?.config || req.body, existing.config);
+    const testResult = config.enabled ? await testCloudStorageConnection(config) : null;
+    const saved = await saveCloudStorageConfig(config, req.userId);
+    const savedConfig = normalizeCloudStorageConfig(saved?.value || config);
+
+    await writeAuditLog({
+      module: 'settings',
+      action: 'cloud_storage_config_saved',
+      entityType: 'app_settings',
+      userId: req.userId,
+      metadata: {
+        enabled: savedConfig.enabled,
+        provider: savedConfig.provider,
+        bucketName: savedConfig.bucketName,
+        publicBaseUrl: savedConfig.publicBaseUrl,
+        tested: Boolean(testResult),
+      },
+    });
+
+    res.json({
+      success: true,
+      message: savedConfig.enabled
+        ? 'Cloud storage saved and verified successfully.'
+        : 'Cloud storage settings saved.',
+      data: {
+        config: sanitizeCloudStorageConfigForClient(savedConfig, saved?.updatedAt || new Date()),
+        testResult,
+      },
+    });
+  } catch (error: any) {
+    const message = error.message || 'Failed to save cloud storage settings';
+    const status = (
+      message.includes('required')
+      || message.includes('failed')
+      || message.includes('Provide a valid API token')
+      || message.includes('Cloudflare token')
+    )
+      ? 400
+      : 500;
+    res.status(status).json({ success: false, error: message });
+  }
+});
+
+router.post('/cloud-storage/test', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await requireSuperAdmin(req, res);
+    if (!user) return;
+
+    const existing = await loadCloudStorageConfigRow();
+    const config = await buildCloudStorageConfigFromInput(req.body?.config || req.body, existing.config);
+    const testResult = await testCloudStorageConnection(config);
+
+    res.json({
+      success: true,
+      message: 'Cloud storage connection test passed.',
+      data: {
+        config: sanitizeCloudStorageConfigForClient(config, existing.updatedAt),
+        testResult,
+      },
+    });
+  } catch (error: any) {
+    const message = error.message || 'Failed to test cloud storage';
+    const status = (
+      message.includes('required')
+      || message.includes('failed')
+      || message.includes('Provide a valid API token')
+      || message.includes('Cloudflare token')
+    )
+      ? 400
+      : 500;
+    res.status(status).json({ success: false, error: message });
+  }
+});
+
+router.post('/cloud-storage/migrate-images', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await requireSuperAdmin(req, res);
+    if (!user) return;
+
+    const summary = await migrateExistingImagesToManagedStorage({
+      tenantId: req.tenantId,
+      updatedBy: req.userId,
+    });
+
+    await writeAuditLog({
+      module: 'settings',
+      action: 'cloud_storage_images_migrated',
+      entityType: 'app_settings',
+      userId: req.userId,
+      metadata: summary,
+    });
+
+    res.json({
+      success: true,
+      message: summary.cloudStorageEnabled
+        ? 'Existing images migrated to managed storage.'
+        : 'Existing inline images migrated to local managed storage.',
+      data: summary,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to migrate existing images' });
   }
 });
 

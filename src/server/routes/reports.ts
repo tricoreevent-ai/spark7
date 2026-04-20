@@ -8,6 +8,23 @@ import { Attendance } from '../models/Attendance.js';
 import { User } from '../models/User.js';
 import { deriveStoreScope, isAdminAuditViewerRole } from '../services/audit.js';
 import { productRequiresStock } from '../services/salesPricing.js';
+import { buildBatchStockRows, buildInventoryValuationRows } from '../services/inventoryCosting.js';
+import {
+  buildPosB2BvsB2CReport,
+  buildPosBalanceSheetReport,
+  buildPosGstHandoff,
+  buildPosHsnSalesReport,
+  buildPosInventoryMovement,
+  buildPosMembershipSales,
+  buildPosNoteRegister,
+  buildPosPaymentReconciliation,
+  buildPosProfitLossReport,
+  buildPosSalesRegister,
+  buildPosSalesSummaryByShift,
+  buildPosTaxSummaryReport,
+  buildPosTaxabilityReport,
+  buildPosZReport,
+} from '../services/posReporting.js';
 
 const router = Router();
 const toNumber = (value: any): number => Number(value || 0);
@@ -48,6 +65,12 @@ const parseRange = (startDate?: string, endDate?: string) => {
     return { start: normalizedStart, end: normalizedEnd };
   }
   return { start, end };
+};
+
+const getStoreGstin = async (req: AuthenticatedRequest): Promise<string> => {
+  if (!req.userId) return '';
+  const user = await User.findById(req.userId).select('gstin');
+  return String(user?.gstin || '').trim().toUpperCase();
 };
 
 const saleMatch = (start: Date, end: Date) => ({
@@ -99,12 +122,24 @@ router.get('/item-wise-sales', authMiddleware, async (req: AuthenticatedRequest,
       { $unwind: '$items' },
       {
         $group: {
-          _id: '$items.productId',
+          _id: {
+            productId: '$items.productId',
+            variantSize: { $ifNull: ['$items.variantSize', ''] },
+            variantColor: { $ifNull: ['$items.variantColor', ''] },
+          },
           productName: { $first: '$items.productName' },
           sku: { $first: '$items.sku' },
+          category: { $first: '$items.category' },
+          subcategory: { $first: '$items.subcategory' },
+          variantSize: { $first: '$items.variantSize' },
+          variantColor: { $first: '$items.variantColor' },
           quantity: { $sum: '$items.quantity' },
           amount: { $sum: '$items.lineTotal' },
-          taxableValue: { $sum: { $multiply: ['$items.quantity', '$items.unitPrice'] } },
+          taxableValue: {
+            $sum: {
+              $ifNull: ['$items.taxableValue', { $multiply: ['$items.quantity', '$items.unitPrice'] }],
+            },
+          },
           tax: { $sum: '$items.gstAmount' },
         },
       },
@@ -366,38 +401,164 @@ router.get('/tax-summary', authMiddleware, async (req: AuthenticatedRequest, res
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
-
-    const salesTax = await Sale.aggregate([
-      { $match: saleMatch(start, end) },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: '$items.gstRate',
-          taxableValue: { $sum: { $multiply: ['$items.quantity', '$items.unitPrice'] } },
-          taxAmount: { $sum: '$items.gstAmount' },
-          cgstAmount: { $sum: '$items.cgstAmount' },
-          sgstAmount: { $sum: '$items.sgstAmount' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
-
-    const returnTax = await Return.aggregate([
-      { $match: { createdAt: { $gte: start, $lte: end }, returnStatus: 'approved' } },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: '$items.gstRate',
-          taxableValue: { $sum: '$items.lineSubtotal' },
-          taxAmount: { $sum: '$items.lineTax' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
-
-    res.json({ success: true, data: { salesTax, returnTax } });
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosTaxSummaryReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate tax summary report' });
+  }
+});
+
+router.get('/profit-loss-store', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const report = await buildPosProfitLossReport(start, end);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate POS profit and loss report' });
+  }
+});
+
+router.get('/balance-sheet-store', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { endDate } = req.query;
+    const { end } = parseRange(undefined, endDate as string);
+    const report = await buildPosBalanceSheetReport(end);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate POS balance sheet report' });
+  }
+});
+
+router.get('/sales-summary-shift', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosSalesSummaryByShift(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate shift sales summary' });
+  }
+});
+
+router.get('/hsn-wise-sales', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosHsnSalesReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate HSN-wise sales report' });
+  }
+});
+
+router.get('/taxability-breakup', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosTaxabilityReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate taxability breakup report' });
+  }
+});
+
+router.get('/b2b-vs-b2c', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosB2BvsB2CReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate B2B vs B2C report' });
+  }
+});
+
+router.get('/gst-note-register', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosNoteRegister(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate GST note register' });
+  }
+});
+
+router.get('/sales-register-detailed', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosSalesRegister(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate detailed sales register' });
+  }
+});
+
+router.get('/payment-reconciliation', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosPaymentReconciliation(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate payment reconciliation report' });
+  }
+});
+
+router.get('/z-report', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosZReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate Z report' });
+  }
+});
+
+router.get('/pos-inventory-movement', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosInventoryMovement(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate POS inventory movement report' });
+  }
+});
+
+router.get('/membership-sales', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const report = await buildPosMembershipSales(start, end);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate membership sales report' });
+  }
+});
+
+router.get('/gst-handoff', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { start, end } = parseRange(startDate as string, endDate as string);
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosGstHandoff(start, end, storeGstin);
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate GST handoff dataset report' });
   }
 });
 
@@ -409,15 +570,17 @@ router.get('/inventory-stock-summary', authMiddleware, async (req: Authenticated
     if (!includeInactive) filter.isActive = true;
     if (category) filter.category = category;
 
-    const rows = (await Product.find(filter).select('name sku category subcategory stock minStock cost price unit updatedAt itemType'))
+    const rows = (await Product.find(filter).select('name sku category subcategory stock minStock cost price unit updatedAt itemType openingStockValue'))
       .filter((row: any) => productRequiresStock(row));
     const totalProducts = rows.length;
     const inStock = rows.filter((row: any) => toNumber(row.stock) > 0).length;
     const lowStock = rows.filter((row: any) => toNumber(row.stock) > 0 && toNumber(row.stock) <= toNumber(row.minStock)).length;
     const outOfStock = rows.filter((row: any) => toNumber(row.stock) <= 0).length;
     const totalUnits = rows.reduce((sum, row: any) => sum + toNumber(row.stock), 0);
-    const valuationCost = rows.reduce((sum, row: any) => sum + (toNumber(row.stock) * toNumber(row.cost)), 0);
+    const valuation = await buildInventoryValuationRows();
+    const valuationCost = toNumber(valuation.summary?.value);
     const valuationRetail = rows.reduce((sum, row: any) => sum + (toNumber(row.stock) * toNumber(row.price)), 0);
+    const openingStockValue = rows.reduce((sum, row: any) => sum + toNumber(row.openingStockValue), 0);
 
     res.json({
       success: true,
@@ -429,6 +592,7 @@ router.get('/inventory-stock-summary', authMiddleware, async (req: Authenticated
         totalUnits: roundTo2(totalUnits),
         valuationCost: roundTo2(valuationCost),
         valuationRetail: roundTo2(valuationRetail),
+        openingStockValue: roundTo2(openingStockValue),
       },
     });
   } catch (error: any) {
@@ -471,30 +635,38 @@ router.get('/inventory-low-stock', authMiddleware, async (req: AuthenticatedRequ
 
 router.get('/inventory-valuation', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const includeInactive = String(req.query.includeInactive || 'false') === 'true';
     const category = String(req.query.category || '').trim();
-    const filter: any = {};
-    if (!includeInactive) filter.isActive = true;
-    if (category) filter.category = category;
+    const valuation = await buildInventoryValuationRows({
+      locationId: String(req.query.locationId || '').trim() || undefined,
+    });
+    const valuationRows = category
+      ? valuation.rows.filter((row: any) => String(row.category || '').toLowerCase() === category.toLowerCase())
+      : valuation.rows;
 
-    const rows = (await Product.find(filter).select('name sku category subcategory stock unit cost price updatedAt itemType'))
-      .filter((row: any) => productRequiresStock(row));
-    const mapped = rows.map((row: any) => {
-      const stock = toNumber(row.stock);
-      const unitCost = toNumber(row.cost);
-      const unitPrice = toNumber(row.price);
-      const costValue = stock * unitCost;
-      const retailValue = stock * unitPrice;
+    const mapped = valuationRows.map((row: any) => {
+      const stock = toNumber(row.quantity ?? row.stock);
+      const unitCost = toNumber(row.unitCost);
+      const productName = row.productName || row.name || '';
+      const unitPrice = toNumber(row.unitPrice || row.price || 0);
+      const costValue = toNumber(row.stockValue ?? row.costValue);
+      const openingStockValue = toNumber(row.openingStockValue);
+      const retailValue = unitPrice > 0 ? stock * unitPrice : 0;
       return {
-        productId: row._id,
-        name: row.name,
+        productId: row.productId || row._id,
+        name: productName,
         sku: row.sku,
         category: row.category,
         subcategory: row.subcategory || '',
+        locationCode: row.locationCode || '',
+        locationName: row.locationName || '',
+        batchNumber: row.batchNumber || '',
+        expiryDate: row.expiryDate || null,
+        valuationMethod: valuation.method,
         stock,
         unit: row.unit || 'piece',
         unitCost: roundTo2(unitCost),
         unitPrice: roundTo2(unitPrice),
+        openingStockValue: roundTo2(openingStockValue),
         costValue: roundTo2(costValue),
         retailValue: roundTo2(retailValue),
         potentialMarginValue: roundTo2(retailValue - costValue),
@@ -504,19 +676,22 @@ router.get('/inventory-valuation', authMiddleware, async (req: AuthenticatedRequ
     const summary = mapped.reduce(
       (acc, row) => {
         acc.totalCostValue += toNumber(row.costValue);
+        acc.totalOpeningStockValue += toNumber(row.openingStockValue);
         acc.totalRetailValue += toNumber(row.retailValue);
         acc.totalMarginValue += toNumber(row.potentialMarginValue);
         return acc;
       },
-      { totalCostValue: 0, totalRetailValue: 0, totalMarginValue: 0 }
+      { totalCostValue: 0, totalOpeningStockValue: 0, totalRetailValue: 0, totalMarginValue: 0 }
     );
 
     res.json({
       success: true,
       data: {
         rows: mapped,
+        method: valuation.method,
         summary: {
           totalCostValue: roundTo2(summary.totalCostValue),
+          totalOpeningStockValue: roundTo2(summary.totalOpeningStockValue),
           totalRetailValue: roundTo2(summary.totalRetailValue),
           totalMarginValue: roundTo2(summary.totalMarginValue),
         },
@@ -524,6 +699,39 @@ router.get('/inventory-valuation', authMiddleware, async (req: AuthenticatedRequ
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate inventory valuation report' });
+  }
+});
+
+router.get('/inventory-batch-stock', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await buildBatchStockRows({
+      productId: String(req.query.productId || '').trim() || undefined,
+      locationId: String(req.query.locationId || '').trim() || undefined,
+      includeExpired: String(req.query.includeExpired || 'false') === 'true',
+    });
+    const summary = rows.reduce(
+      (acc: any, row: any) => {
+        acc.quantity += toNumber(row.quantity);
+        acc.availableQuantity += toNumber(row.availableQuantity);
+        acc.reservedQuantity += toNumber(row.reservedQuantity);
+        acc.stockValue += toNumber(row.stockValue);
+        return acc;
+      },
+      { quantity: 0, availableQuantity: 0, reservedQuantity: 0, stockValue: 0 }
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      summary: {
+        quantity: roundTo2(summary.quantity),
+        availableQuantity: roundTo2(summary.availableQuantity),
+        reservedQuantity: roundTo2(summary.reservedQuantity),
+        stockValue: roundTo2(summary.stockValue),
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate batch stock report' });
   }
 });
 

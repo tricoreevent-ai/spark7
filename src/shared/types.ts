@@ -43,6 +43,15 @@ export interface IUser {
   updatedAt?: Date;
 }
 
+export interface IProductVariantMatrixRow {
+  size?: string;
+  color?: string;
+  skuSuffix?: string;
+  barcode?: string;
+  price?: number;
+  isActive?: boolean;
+}
+
 export interface IProduct {
   _id?: string;
   name: string;
@@ -65,8 +74,13 @@ export interface IProduct {
   cost: number;
   taxType?: 'gst' | 'vat';
   gstRate: number;
+  cgstRate?: number;
+  sgstRate?: number;
+  igstRate?: number;
   hsnCode?: string;
   stock: number;
+  openingStockValue?: number;
+  stockLedgerAccountId?: string;
   returnStock?: number;
   damagedStock?: number;
   allowNegativeStock?: boolean;
@@ -80,7 +94,11 @@ export interface IProduct {
   serialNumberTracking?: boolean;
   variantSize?: string;
   variantColor?: string;
+  variantMatrix?: IProductVariantMatrixRow[];
   isActive?: boolean;
+  deletedAt?: Date | string;
+  deletedBy?: string;
+  deletionReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -110,15 +128,54 @@ export interface IOrder {
   userId: string | IUser;
   items: {
     productId: string | IProduct;
+    productName?: string;
+    sku?: string;
     quantity: number;
     price: number;
     gstAmount: number;
+    gstRate?: number;
+    reservedQuantity?: number;
+    deliveredQuantity?: number;
+    invoicedQuantity?: number;
+    backOrderQuantity?: number;
+    reservationAllocations?: Array<{
+      batchId?: string;
+      batchNumber?: string;
+      locationId?: string;
+      locationCode?: string;
+      expiryDate?: Date | string;
+      quantity: number;
+      unitCost?: number;
+    }>;
+    deliveryAllocations?: Array<{
+      batchId?: string;
+      batchNumber?: string;
+      locationId?: string;
+      locationCode?: string;
+      quantity: number;
+      unitCost?: number;
+    }>;
   }[];
   totalAmount: number;
   gstAmount: number;
   paymentMethod: 'cash' | 'card' | 'upi' | 'check';
   paymentStatus: 'pending' | 'completed' | 'failed';
-  orderStatus: 'pending' | 'processing' | 'completed' | 'cancelled';
+  orderStatus:
+    | 'pending'
+    | 'confirmed'
+    | 'partially_reserved'
+    | 'reserved'
+    | 'back_order'
+    | 'partially_dispatched'
+    | 'dispatched'
+    | 'invoiced'
+    | 'processing'
+    | 'completed'
+    | 'cancelled';
+  reservationStatus?: 'not_reserved' | 'partial' | 'reserved' | 'back_order';
+  deliveryStatus?: 'not_dispatched' | 'partial' | 'dispatched';
+  invoiceSaleId?: string;
+  deliveryChallanIds?: string[];
   notes?: string;
   createdAt?: Date | string;
   updatedAt?: Date | string;

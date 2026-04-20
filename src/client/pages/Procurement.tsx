@@ -452,6 +452,22 @@ export const Procurement: React.FC = () => {
     }
   };
 
+  const createPurchaseBill = async (order: PurchaseOrderRow) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      await fetchApiJson(apiUrl(`/api/purchases/${order._id}/bill`), {
+        method: 'POST',
+        headers: getHeaders(false),
+      });
+      await refreshAll(`Purchase bill posted for ${order.purchaseNumber}.`);
+    } catch (billError: any) {
+      setError(billError?.message || 'Failed to create purchase bill');
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -577,7 +593,7 @@ export const Procurement: React.FC = () => {
                         <td className="px-2 py-2 text-gray-300"><div>{formatDate(order.orderDate)}</div><div className="text-xs text-gray-500">{formatDate(order.expectedDate)}</div></td>
                         <td className="px-2 py-2"><span className={`rounded-full px-2 py-1 text-xs ${order.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' : order.status === 'returned' ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>{statusLabel(order.status)}</span></td>
                         <td className="px-2 py-2 text-white">{formatCurrency(Number(order.totalAmount || 0))}</td>
-                        <td className="px-2 py-2 text-right"><div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => openAction(order, 'receive')} className="text-xs text-emerald-200 hover:text-emerald-100" disabled={!hasPending}>Receive</button><button type="button" onClick={() => openAction(order, 'return')} className="text-xs text-amber-200 hover:text-amber-100" disabled={!hasReceived}>Return</button></div></td>
+                        <td className="px-2 py-2 text-right"><div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => openAction(order, 'receive')} className="text-xs text-emerald-200 hover:text-emerald-100" disabled={!hasPending}>Receive</button><button type="button" onClick={() => openAction(order, 'return')} className="text-xs text-amber-200 hover:text-amber-100" disabled={!hasReceived}>Return</button><button type="button" onClick={() => void createPurchaseBill(order)} className="text-xs text-cyan-200 hover:text-cyan-100" disabled={!hasReceived || loading}>Create Bill</button></div></td>
                       </tr>
                     );
                   })}

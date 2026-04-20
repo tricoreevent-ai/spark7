@@ -18,9 +18,14 @@ type ProductColumnId =
   | 'promotionalPrice'
   | 'cost'
   | 'gstRate'
+  | 'cgstRate'
+  | 'sgstRate'
+  | 'igstRate'
   | 'taxType'
   | 'hsnCode'
   | 'stock'
+  | 'openingStockValue'
+  | 'stockLedgerAccountId'
   | 'minStock'
   | 'autoReorder'
   | 'reorderQuantity'
@@ -30,6 +35,9 @@ type ProductColumnId =
   | 'allowNegativeStock'
   | 'batchTracking'
   | 'expiryRequired'
+  | 'serialNumberTracking'
+  | 'variantSize'
+  | 'variantColor'
   | 'isActive'
   | 'createdAt'
   | 'updatedAt';
@@ -65,13 +73,21 @@ const SORT_FIELD_OPTIONS: Array<{ value: ProductSortField; label: string }> = [
   { value: 'reorderQuantity', label: 'Reorder Qty' },
   { value: 'unit', label: 'Unit' },
   { value: 'gstRate', label: 'GST %' },
+  { value: 'cgstRate', label: 'CGST %' },
+  { value: 'sgstRate', label: 'SGST %' },
+  { value: 'igstRate', label: 'IGST %' },
   { value: 'taxType', label: 'Tax Type' },
   { value: 'hsnCode', label: 'HSN Code' },
+  { value: 'openingStockValue', label: 'Opening Stock Value' },
+  { value: 'stockLedgerAccountId', label: 'Stock Ledger' },
   { value: 'returnStock', label: 'Return Stock' },
   { value: 'damagedStock', label: 'Damaged Stock' },
   { value: 'allowNegativeStock', label: 'Allow Negative' },
   { value: 'batchTracking', label: 'Batch Tracking' },
   { value: 'expiryRequired', label: 'Expiry Required' },
+  { value: 'serialNumberTracking', label: 'Serial Tracking' },
+  { value: 'variantSize', label: 'Variant Size' },
+  { value: 'variantColor', label: 'Variant Color' },
   { value: 'isActive', label: 'Status' },
   { value: 'createdAt', label: 'Created Date' },
   { value: 'updatedAt', label: 'Updated Date' },
@@ -90,8 +106,13 @@ const columnDefs: ColumnDef[] = [
   { id: 'promotionalPrice', label: 'Promo Price', defaultVisible: false },
   { id: 'cost', label: 'Cost Price', defaultVisible: true },
   { id: 'gstRate', label: 'GST %', defaultVisible: true },
+  { id: 'cgstRate', label: 'CGST %', defaultVisible: false },
+  { id: 'sgstRate', label: 'SGST %', defaultVisible: false },
+  { id: 'igstRate', label: 'IGST %', defaultVisible: false },
   { id: 'taxType', label: 'Tax Type', defaultVisible: false },
   { id: 'hsnCode', label: 'HSN Code', defaultVisible: false },
+  { id: 'openingStockValue', label: 'Opening Value', defaultVisible: false },
+  { id: 'stockLedgerAccountId', label: 'Stock Ledger', defaultVisible: false },
   { id: 'stock', label: 'Stock', defaultVisible: true },
   { id: 'minStock', label: 'Min Stock', defaultVisible: true },
   { id: 'autoReorder', label: 'Auto Reorder', defaultVisible: false },
@@ -102,6 +123,9 @@ const columnDefs: ColumnDef[] = [
   { id: 'allowNegativeStock', label: 'Allow Negative', defaultVisible: false },
   { id: 'batchTracking', label: 'Batch Tracking', defaultVisible: false },
   { id: 'expiryRequired', label: 'Expiry Required', defaultVisible: false },
+  { id: 'serialNumberTracking', label: 'Serial Tracking', defaultVisible: false },
+  { id: 'variantSize', label: 'Variant Size', defaultVisible: false },
+  { id: 'variantColor', label: 'Variant Color', defaultVisible: false },
   { id: 'isActive', label: 'Status', defaultVisible: true },
   { id: 'createdAt', label: 'Created', defaultVisible: false },
   { id: 'updatedAt', label: 'Updated', defaultVisible: false },
@@ -148,13 +172,21 @@ const getSortValue = (product: Product, field: ProductSortField): number | strin
   if (field === 'reorderQuantity') return Number(product.reorderQuantity || 0);
   if (field === 'unit') return String(product.unit || '');
   if (field === 'gstRate') return Number(product.gstRate || 0);
+  if (field === 'cgstRate') return Number(product.cgstRate || 0);
+  if (field === 'sgstRate') return Number(product.sgstRate || 0);
+  if (field === 'igstRate') return Number(product.igstRate || 0);
   if (field === 'taxType') return String(product.taxType || '');
   if (field === 'hsnCode') return String(product.hsnCode || '');
+  if (field === 'openingStockValue') return Number(product.openingStockValue || 0);
+  if (field === 'stockLedgerAccountId') return String(product.stockLedgerAccountId || '');
   if (field === 'returnStock') return Number(product.returnStock || 0);
   if (field === 'damagedStock') return Number(product.damagedStock || 0);
   if (field === 'allowNegativeStock') return product.allowNegativeStock ? 1 : 0;
   if (field === 'batchTracking') return product.batchTracking ? 1 : 0;
   if (field === 'expiryRequired') return product.expiryRequired ? 1 : 0;
+  if (field === 'serialNumberTracking') return product.serialNumberTracking ? 1 : 0;
+  if (field === 'variantSize') return String(product.variantSize || '');
+  if (field === 'variantColor') return String(product.variantColor || '');
   if (field === 'isActive') return product.isActive === false ? 0 : 1;
   if (field === 'createdAt') return new Date(product.createdAt || 0).getTime() || 0;
   if (field === 'updatedAt') return new Date(product.updatedAt || 0).getTime() || 0;
@@ -206,6 +238,9 @@ export const ProductList: React.FC = () => {
         product.description,
         product.hsnCode,
         product.taxType,
+        product.variantSize,
+        product.variantColor,
+        product.serialNumberTracking ? 'serial tracking' : '',
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
@@ -349,8 +384,13 @@ export const ProductList: React.FC = () => {
     if (columnId === 'promotionalPrice') return Number(product.promotionalPrice || 0) > 0 ? formatCurrency(Number(product.promotionalPrice || 0)) : '-';
     if (columnId === 'cost') return formatCurrency(Number(product.cost || 0));
     if (columnId === 'gstRate') return `${Number(product.gstRate || 0)}%`;
+    if (columnId === 'cgstRate') return `${Number(product.cgstRate || 0)}%`;
+    if (columnId === 'sgstRate') return `${Number(product.sgstRate || 0)}%`;
+    if (columnId === 'igstRate') return `${Number(product.igstRate || 0)}%`;
     if (columnId === 'taxType') return String(product.taxType || 'gst').toUpperCase();
     if (columnId === 'hsnCode') return product.hsnCode || '-';
+    if (columnId === 'openingStockValue') return formatCurrency(Number(product.openingStockValue || 0));
+    if (columnId === 'stockLedgerAccountId') return product.stockLedgerAccountId || '-';
     if (columnId === 'stock') {
       const isLow = Number(product.stock || 0) <= Number(product.minStock || 0);
       return <span className={isLow ? 'font-semibold text-red-400' : 'text-emerald-300'}>{Number(product.stock || 0)}</span>;
@@ -364,6 +404,9 @@ export const ProductList: React.FC = () => {
     if (columnId === 'allowNegativeStock') return yesNo(product.allowNegativeStock);
     if (columnId === 'batchTracking') return yesNo(product.batchTracking);
     if (columnId === 'expiryRequired') return yesNo(product.expiryRequired);
+    if (columnId === 'serialNumberTracking') return yesNo(product.serialNumberTracking);
+    if (columnId === 'variantSize') return product.variantSize || '-';
+    if (columnId === 'variantColor') return product.variantColor || '-';
     if (columnId === 'isActive') {
       const active = product.isActive !== false;
       return (
@@ -478,7 +521,7 @@ export const ProductList: React.FC = () => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, SKU, barcode, category, HSN, tax type..."
+            placeholder="Search by name, SKU, barcode, category, variant, HSN, tax type..."
             className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500 sm:max-w-xl"
           />
           <div className="flex items-center gap-2 text-sm text-gray-300">

@@ -7,6 +7,7 @@ import { FixedAsset } from '../models/FixedAsset.js';
 import { JournalEntry } from '../models/JournalEntry.js';
 import { JournalLine } from '../models/JournalLine.js';
 import { Vendor } from '../models/Vendor.js';
+import { AccountGroup } from '../models/AccountGroup.js';
 import { AuditFlag } from '../models/AuditFlag.js';
 import { RecordVersion } from '../models/RecordVersion.js';
 import { writeAuditLog } from '../services/audit.js';
@@ -51,6 +52,7 @@ import {
   upsertTreasuryAccount,
   writeTreasuryAudit,
 } from '../services/treasury.js';
+import { buildBalanceSheetReport, buildProfitLossStatement, buildTrialBalanceReport } from '../services/accountingReports.js';
 
 const router = Router();
 const accountingExportRateLimit = createRateLimitMiddleware({
@@ -88,6 +90,12 @@ const round2 = (value: number): number => Number(Number(value || 0).toFixed(2));
 const toIso = (value?: Date): string | undefined => (value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : undefined);
 const extractIdempotencyKey = (req: AuthenticatedRequest): string =>
   String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
+const parseBoolean = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+};
+const normalizePan = (value: unknown): string => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+const isValidPan = (value: string): boolean => !value || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
 
 const toDateWindow = (startDate?: string, endDate?: string): { $gte?: Date; $lte?: Date } | undefined => {
   if (!startDate && !endDate) return undefined;
@@ -236,9 +244,13 @@ const toClientErrorMessage = (error: unknown, fallback: string): string => {
   return raw;
 };
 
-router.get('/dashboard', async (_req: AuthenticatedRequest, res: Response) => {
+router.get('/dashboard', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const data = await buildDashboardSummary();
+    const dateWindow = toDateWindow(
+      req.query.startDate ? String(req.query.startDate) : undefined,
+      req.query.endDate ? String(req.query.endDate) : undefined,
+    );
+    const data = await buildDashboardSummary({ startDate: dateWindow?.$gte, endDate: dateWindow?.$lte });
     res.json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to load accounting dashboard') });
@@ -527,11 +539,20 @@ router.post('/vendors', async (req: AuthenticatedRequest, res: Response) => {
     if (!requireWriter(req, res)) return;
     const result = await createVendor({
       name: String(req.body?.name || '').trim(),
+      groupId: String(req.body?.groupId || '').trim() || undefined,
       contact: req.body?.contact,
       email: req.body?.email,
       phone: req.body?.phone,
+      alternatePhone: req.body?.alternatePhone,
       gstin: req.body?.gstin,
+      pan: req.body?.pan,
       address: req.body?.address,
+      isTdsApplicable: parseBoolean(req.body?.isTdsApplicable),
+      deducteeType: req.body?.deducteeType,
+      tdsSectionCode: req.body?.tdsSectionCode,
+      tdsRate: Number(req.body?.tdsRate || 0),
+      openingBalance: Number(req.body?.openingBalance || 0),
+      openingSide: String(req.body?.openingSide || 'credit').toLowerCase() === 'debit' ? 'debit' : 'credit',
       createdBy: req.userId,
       metadata: {
         ip: req.ip,
@@ -569,8 +590,21 @@ router.put('/vendors/:id', async (req: AuthenticatedRequest, res: Response) => {
 
     const before = vendor.toObject();
     vendor.name = nextName;
+    if (req.body?.groupId !== undefined) {
+      const groupId = String(req.body?.groupId || '').trim();
+      if (groupId) {
+        const group = await AccountGroup.findById(groupId);
+        if (!group) return res.status(404).json({ success: false, error: 'Selected vendor group was not found' });
+        vendor.groupId = group._id as any;
+        vendor.groupName = group.groupName;
+      } else {
+        vendor.groupId = undefined;
+        vendor.groupName = undefined;
+      }
+    }
     vendor.contact = String(req.body?.contact ?? vendor.contact ?? '').trim() || undefined;
     vendor.phone = String(req.body?.phone ?? vendor.phone ?? '').trim() || undefined;
+    vendor.alternatePhone = String(req.body?.alternatePhone ?? vendor.alternatePhone ?? '').trim() || undefined;
     vendor.email = String(req.body?.email ?? vendor.email ?? '').trim().toLowerCase() || undefined;
     const nextGstin = String(req.body?.gstin ?? vendor.gstin ?? '').trim().toUpperCase();
     if (nextGstin) {
@@ -580,13 +614,32 @@ router.put('/vendors/:id', async (req: AuthenticatedRequest, res: Response) => {
       }
     }
     vendor.gstin = nextGstin || undefined;
+    const nextPan = normalizePan(req.body?.pan ?? vendor.pan ?? '');
+    if (!isValidPan(nextPan)) {
+      return res.status(400).json({ success: false, error: 'PAN format should be ABCDE1234F.' });
+    }
+    vendor.pan = nextPan || undefined;
     vendor.address = String(req.body?.address ?? vendor.address ?? '').trim() || undefined;
+    if (req.body?.isTdsApplicable !== undefined) vendor.isTdsApplicable = parseBoolean(req.body?.isTdsApplicable);
+    vendor.deducteeType = String(req.body?.deducteeType ?? vendor.deducteeType ?? '').trim().toLowerCase() || undefined;
+    vendor.tdsSectionCode = String(req.body?.tdsSectionCode ?? vendor.tdsSectionCode ?? '').trim().toUpperCase() || undefined;
+    vendor.tdsRate = round2(Number(req.body?.tdsRate ?? vendor.tdsRate ?? 0));
+    vendor.openingBalance = round2(Number(req.body?.openingBalance ?? vendor.openingBalance ?? 0));
+    vendor.openingSide = String(req.body?.openingSide ?? vendor.openingSide ?? 'credit').toLowerCase() === 'debit' ? 'debit' : 'credit';
     await vendor.save();
 
     if (vendor.ledgerAccountId) {
       const ledgerAccount = await ChartAccount.findById(vendor.ledgerAccountId);
       if (ledgerAccount && ledgerAccount.subType === 'supplier' && !ledgerAccount.isSystem) {
         ledgerAccount.accountName = `Vendor - ${vendor.name}`;
+        ledgerAccount.groupId = vendor.groupId;
+        ledgerAccount.groupName = vendor.groupName;
+        if (vendor.groupId) {
+          const group = await AccountGroup.findById(vendor.groupId);
+          if (group) ledgerAccount.accountType = group.under;
+        }
+        ledgerAccount.openingBalance = vendor.openingBalance || 0;
+        ledgerAccount.openingSide = vendor.openingSide || 'credit';
         await ledgerAccount.save();
       }
     }
@@ -1293,10 +1346,48 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
     const totalCredit = round2(Number(journalTotalsAgg[0]?.totalCredit || 0));
     const debitCreditMismatch = round2(totalDebit - totalCredit);
     const cancelledRecordsCount = cancelledInvoices.length + cancelledJournalEntries.length;
+    const checkStart = entryDateRange?.$gte || new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const checkEnd = entryDateRange?.$lte || new Date();
+    checkEnd.setHours(23, 59, 59, 999);
+    const ledgerDateMatch = entryDateRange ? { entryDate: entryDateRange } : {};
+    const [ledgerTotalsAgg, unbalancedLedgerVouchers, trialBalanceCheck, balanceSheetCheck] = await Promise.all([
+      AccountLedgerEntry.aggregate([
+        { $match: { isDeleted: { $ne: true }, ...ledgerDateMatch } },
+        { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+      ]),
+      AccountLedgerEntry.aggregate([
+        { $match: { isDeleted: { $ne: true }, ...ledgerDateMatch } },
+        {
+          $group: {
+            _id: {
+              voucherNumber: '$voucherNumber',
+              voucherType: '$voucherType',
+              source: '$metadata.source',
+              sourceId: '$metadata.sourceId',
+            },
+            debit: { $sum: '$debit' },
+            credit: { $sum: '$credit' },
+            count: { $sum: 1 },
+            firstDate: { $min: '$entryDate' },
+          },
+        },
+        { $project: { debit: 1, credit: 1, count: 1, firstDate: 1, difference: { $subtract: ['$debit', '$credit'] } } },
+        { $match: { difference: { $ne: 0 } } },
+        { $sort: { firstDate: 1 } },
+        { $limit: 250 },
+      ]),
+      buildTrialBalanceReport(checkStart, checkEnd),
+      buildBalanceSheetReport(checkEnd),
+    ]);
+    const ledgerDebit = round2(Number(ledgerTotalsAgg[0]?.totalDebit || 0));
+    const ledgerCredit = round2(Number(ledgerTotalsAgg[0]?.totalCredit || 0));
+    const ledgerDebitCreditMismatch = round2(ledgerDebit - ledgerCredit);
 
     const findings = {
       debitCreditMismatch,
+      ledgerDebitCreditMismatch,
       unbalancedJournalEntries: unbalancedEntries.length,
+      unbalancedLedgerVouchers: unbalancedLedgerVouchers.length,
       orphanJournalLines: orphanJournalLines.length,
       invoicesMissingJournal: invoicesMissingJournal.length,
       paymentsMissingInvoice: paymentsMissingInvoice.length,
@@ -1306,6 +1397,10 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
       backdatedEntries: backdatedEntries.length,
       cashTransactionsAboveLimit: cashTransactionsAboveLimit.length,
       cancelledRecords: cancelledRecordsCount,
+      trialBalanceDifference: round2(Number(trialBalanceCheck.totals?.balanceDifference || 0)),
+      balanceSheetDifference: round2(Number(balanceSheetCheck.totals?.difference || 0)),
+      openingBalanceDifference: round2(Number(balanceSheetCheck.diagnostics?.openingBalanceDifference || 0)),
+      legacyClearing: round2(Number(balanceSheetCheck.diagnostics?.legacyClearing || 0)),
     };
 
     const windowKey = `${toIso(entryDateRange?.$gte) || 'all'}:${toIso(entryDateRange?.$lte) || 'all'}`;
@@ -1320,6 +1415,36 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
             dedupeKey: `debit_credit_mismatch:${windowKey}`,
             detectedBy: req.userId,
             metadata: { totalDebit, totalCredit, mismatch: debitCreditMismatch },
+          }]
+        : []),
+      ...(ledgerDebitCreditMismatch !== 0
+        ? [{
+            module: 'accounting',
+            flagType: 'ledger_debit_credit_mismatch',
+            severity: 'critical' as const,
+            message: `Ledger debit/credit mismatch detected: ${ledgerDebitCreditMismatch}`,
+            dedupeKey: `ledger_debit_credit_mismatch:${windowKey}`,
+            detectedBy: req.userId,
+            metadata: {
+              totalDebit: ledgerDebit,
+              totalCredit: ledgerCredit,
+              mismatch: ledgerDebitCreditMismatch,
+              unbalancedVouchers: unbalancedLedgerVouchers.slice(0, 250),
+            },
+          }]
+        : []),
+      ...(Number(balanceSheetCheck.totals?.difference || 0) !== 0
+        ? [{
+            module: 'accounting',
+            flagType: 'balance_sheet_difference',
+            severity: 'critical' as const,
+            message: `Balance Sheet difference detected: ${round2(Number(balanceSheetCheck.totals?.difference || 0))}`,
+            dedupeKey: `balance_sheet_difference:${windowKey}`,
+            detectedBy: req.userId,
+            metadata: {
+              totals: balanceSheetCheck.totals,
+              diagnostics: balanceSheetCheck.diagnostics,
+            },
           }]
         : []),
       ...(unbalancedEntries.length > 0
@@ -1458,6 +1583,11 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
           totalDebit,
           totalCredit,
           debitCreditEqual: debitCreditMismatch === 0,
+          ledgerDebit,
+          ledgerCredit,
+          ledgerDebitCreditEqual: ledgerDebitCreditMismatch === 0,
+          trialBalanceBalanced: Number(trialBalanceCheck.totals?.balanceDifference || 0) === 0,
+          balanceSheetBalanced: Number(balanceSheetCheck.totals?.difference || 0) === 0,
           allInvoicesLinkedToEntries: invoicesMissingJournal.length === 0,
           noOrphanRecords: orphanJournalLines.length === 0 && paymentsMissingInvoice.length === 0,
           noNegativeBalances: negativeBalances.length === 0,
@@ -1468,6 +1598,7 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
         findings,
         details: {
           unbalancedJournalEntries: unbalancedEntries,
+          unbalancedLedgerVouchers,
           orphanJournalLines,
           invoicesMissingJournal,
           paymentsMissingInvoice,
@@ -1479,6 +1610,9 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
           cancelledInvoices,
           cancelledJournalEntries,
           cashLimit,
+          trialBalanceTotals: trialBalanceCheck.totals,
+          balanceSheetTotals: balanceSheetCheck.totals,
+          balanceSheetDiagnostics: balanceSheetCheck.diagnostics,
         },
       },
     });
@@ -1514,28 +1648,21 @@ router.get('/exports/:reportType', accountingExportRateLimit, async (req: Authen
         status: row.status,
       }));
     } else if (reportType === 'trial-balance') {
-      const accounts = await ChartAccount.find({ isActive: true }).sort({ accountType: 1, accountCode: 1 });
-      rows = await Promise.all(
-        accounts.map(async (account) => {
-          const filter: Record<string, any> = { accountId: account._id };
-          if (startDate || endDate) {
-            filter.entryDate = {};
-            if (startDate) filter.entryDate.$gte = startDate;
-            if (endDate) filter.entryDate.$lte = endDate;
-          }
-          const totals = await JournalLine.aggregate([
-            { $match: filter },
-            { $group: { _id: null, debit: { $sum: '$debitAmount' }, credit: { $sum: '$creditAmount' } } },
-          ]);
-          return {
-            accountCode: account.accountCode,
-            accountName: account.accountName,
-            accountType: account.accountType,
-            debit: round2(Number(totals[0]?.debit || 0)),
-            credit: round2(Number(totals[0]?.credit || 0)),
-          };
-        })
-      );
+      const reportStart = startDate || new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const reportEnd = endDate || new Date();
+      reportEnd.setHours(23, 59, 59, 999);
+      const report = await buildTrialBalanceReport(reportStart, reportEnd);
+      rows = report.rows.map((row) => ({
+        accountCode: row.accountCode,
+        accountName: row.accountName,
+        accountType: row.accountType,
+        openingBalance: row.openingBalance,
+        debit: row.debit,
+        credit: row.credit,
+        closingBalance: row.closingBalance,
+        debitBalance: row.debitBalance,
+        creditBalance: row.creditBalance,
+      }));
     } else if (reportType === 'ledger') {
       const accountId = String(req.query?.accountId || '').trim();
       if (!accountId) {
@@ -1556,25 +1683,15 @@ router.get('/exports/:reportType', accountingExportRateLimit, async (req: Authen
         creditAmount: row.creditAmount,
       }));
     } else if (reportType === 'profit-loss') {
-      rows = await JournalLine.aggregate([
-        { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
-        { $unwind: '$account' },
-        { $match: startDate || endDate ? { entryDate: { ...(startDate ? { $gte: startDate } : {}), ...(endDate ? { $lte: endDate } : {}) } } : {} },
-        {
-          $group: {
-            _id: { accountType: '$account.accountType', accountCode: '$account.accountCode', accountName: '$account.accountName' },
-            debit: { $sum: '$debitAmount' },
-            credit: { $sum: '$creditAmount' },
-          },
-        },
-        { $sort: { '_id.accountType': 1, '_id.accountCode': 1 } },
-      ]).then((agg) => agg.map((row) => ({
-        accountType: row._id.accountType,
-        accountCode: row._id.accountCode,
-        accountName: row._id.accountName,
-        debit: round2(Number(row.debit || 0)),
-        credit: round2(Number(row.credit || 0)),
-      })));
+      const reportStart = startDate || new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const reportEnd = endDate || new Date();
+      reportEnd.setHours(23, 59, 59, 999);
+      const report = await buildProfitLossStatement(reportStart, reportEnd);
+      rows = report.rows.map((row) => ({
+        section: row.section,
+        particulars: row.particulars,
+        amount: row.amount,
+      }));
     } else if (reportType === 'vendors') {
       rows = await listVendorBalances();
     } else {

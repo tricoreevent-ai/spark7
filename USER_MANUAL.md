@@ -2,13 +2,16 @@
 
 User Manual and Product Documentation
 
-Last updated: April 10, 2026
+Last updated: April 17, 2026
 
 ## Latest Highlights
 
 - Customer CRM now separates profiles, enquiries, campaigns, and reports for cleaner follow-up.
 - Event quotations now support revision history, PDF preview, print output, email sending, and booking conversion.
 - Membership workflows cover plan setup, subscription issue, active-member tracking, renewals, and reporting.
+- Accounting reports now include one-click help cards explaining the formula, source data, and report logic used on the dashboard and each report tab.
+- A separate Validation Dashboard is available for accounting health checks, drill-down review, exports, scheduled checks, and alerts.
+- A safe accounting transaction reset batch file is available for test cycles while preserving master/setup data.
 - The public Sarva website now includes Home, Products, About, Contact, Login, and the public User Manual.
 
 ## Quick Index
@@ -61,6 +64,7 @@ The application is divided into the following main modules:
 - [People](/employees)
 - [Operations](/facilities)
 - [Accounts](/accounting)
+- [Validation](/accounting/validation)
 - [Admin](/settings)
 
 Each module contains specific pages designed to perform related tasks.
@@ -75,7 +79,8 @@ A typical usage flow in the system is:
 4. Sales team handles customer profiles, enquiries, campaigns, quotations, bookings, and transactions
 5. People module manages employees, attendance, shifts, and payroll
 6. Accounts team tracks payments, reconciliation, and settlements
-7. Management reviews reports and performance
+7. Validation checks confirm accounting data health before management review
+8. Management reviews reports and performance
 
 ## 5. Main Menu Modules
 
@@ -98,20 +103,22 @@ Key Uses
 
 ### 5.2 Sales
 
-Direct links: [Sales Dashboard](/sales-dashboard), [Sales Orders](/orders), [Quotations](/sales/quotes)
+Direct links: [Sales Dashboard](/sales-dashboard), [Sales Orders](/orders), [Quotations](/sales/quotes), [Reports](/reports), [Customer Profiles](/customers/profiles), [CRM Enquiries](/customers/enquiries), [CRM Campaigns](/customers/campaigns), [CRM Reports](/customers/reports)
 
 Purpose  
 The Sales module manages all customer-related transactions and revenue activities in a structured way.
 
 Description  
-It handles the full sales cycle from quotations to confirmed orders, returns, and sales reporting. It ensures that commercial transactions are recorded properly and remain traceable for follow-up and review.
+It handles the full sales cycle from dashboard monitoring and quotations to confirmed orders, returns, CRM follow-up, campaigns, and detailed sales reporting. It ensures that commercial transactions are recorded properly and remain traceable for follow-up and review.
 
 Key Uses
 
+- Open the sales dashboard and POS shortcuts
 - Manage customer orders
 - Provide quotations
 - Track sales
 - Handle returns
+- Run CRM follow-up and campaigns
 - View sales reports
 
 ### 5.3 Catalog
@@ -168,7 +175,7 @@ Key Uses
 
 ### 5.6 Accounts
 
-Direct links: [Accounting](/accounting), [Settlements](/accounting/settlements)
+Direct links: [Accounting](/accounting), [Settlements](/accounting/settlements), [Validation Dashboard](/accounting/validation)
 
 Purpose  
 The Accounts module manages financial transactions and records.
@@ -184,21 +191,39 @@ Key Uses
 - Perform settlements and reconciliation
 - Generate exports and financial statements
 
-### 5.7 Admin
+### 5.7 Validation
 
-Direct links: [Settings](/settings), [Users](/user-management), [Company Create](/admin/company-create)
+Direct link: [Validation Dashboard](/accounting/validation)
+
+Purpose  
+The Validation module verifies accounting data quality.
+
+Description  
+It runs read-only validation checks, shows critical and warning findings, supports drill-down review, and helps accountants confirm whether Trial Balance, Balance Sheet, TDS, and other accounting reports are reliable.
+
+Key Uses
+
+- Run accounting health checks
+- Review failed checks with causes and suggested fixes
+- Export validation results
+- Schedule nightly checks and alerts
+
+### 5.8 Admin
+
+Direct links: [Settings](/settings), [Users](/user-management), [Company Create](/admin/company-create), [Admin Reports](/admin/reports)
 
 Purpose  
 The Admin module controls system configuration and access.
 
 Description  
-It allows administrators to manage users, permissions, company information, print settings, mail settings, and other shared system behavior.
+It allows administrators to manage users, permissions, company information, print settings, mail settings, admin reporting, and other shared system behavior.
 
 Key Uses
 
 - Manage users
 - Control access
 - Configure system
+- Review admin activity and audit reports
 
 ## 6. Catalog Menu
 
@@ -354,14 +379,31 @@ This page assigns working hours and shift patterns to ensure proper staffing cov
 Direct link: [Payroll](/payroll)
 
 Purpose  
-Calculates salaries.
+Calculates monthly payroll and statutory payroll compliance outputs.
 
 Description  
-This page processes employee payments based on attendance and shifts and helps the organization review payroll output in a structured way.
+This page processes employee payments based on attendance and shifts, calculates PF/ESI/PT/TDS deductions, and helps the organization review payroll output in a structured way. It also provides payroll compliance panels for PF, ESI, PT, and salary TDS challan worksheets, salary arrears, draft Form 16 worksheets, and full-and-final settlement calculations.
 
 ## 8. Sales Menu
 
-### 8.1 Sales Orders
+### 8.1 Sales Dashboard
+
+Direct link: [Sales Dashboard](/sales-dashboard)
+
+Purpose  
+Provides a quick action and monitoring workspace for the sales team.
+
+Description  
+This page combines fast links to POS billing, sales history, returns, analytics, seven-day sales trend visibility, and stock alert cards. It helps front desk or sales users move quickly between the most common sales tasks without opening each page separately.
+
+Key Uses
+
+- Open POS and billing actions quickly
+- Review seven-day sales trend
+- Check stock alerts before selling
+- Jump to orders, returns, and reports
+
+### 8.2 Sales Orders
 
 Direct link: [Sales Orders](/orders)
 
@@ -371,7 +413,7 @@ Records confirmed sales.
 Description  
 This page tracks completed transactions and provides a structured history of finalized customer sales.
 
-### 8.2 Quotations
+### 8.3 Quotations
 
 Direct link: [Quotations](/sales/quotes)
 
@@ -381,7 +423,7 @@ Provides price estimates.
 Description  
 This page helps customers review pricing before purchase confirmation and supports the pre-sales process.
 
-### 8.3 Returns
+### 8.4 Returns
 
 Direct link: [Returns](/returns)
 
@@ -391,31 +433,69 @@ Handles returned items.
 Description  
 This page maintains accurate sales and stock records by capturing return activity and related adjustments.
 
-### 8.4 Reports
+### 8.5 Reports
 
 Direct link: [Reports](/reports)
 
 Purpose  
-Provides sales insights.
+Provides sales and POS insights.
 
 Description  
-This page analyzes business performance and helps management understand operational and revenue trends through reports and summaries.
+This page is the tabbed `Sales & POS Reports` workspace. It helps management and front desk users analyze business performance through filters, exports, and multiple report tabs covering store-level finance views, sales analysis, GST datasets, receivables, inventory movement, user performance, and tax review.
 
-### 8.5 Customers and CRM
+### 8.5.1 Sales Reports Tabs
 
-Direct links: [Customer Profiles](/customers/profiles), [Customer Enquiries](/customers/enquiries), [Customer Reports](/customers/reports)
+Inside `Sales -> Reports`, use the `Reports Menu` tabs for the exact report needed:
+
+- `Profit & Loss (Store-level)`: store-level income versus expense view for the selected period
+- `Balance Sheet (Store-level)`: store-level position view for assets, liabilities, and balance
+- `Sales Summary (Daily / Shift)`: daily and shift-wise sales closure comparison
+- `Daily Sales Summary`: day-by-day invoice count, sales amount, tax, and outstanding
+- `Item-wise Sales Report`: quantity, value, and tax grouped item by item
+- `Customer-wise Sales Report`: invoice count, total billed value, and pending amount grouped by customer
+- `Sales Return Report`: approved return value, tax reversal, and refund impact
+- `Gross Profit Report`: revenue, item cost, gross profit, and margin
+- `HSN-wise Sales Report`: sales grouped by HSN or SAC classification
+- `Taxable / Exempt / Nil / Non-GST`: billing value grouped by GST treatment bucket
+- `B2B vs B2C Invoice Report`: registered-party versus consumer invoice split
+- `Credit / Debit Note Register (GST)`: GST note activity for corrected or adjusted invoices
+- `Sales Register (Detailed)`: detailed invoice-level sales register for review and export
+- `Payment Reconciliation Report`: invoice-side and payment-side comparison for settlement review
+- `Z-Report (End of Day)`: day-close summary for counter and billing closure
+- `Inventory Movement (POS only)`: stock movement created only by POS selling activity
+- `Membership Sales Report`: membership or plan-related sales captured through sales billing
+- `GST Handoff Datasets`: GST-facing export and verification datasets from sales transactions
+- `Outstanding Receivables Report`: open credit invoices still awaiting collection
+- `Attendance Report`: attendance-related operational snapshot inside the sales reporting workspace
+- `Cash vs Credit Sales Report`: invoice split by cash billing and credit billing
+- `User-wise Sales Report`: sales grouped by staff user with payment-mode mix
+- `Tax Summary Report`: GST taxable value and tax amount grouped by rate with return reversal effect
+
+Export tools  
+The active report tab can be exported to Excel or PDF after applying the selected date range.
+
+### 8.6 Customer CRM Desk
+
+Direct links: [Customer Profiles](/customers/profiles), [Customer Enquiries](/customers/enquiries), [CRM Campaigns](/customers/campaigns), [CRM Reports](/customers/reports)
 
 Purpose  
-Runs the customer CRM desk.
+Runs the customer CRM workspace.
 
 Description  
-This page combines customer profiles, enquiry follow-up, campaigns, visit and payment history, repeat-customer review, and collection watchlists in one place. The CRM desk is split into profiles, enquiries, campaigns, and reports so staff can move directly to the exact customer task they need.
+This workspace combines customer profiles, enquiry follow-up, campaigns, visit and payment history, repeat-customer review, and collection watchlists in one place. The CRM desk is split into separate route-based tabs so staff can open the exact CRM function they need from the Sales menu.
+
+### 8.6.1 CRM Desk Tabs
+
+- `Customer Profiles`: create and maintain customer master records, contact details, preferences, notes, and contact roles
+- `CRM Enquiries`: capture walk-in, phone, and website leads, assign follow-up, and convert enquiries into quotation or booking activity
+- `CRM Campaigns`: create brochure campaigns, save drafts, send outreach, and keep campaign history inside the CRM
+- `CRM Reports`: review conversion rate, repeat-customer trends, preferred facilities or time slots, and collection watchlist signals
 
 Example  
 Create a profile for `Rahul Menon`, save his phone, email, preferred badminton slot `06:00 PM to 08:00 PM`, and note that he usually buys shuttle tubes from the sports shop. Later, when he asks about a weekend court block by phone, create an enquiry, assign it to front desk staff, and then open the booking or quotation screen directly from that enquiry.
 
 How it affects reports  
-The page itself does not create sales or booking figures. It collects customer and enquiry information that is then connected to bookings, quotations, invoices, payment follow-up, and CRM summary cards.
+The CRM workspace itself does not create sales or booking figures. It collects customer, lead, and campaign information that later connects to bookings, quotations, invoices, payment follow-up, and CRM summary cards.
 
 ## 9. Operations Menu
 
@@ -516,10 +596,31 @@ Inside the accounting page, use the **left sidebar menu** to move between sectio
 - `Expenses & Income`: manual expense/income day-book posting with edit/cancel actions
 - `Vouchers`: receipt voucher, payment voucher, journal voucher, transfer voucher, and voucher print actions
 - `Cash & Bank Book`: cash/bank movements, pending bank reconciliation rows, and CSV statement matching
+- `Treasury & Banks`: bank account master, bank transfers, cheque tracking, deposit slips, and treasury movement review
 - `Chart & Ledger`: chart account creation and account-level ledger drill-down
-- `Financial Reports`: trial balance, profit and loss, balance sheet, and CSV exports
+- `GST & Filing`: GST period status, return working data, reconciliation, and filing controls
+- `TDS Compliance`: company PAN/TAN setup, sections, deductees, deductions, challans, returns, certificates, and reconciliation
+- `Reports`: overview cards, recent accounting activity, vendor/assets/period reports, invoice/payment/voucher reports, salary/contract/day-book reports, cash/bank entries, trial balance, profit and loss, balance sheet, TDS report, and CSV exports
 
-### 10.1.3 Payment Voucher (Reference Layout)
+### 10.1.3 TDS Sports Complex Use Cases
+
+Inside `Accounting -> TDS Compliance -> Deductions`, the `Sports Complex Use Case` selector helps the accounts team choose the correct section, rate, and threshold before previewing or recording a deduction.
+
+Available presets:
+
+- `Sports facility rent - equipment`: Section `194I`, rate `2%`, monthly threshold `50000`
+- `Sports facility rent - land/building`: Section `194I`, rate `10%`, monthly threshold `50000`
+- `Commercial room / hall rent`: Section `194I`, rate `10%`, monthly threshold `50000`
+- `Residential room rent`: Section `194-IB`, rate `2%`, monthly threshold `50000`
+- `Contract labour - Individual/HUF`: Section `194C`, rate `1%`, single threshold `30000`, annual threshold `100000`
+- `Contract labour - Company/Firm`: Section `194C`, rate `2%`, single threshold `30000`, annual threshold `100000`
+- `Professional services`: Section `194J`, rate `10%`, annual threshold `50000`
+- `Event prize money`: Section `194B`, rate `30%`, single threshold `10000`
+
+Note
+The preset values are transaction-level overrides. Users can still edit the rate or threshold fields before previewing the calculation if the accountant confirms a different treatment. If PAN is missing or invalid, the system applies the higher-rate rule where applicable. The official Finance Act 2025 TDS rate table shows `194-IB` at `2%`; use the override field if a legacy or special residential rent case needs a different rate.
+
+### 10.1.4 Payment Voucher (Reference Layout)
 
 The Payment Voucher form and print template support the following fields:
 
@@ -537,7 +638,7 @@ The Payment Voucher form and print template support the following fields:
 Note  
 Signature lines for the printed voucher can be turned on or off from `Settings -> Printing Preferences`. The form keeps the business details, while physical signing can be handled outside the system when required.
 
-### 10.1.4 Recommended Daily Workflow
+### 10.1.5 Recommended Daily Workflow
 
 1. Confirm date range and refresh the active section.
 2. Post transactions (invoice, expense, voucher, salary, contract, or manual entry).
@@ -554,6 +655,50 @@ Handles payment reconciliation.
 
 Description  
 This page ensures transactions match actual payments and settlement activity, supporting financial accuracy and closure.
+
+### 10.3 Validation Dashboard
+
+Direct link: [Validation Dashboard](/accounting/validation)
+
+Navigation path: `Top menu -> Validation -> Validation Dashboard`
+
+Purpose  
+Checks whether accounting reports, ledgers, and compliance figures are reliable before audit, filing, or management review.
+
+Description  
+This is a separate accounting health workspace. It consumes the validation API and does not write to existing accounting transaction collections. The page includes a `Validation Command Center` activity log, run controls, summary cards, health gauge, timeline, saved report list, detailed findings, drill-down records, export tools, repair support for selected findings, schedule settings, alert recipients, and an assistant panel for accounting review.
+
+Main checks  
+
+- `Double-entry integrity`: confirms debit and credit lines balance for each transaction.
+- `Trial Balance`: checks total debit balances against total credit balances.
+- `Balance Sheet equation`: checks Assets = Liabilities + Equity including retained earnings.
+- `TDS / GST compliance`: compares deducted or payable amounts with challans/deposits and ledger balances.
+- `Vendor / Customer reconciliation`: compares subsidiary balances against control accounts.
+- `Missing sequences`: detects gaps in invoices, vouchers, and other number series.
+- `Closed period posting`: flags entries dated inside locked financial periods.
+- `Orphan records`: flags transactions linked to missing vendors, customers, ledgers, or documents.
+- `Suspense / round-off review`: highlights balances that need accountant review.
+
+How to use it  
+
+1. Open `Validation -> Validation Dashboard`.
+2. Select the accounting period to test from the run controls.
+3. Click `Run Full Validation Now`.
+4. Watch the `Validation Command Center` log to see which checks are running or completed.
+5. Review the health score, critical count, warning count, and passed count.
+6. Open failed checks, read `Why?`, review the suggested fix, and use drill-down records for correction.
+7. Export PDF or Excel if the report is needed for audit follow-up.
+
+### 10.4 One-click Help On Accounting Reports
+
+The Accounting Dashboard and each Accounting Reports tab now includes in-screen help. Depending on the screen, it appears as a drawer button or expandable help card. The help panel shows:
+
+- `Formula / Logic`: the calculation method used by the screen.
+- `Data Used`: the collections or business records feeding the result.
+- `Open full help`: a direct link to the matching manual topic.
+
+This helps users verify how Total Income, Total Expense, Net Profit/Loss, Trial Balance, Balance Sheet, TDS, payroll, and book reports are derived without searching through the full manual.
 
 ## 11. Admin Menu
 
@@ -597,6 +742,50 @@ Defines company details.
 
 Description  
 This page stores organization-level information used during onboarding and major company setup activity.
+
+### 11.4 Admin Reports
+
+Direct link: [Admin Reports](/admin/reports)
+
+Purpose  
+Reviews system activity, audit trails, and login history.
+
+Description  
+This page is the admin reporting workspace for system controls. It includes `Overview`, `Audit Logs`, `Login Activity`, and `Transaction Logs` tabs so administrators can review system usage, export activity data, search by date or keyword, and monitor whether audit-log volume has crossed warning limits.
+
+Key Uses
+
+- Review overall admin-report summary and warning thresholds
+- Search audit log rows by module or action
+- Review login success, failure, OTP, and logout history
+- Inspect transaction-side system logs
+- Export admin-report review data
+
+### 11.5 Accounting Transaction Reset Utility
+
+File: `clear-accounting-transactions.bat`
+
+Purpose  
+Clears accounting-facing transaction data for testing while preserving master/setup data.
+
+What it clears  
+The reset utility clears transaction collections such as ledger entries, journal entries, customer ledger entries, accounting invoices, payments, vouchers, day-book rows, salary and contract payments, sales, returns, orders, quotations, facility/event booking transactions, member subscriptions, attendance rows used for payroll testing, purchase transactions, inventory balance/batch records, stock movement, bank feed/reconciliation rows, TDS/GST working records, payroll statutory outputs, and validation reports.
+
+What it preserves  
+It does not delete master/setup collections such as users, tenants, chart accounts, account groups, vendors, customers, products, categories, suppliers, employees, facilities, fixed assets, financial periods, stock locations, inventory valuation settings, membership plans, TDS sections, TDS deductee profiles, treasury accounts, app settings, and validation settings.
+
+Safe usage  
+
+1. Take a backup first.
+2. Run `node scripts\clear-accounting-transactions.cjs --dry-run` to preview counts.
+3. Run `clear-accounting-transactions.bat`.
+4. Enter a tenant ID if only one tenant must be cleared, or leave blank for all tenants.
+5. Type the confirmation phrase exactly when prompted.
+
+Optional reset choices  
+
+- `Reset derived balances` resets customer/vendor/product balance-style fields for a clean test cycle.
+- `Reset opening balances` resets chart account and vendor opening balances. Use this only when the opening balances should also be rebuilt from scratch.
 
 ## 12. Transaction Screen Guides
 
@@ -744,6 +933,18 @@ This section explains how report figures are calculated from the day-to-day entr
 
 ### 13.2 Sales And Customer Reports
 
+`Sales Reports Menu Tabs`  
+The `Sales & POS Reports` page is a tabbed workspace. Start by selecting the date range, then open the required tab from the `Reports Menu`. The page supports Excel and PDF export for the active tab.
+
+`Profit And Loss (Store-level)`  
+This tab gives a store-level profit-and-loss style view for the selected period. It helps management review sales-side income versus expense without leaving the Sales reports workspace.
+
+`Balance Sheet (Store-level)`  
+This tab gives a store-level position-style view for assets, liabilities, and net balance as on the selected period end.
+
+`Sales Summary (Daily / Shift)`  
+This tab groups business volume by day and shift so the team can compare counter performance, day-close patterns, and shift-wise sales activity.
+
 `Daily Sales Summary`  
 This report adds together all posted sales invoices for each day in the selected period. `Invoices` is the number of bills created that day. `Sales Amount` is the total bill value including the saved invoice total. `Tax Amount` comes from the GST recorded on those invoices. `Outstanding` is the unpaid balance still left on those invoices.
 
@@ -759,8 +960,41 @@ This report uses approved return entries only. `Returned Amount` is the value of
 `Gross Profit Report`  
 This report compares what the business sold against the recorded item cost. `Revenue` is the total invoice value. `Cost of Goods` is the total cost of the items sold. `Gross Profit` is revenue minus item cost. `Margin %` shows the profit as a percentage of revenue.
 
+`HSN-wise Sales Report`  
+This report groups sales by HSN or SAC classification so the business can review taxable value and tax amount by classification code.
+
+`Taxable / Exempt / Nil / Non-GST`  
+This report separates billed values by GST treatment bucket. It helps users understand how much billing was taxable and how much was exempt, nil-rated, or outside GST.
+
+`B2B vs B2C Invoice Report`  
+This report splits invoices into registered-party and consumer billing groups. It is useful for GST review and invoice scrutiny.
+
+`Credit / Debit Note Register (GST)`  
+This report shows GST-impacting credit or debit note activity linked to sales corrections and later document adjustments.
+
+`Sales Register (Detailed)`  
+This report lists invoice-level rows with customer, document, tax, value, and status details. It acts as the detailed sales register for audit review and export.
+
+`Payment Reconciliation Report`  
+This report compares invoice-side values with payment-side values so the team can identify what is fully settled, partially settled, or still mismatched.
+
+`Z-Report (End of Day)`  
+This report summarizes day-close billing and payment totals for counter operations. It supports front desk closure and end-of-day review.
+
+`Inventory Movement (POS only)`  
+This report shows stock movement caused only by POS selling activity. It helps the team review how sales reduced item quantities without mixing procurement-side stock changes.
+
+`Membership Sales Report`  
+This report summarizes membership or plan-related sales captured through the sales-side billing flow. It helps management review membership-linked billing without leaving the reports page.
+
+`GST Handoff Datasets`  
+This report prepares GST-facing export or verification datasets from sales transactions. It is used as handoff data for deeper GST workspace review and filing preparation.
+
 `Outstanding Receivables`  
 This report lists posted credit invoices that still have money left to collect. The total outstanding amount is simply the sum of all remaining balances on those open credit invoices.
+
+`Attendance Report`  
+This report shows attendance-linked operational counts inside the sales reporting workspace for quick comparison with the business period.
 
 `Cash vs Credit Report`  
 This report separates invoices by invoice type. Cash invoices are counted in the cash section. Credit invoices are counted in the credit section. Each side shows the number of invoices and their total value.
@@ -801,26 +1035,121 @@ Payroll is generated from employee master data, attendance entries, weekly offs,
 
 ### 13.5 Accounts And Settlement Reports
 
+<a id="accounting-dashboard-logic"></a>
+
+`Accounting Dashboard Logic`  
+The accounting dashboard combines posted accounting movement for the selected dates with recent invoices, payments, journals, and compliance activity.
+
+- `Selected Revenue` = posted sales/accounting income between the selected start date and end date.
+- `Month-to-date Revenue` = posted income from the first day of the selected end-date month through the selected end date.
+- `Expenses` = posted expense ledger movement inside the selected date range, with fallback rows used only where required.
+- `Profit` = Selected Revenue - Expenses for the selected date range.
+- `GST Payable` = output GST payable less input/settled GST movement from GST ledger accounts as on the selected end date.
+- Data used: account ledger entries, accounting invoices, accounting payments, journal entries, and TDS/GST workspaces.
+
+<a id="accounting-report-logic"></a>
+
+`Accounting Reports Overview`  
+The accounting reports overview combines the selected date range into summary cards and recent activity. Recent activity is sorted by latest transaction date and includes accounting invoices, payments, vouchers, journals, and TDS deductions so management can quickly verify what changed most recently before opening a detailed report tab.
+
+- `Total Income` = income ledger credits minus income ledger debits, plus legacy POS/manual income fallback rows only where needed.
+- `Total Expense` = expense ledger debits minus expense ledger credits, plus legacy payroll/contract/manual expense fallback rows only where needed.
+- `Net Profit/Loss` = Total Income - Total Expense.
+- `Balance Sheet Difference` = Assets - Liabilities - Equity after retained earnings and diagnostic rows.
+
 `Income Report`  
 This report combines posted sales income and manual income entries recorded in the day book. Total income is the sum of those income sources during the selected period.
 
 `Expense Report`  
 This report combines manual expense entries, salary payments, contract payments, and approved sales-return refunds. Total expense is the sum of those outgoing amounts.
 
+<a id="accounting-trial-balance-logic"></a>
+
 `Trial Balance`  
 This report shows each account with its opening balance, period debits, period credits, and closing balance. In simple terms, it starts with the previous balance, adds money going into the account, subtracts money going out, and shows where the account stands at the end of the period.
+
+- `Opening Balance` = chart opening balance unless an opening ledger entry already exists, plus ledger movement before the start date.
+- `Period Debit` = sum of debit ledger entries inside the selected date range.
+- `Period Credit` = sum of credit ledger entries inside the selected date range.
+- `Closing Balance` = Opening Balance + Period Debit - Period Credit.
+- `Debit Balance` and `Credit Balance` are derived from the closing balance normal side.
+- Check expected by accounting principle: total debit balances should equal total credit balances.
+
+<a id="accounting-profit-loss-logic"></a>
 
 `Profit And Loss Statement`  
 This report compares income against expense for the selected period. Sales income and manual income form the income side. Salary, contract, return refunds, and manual expenses form the expense side. `Net Profit` is income minus expense.
 
+- `Income` = income ledger credits minus debits, excluding opening entries.
+- `Expense` = expense ledger debits minus credits, excluding opening entries.
+- Legacy fallback income/expense is included only when source documents do not already have ledger postings.
+- `Net Profit/Loss` = Total Income - Total Expense.
+
+<a id="accounting-balance-sheet-logic"></a>
+
 `Balance Sheet`  
 This report shows the business position as on one date. Assets such as cash, bank, stock, and other asset balances appear on one side. Liabilities and earnings appear on the other side. It is a snapshot of what the business owns and what it owes.
+
+- `Assets` = debit-positive closing balances of asset accounts.
+- `Liabilities` = credit-positive closing balances of liability accounts.
+- `Equity` = capital/equity/opening-balance accounts plus retained earnings.
+- `Retained Earnings` = profit/loss accumulated up to the selected as-on date.
+- `Difference` = Assets - Liabilities - Equity. It should be zero after diagnostics are resolved.
+
+<a id="accounting-tds-report-logic"></a>
+
+`TDS Report`
+This report suite summarizes the complete TDS lifecycle recorded in the TDS compliance workspace. The sub-tabs include `TDS Computation`, `TDS Payables`, `TDS Outstanding`, quarterly returns `24Q / 26Q / 27Q / 27EQ`, certificates `Form 16 / 16A / 27D`, `Form 26AS / AIS Reconciliation`, `TDS Mismatch`, `Challan Status`, `TDS Payment Register`, `Correction Returns`, `Audit Trail`, and `Tax Audit Clause 34(a)`. Each table supports search, filters, sorting, pagination, and CSV export from the accounting reports page.
+
+- `TDS Deducted` = sum of TDS transaction amounts.
+- `Deposited` = non-cancelled challan payments recorded against TDS.
+- `Outstanding` = deducted amount minus deposited/allocated amount.
+- Mismatch rows compare books, challans, returns, and reconciliation imports where available.
+
+<a id="accounting-master-report-logic"></a>
+
+`Master Reports`  
+Vendor, fixed asset, and financial period reports use master/setup data.
+
+- `Vendor Balance` = vendor opening balance and linked supplier ledger movement where available.
+- `Asset Book Value` = original cost minus accumulated depreciation posted through asset workflows.
+- `Financial Period Status` = open, closed, or locked status used by entry screens and validation checks.
+
+<a id="accounting-transaction-report-logic"></a>
+
+`Invoice, Payment, And Voucher Reports`  
+These reports summarize transaction documents posted into accounting.
+
+- `Invoice Balance` = invoice total amount minus paid amount.
+- Payment amount is the saved posted amount by party and payment mode.
+- Cancelled payments are excluded from final summaries.
+- Voucher total is the saved voucher amount.
+- Balanced vouchers must have equal debit and credit lines.
+
+<a id="accounting-payroll-report-logic"></a>
+
+`Salary And Contract Reports`  
+Salary reports include gross salary, statutory deductions, voluntary deductions, net pay, employer payroll taxes, benefits expense, and total payroll cost.
+
+- `Net Pay` = Gross Salary - statutory deductions - voluntary deductions.
+- `Total Payroll Cost` = Gross Salary + employer payroll taxes + benefits expense.
+- Contract expense is the posted contractor payment amount.
+- Contract TDS is calculated from the applicable section/rate where enabled.
+
+<a id="accounting-book-report-logic"></a>
 
 `Cash Book`  
 This report shows all cash-related entries during the period, including receipts, payments, expenses, sales collections, and transfers that affect cash.
 
+- `Cash Closing` = opening cash + cash inflows - cash outflows.
+
 `Bank Book`  
 This report shows all bank-related entries during the period, including bank receipts, bank payments, and transfers between cash and bank.
+
+- `Bank Closing` = opening bank balance + bank inflows - bank outflows.
+
+`Day Book`  
+Day Book is the chronological register of manual income/expense entries and operational accounting movement. Income entries increase income totals, expense entries increase expense totals, and payment mode decides whether the cash book or bank book is affected.
 
 `Accounts Summary / MIS Summary`  
 This summary combines major totals such as sales income, manual income, salary expense, contract expense, return-related refunds, manual expenses, credit note activity, and net profit. It gives management a quick accounting snapshot for the chosen period.
@@ -834,7 +1163,24 @@ This settlement report compares the number and value of invoices and receipts ha
 `Day-End Closing`  
 This closing report starts with opening cash, adds the day's cash sales and cash receipts, subtracts cash expenses, and arrives at system closing cash. The user then enters physical closing cash, and the report shows the difference as variance.
 
-### 13.6 Membership Reports
+### 13.6 Validation Dashboard And Accounting Health
+
+<a id="validation-dashboard-logic"></a>
+
+`Validation Dashboard`  
+The Validation Dashboard runs read-only checks against accounting data and saves results in separate validation collections. It is designed to help the accountant identify whether reports can be trusted before closing, filing, or audit review.
+
+- `Total Checks` = number of validation rules executed for the selected period.
+- `Critical` = failures that can materially affect reports, such as unbalanced entries or balance sheet differences.
+- `Warning` = items needing review, such as missing sequences, outstanding TDS, or closed-period postings.
+- `Passed` = checks that completed without issues.
+- `Health Score` = a management indicator based on pass/fail severity. Critical failures reduce the score most.
+- `Drill Down` = source records behind a failed check, such as unbalanced vouchers or missing invoice numbers.
+- `False Positive` feedback is stored separately and does not edit accounting data.
+
+Checks covered include double-entry integrity, trial balance, balance sheet equation, TDS/GST reconciliation, vendor/customer reconciliation, missing sequences, closed-period postings, orphan records, cash/bank review, depreciation review, suspense balances, and round-off differences.
+
+### 13.7 Membership Reports
 
 `Active Members` and `Expired Members`  
 These counts come from the current status of member subscriptions.
@@ -921,7 +1267,11 @@ Result: the employee's attendance totals and monthly payroll calculations use th
 
 `Payroll Generation`  
 Sample value: `Month` 2026-04, then click `Generate`.  
-Result: the system calculates payable days, overtime pay, and total payout for each employee using the month's attendance and employee salary setup.
+Result: the system calculates payable days, overtime pay, arrears, gross pay, PF, ESI, professional tax, TDS, employer contribution, and net payout for each employee using the month's attendance and employee salary setup.
+
+`Payroll Compliance`
+Sample values: select `PF` under `Statutory Challans` and click `Generate`; create an arrears entry for an employee whose salary changed from `2026-02`; generate `Form 16` for `2025-26`; or calculate full-and-final settlement with notice pay, leave encashment, gratuity, recoveries, and TDS.
+Result: the system saves downloadable payroll compliance worksheets and keeps recent challan, Form 16, arrears, and settlement records visible on the payroll page. Form 16 collects company PAN/TAN/legal name from TDS/company settings, employee PAN/address from employee master, salary/TDS values from payroll and salary payment records, and optional Section 10, Section 16, Chapter VI-A, quarterly receipt, and tax computation adjustments from the Form 16 details panel. The final Form 16 download is a PDF with Part A and Part B.
 
 ### 14.5 Accounts Screens
 

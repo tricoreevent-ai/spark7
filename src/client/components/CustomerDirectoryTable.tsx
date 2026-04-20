@@ -424,7 +424,7 @@ export const CustomerDirectoryTable: React.FC<CustomerDirectoryTableProps> = ({
                       onClick={() => onEditCustomer(row)}
                       className="rounded-md bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-100"
                     >
-                      Open
+                      Edit
                     </button>
                     <button
                       type="button"

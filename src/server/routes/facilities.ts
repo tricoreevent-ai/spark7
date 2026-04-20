@@ -1,13 +1,24 @@
 import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
-import { Facility } from '../models/Facility.js';
+import { Facility, FacilityType } from '../models/Facility.js';
 import { FacilityBooking } from '../models/FacilityBooking.js';
 import { Customer } from '../models/Customer.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { MembershipPlan } from '../models/MembershipPlan.js';
+import { EventBooking } from '../models/EventBooking.js';
+import { EventQuotation } from '../models/EventQuotation.js';
 import { AccountingInvoice } from '../models/AccountingInvoice.js';
 import { generateNumber } from '../services/numbering.js';
 import { cancelJournalEntry, createInvoice, createJournalEntry, recordPayment } from '../services/accountingEngine.js';
+import { writeAuditLog } from '../services/audit.js';
+import {
+  classifyFacilityImageValue,
+  estimateInlineFacilityImageBytes,
+  isInlineFacilityImage,
+  persistFacilityImageValue,
+  removeStoredFacilityImage,
+  resolveFacilityStoredImagePath,
+} from '../services/facilityStorage.js';
 
 const router = Router();
 const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'booked'] as const;
@@ -18,6 +29,19 @@ type BookingPaymentMethod = 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque'
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const normalizeOptionalText = (value: any): string | undefined => {
+  const trimmed = String(value ?? '').trim();
+  return trimmed ? trimmed : undefined;
+};
+const normalizeFacilityType = (value: any): FacilityType => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'badminton_court') return 'badminton_court';
+  if (normalized === 'football_turf') return 'football_turf';
+  if (normalized === 'box_cricket') return 'box_cricket';
+  if (normalized === 'swimming_pool') return 'swimming_pool';
+  if (normalized === 'gym') return 'gym';
+  return 'other';
+};
 const normalizePaymentMethod = (value: any): BookingPaymentMethod => {
   const method = String(value || 'cash').trim().toLowerCase();
   if (method === 'card') return 'card';
@@ -179,6 +203,96 @@ const findOrCreateCustomerByPhone = async (args: {
   return customer;
 };
 
+interface FacilityStorageAuditRow {
+  id: string;
+  name: string;
+  active: boolean;
+  imageKind: 'inline-data-url' | 'server-file' | 'external-or-relative' | 'none';
+  imageBytesEstimate: number;
+  bookingCount: number;
+  latestBookingAt?: Date | null;
+  membershipPlanCount: number;
+  eventBookingCount: number;
+  eventQuoteCount: number;
+}
+
+const buildFacilityStorageAudit = async () => {
+  const [facilities, bookingRows, planRows, eventBookingRows, eventQuoteRows] = await Promise.all([
+    Facility.find().lean(),
+    FacilityBooking.aggregate([
+      { $group: { _id: '$facilityId', count: { $sum: 1 }, latestBookingAt: { $max: '$createdAt' } } },
+    ]),
+    MembershipPlan.aggregate([
+      { $unwind: { path: '$facilityIds', preserveNullAndEmptyArrays: false } },
+      { $group: { _id: '$facilityIds', count: { $sum: 1 } } },
+    ]),
+    EventBooking.aggregate([
+      { $unwind: { path: '$facilityIds', preserveNullAndEmptyArrays: false } },
+      { $group: { _id: '$facilityIds', count: { $sum: 1 } } },
+    ]),
+    EventQuotation.aggregate([
+      { $unwind: { path: '$facilityIds', preserveNullAndEmptyArrays: false } },
+      { $group: { _id: '$facilityIds', count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const bookingMap = new Map(
+    bookingRows.map((row: any) => [String(row?._id || ''), { count: Number(row?.count || 0), latestBookingAt: row?.latestBookingAt || null }])
+  );
+  const planMap = new Map(planRows.map((row: any) => [String(row?._id || ''), Number(row?.count || 0)]));
+  const eventBookingMap = new Map(eventBookingRows.map((row: any) => [String(row?._id || ''), Number(row?.count || 0)]));
+  const eventQuoteMap = new Map(eventQuoteRows.map((row: any) => [String(row?._id || ''), Number(row?.count || 0)]));
+
+  const rows: FacilityStorageAuditRow[] = facilities.map((facility: any) => {
+    const id = String(facility?._id || '');
+    const booking = bookingMap.get(id);
+    return {
+      id,
+      name: String(facility?.name || '').trim(),
+      active: facility?.active !== false,
+      imageKind: classifyFacilityImageValue(facility?.imageUrl, facility?.imageStoragePath),
+      imageBytesEstimate: estimateInlineFacilityImageBytes(facility?.imageUrl),
+      bookingCount: Number(booking?.count || 0),
+      latestBookingAt: booking?.latestBookingAt || null,
+      membershipPlanCount: Number(planMap.get(id) || 0),
+      eventBookingCount: Number(eventBookingMap.get(id) || 0),
+      eventQuoteCount: Number(eventQuoteMap.get(id) || 0),
+    };
+  });
+
+  const inlineImageFacilities = rows
+    .filter((row) => row.imageKind === 'inline-data-url')
+    .sort((a, b) => {
+      if (b.imageBytesEstimate !== a.imageBytesEstimate) return b.imageBytesEstimate - a.imageBytesEstimate;
+      return a.name.localeCompare(b.name);
+    });
+
+  const safeDeleteCandidates = rows
+    .filter(
+      (row) =>
+        !row.active &&
+        row.bookingCount === 0 &&
+        row.membershipPlanCount === 0 &&
+        row.eventBookingCount === 0 &&
+        row.eventQuoteCount === 0
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    summary: {
+      totalFacilities: rows.length,
+      inlineImageCount: inlineImageFacilities.length,
+      serverStoredImageCount: rows.filter((row) => row.imageKind === 'server-file').length,
+      externalImageCount: rows.filter((row) => row.imageKind === 'external-or-relative').length,
+      noImageCount: rows.filter((row) => row.imageKind === 'none').length,
+      totalInlineImageBytesEstimate: inlineImageFacilities.reduce((sum, row) => sum + row.imageBytesEstimate, 0),
+      safeDeleteCandidateCount: safeDeleteCandidates.length,
+    },
+    inlineImageFacilities,
+    safeDeleteCandidates,
+  };
+};
+
 router.get('/', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const facilities = await Facility.find().sort({ active: -1, name: 1 });
@@ -188,20 +302,164 @@ router.get('/', authMiddleware, async (_req: AuthenticatedRequest, res: Response
   }
 });
 
+router.get('/storage/audit', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const audit = await buildFacilityStorageAudit();
+    res.json({ success: true, data: audit });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to analyze facility storage' });
+  }
+});
+
+router.post('/storage/optimize', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const facilities = await Facility.find().sort({ updatedAt: -1, createdAt: -1 });
+    let migratedImages = 0;
+    let backfilledStoragePaths = 0;
+    let normalizedFields = 0;
+    let estimatedBytesSaved = 0;
+
+    for (const facility of facilities) {
+      let changed = false;
+      let newlyWrittenStoragePath = '';
+      try {
+        const imageUrl = String(facility.imageUrl || '').trim();
+        const currentStoragePath = resolveFacilityStoredImagePath(imageUrl, facility.imageStoragePath);
+
+        if (isInlineFacilityImage(imageUrl)) {
+          const persisted = await persistFacilityImageValue({
+            imageValue: imageUrl,
+            tenantId: req.tenantId,
+            facilityName: facility.name,
+          });
+          newlyWrittenStoragePath = String(persisted.imageStoragePath || '');
+          facility.imageUrl = persisted.imageUrl;
+          facility.imageStoragePath = persisted.imageStoragePath;
+          facility.imageFileName = persisted.imageFileName;
+          facility.imageSizeBytes = persisted.imageSizeBytes;
+          migratedImages += 1;
+          estimatedBytesSaved += Math.max(
+            0,
+            estimateInlineFacilityImageBytes(imageUrl) - Buffer.byteLength(persisted.imageUrl, 'utf8')
+          );
+          changed = true;
+        } else if (imageUrl) {
+          const inferredStoragePath = resolveFacilityStoredImagePath(imageUrl, facility.imageStoragePath);
+          if (inferredStoragePath && facility.imageStoragePath !== inferredStoragePath) {
+            facility.imageStoragePath = inferredStoragePath;
+            if (!facility.imageFileName) {
+              facility.imageFileName = inferredStoragePath.split('/').pop();
+            }
+            backfilledStoragePaths += 1;
+            changed = true;
+          }
+        } else if (facility.imageStoragePath || facility.imageFileName || Number(facility.imageSizeBytes || 0) > 0) {
+          facility.imageStoragePath = undefined;
+          facility.imageFileName = undefined;
+          facility.imageSizeBytes = undefined;
+          normalizedFields += 1;
+          changed = true;
+        }
+
+        const normalizedName = String(facility.name || '').trim();
+        if (facility.name !== normalizedName && normalizedName) {
+          facility.name = normalizedName;
+          normalizedFields += 1;
+          changed = true;
+        }
+
+        const rawLocation = typeof facility.location === 'string' ? facility.location : '';
+        const normalizedLocation = normalizeOptionalText(rawLocation);
+        if ((rawLocation && rawLocation !== normalizedLocation) || (!normalizedLocation && facility.location !== undefined)) {
+          facility.location = normalizedLocation;
+          normalizedFields += 1;
+          changed = true;
+        }
+
+        const rawDescription = typeof facility.description === 'string' ? facility.description : '';
+        const normalizedDescription = normalizeOptionalText(rawDescription);
+        if (
+          (rawDescription && rawDescription !== normalizedDescription)
+          || (!normalizedDescription && facility.description !== undefined)
+        ) {
+          facility.description = normalizedDescription;
+          normalizedFields += 1;
+          changed = true;
+        }
+
+        if (changed) {
+          await facility.save();
+        }
+
+        newlyWrittenStoragePath = '';
+        if (currentStoragePath && currentStoragePath !== resolveFacilityStoredImagePath(facility.imageUrl, facility.imageStoragePath)) {
+          await removeStoredFacilityImage(currentStoragePath);
+        }
+      } catch (facilityError) {
+        if (newlyWrittenStoragePath) {
+          await removeStoredFacilityImage(newlyWrittenStoragePath);
+        }
+        throw facilityError;
+      }
+    }
+
+    const audit = await buildFacilityStorageAudit();
+    await writeAuditLog({
+      module: 'facilities',
+      action: 'facility_storage_optimized',
+      entityType: 'facility',
+      userId: req.userId,
+      metadata: {
+        migratedImages,
+        backfilledStoragePaths,
+        normalizedFields,
+        estimatedBytesSaved,
+      },
+    });
+
+    res.json({
+      success: true,
+      message:
+        migratedImages || backfilledStoragePaths || normalizedFields
+          ? 'Facility storage optimized successfully.'
+          : 'Facility storage was already optimized.',
+      data: {
+        migratedImages,
+        backfilledStoragePaths,
+        normalizedFields,
+        estimatedBytesSaved,
+        audit,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to optimize facility storage' });
+  }
+});
+
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenStoragePath = '';
   try {
     const { name, type, location, hourlyRate, capacity, description, imageUrl, active } = req.body;
+    const normalizedName = String(name || '').trim();
+    const rawImageUrl = String(imageUrl || '').trim();
 
-    if (!name || hourlyRate === undefined) {
+    if (!normalizedName || hourlyRate === undefined) {
       return res.status(400).json({ success: false, error: 'name and hourlyRate are required' });
     }
 
-    if (!imageUrl || !String(imageUrl).trim()) {
+    if (!rawImageUrl) {
       return res.status(400).json({ success: false, error: 'Facility image is required' });
     }
 
+    const persistedImage = await persistFacilityImageValue({
+      imageValue: rawImageUrl,
+      tenantId: req.tenantId,
+      facilityName: normalizedName,
+    });
+    writtenStoragePath = String(persistedImage.imageStoragePath || '');
+
     const derivedCapacity = (() => {
-      const probe = { name, capacity: Number(capacity || 0) };
+      const probe = { name: normalizedName, capacity: Number(capacity || 0) };
       if (isBadmintonFacility(probe)) return 8;
       if (isFootballTurfFacility(probe)) return 1;
       if (isSwimmingPoolFacility(probe)) return 1;
@@ -209,48 +467,103 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     })();
 
     const facility = await Facility.create({
-      name,
-      type: type || 'other',
-      location,
+      name: normalizedName,
+      type: normalizeFacilityType(type),
+      location: normalizeOptionalText(location),
       hourlyRate: Number(hourlyRate),
       capacity: Number(derivedCapacity || 0),
-      description,
-      imageUrl: String(imageUrl).trim(),
+      description: normalizeOptionalText(description),
+      imageUrl: persistedImage.imageUrl,
+      imageStoragePath: persistedImage.imageStoragePath,
+      imageFileName: persistedImage.imageFileName,
+      imageSizeBytes: persistedImage.imageSizeBytes,
       active: active !== undefined ? Boolean(active) : true,
       createdBy: req.userId,
     });
 
+    writtenStoragePath = '';
     res.status(201).json({ success: true, data: facility, message: 'Facility created' });
   } catch (error: any) {
+    if (writtenStoragePath) {
+      await removeStoredFacilityImage(writtenStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to create facility' });
   }
 });
 
 router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenStoragePath = '';
   try {
     const existing = await Facility.findById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Facility not found' });
 
-    const updates = { ...req.body } as any;
-    if (updates.imageUrl !== undefined) {
-      updates.imageUrl = String(updates.imageUrl || '').trim();
+    if (req.body.name !== undefined) {
+      const normalizedName = String(req.body.name || '').trim();
+      if (!normalizedName) {
+        return res.status(400).json({ success: false, error: 'name cannot be empty' });
+      }
+      existing.name = normalizedName;
     }
-    if (updates.type === '' || updates.type === null) {
-      updates.type = 'other';
+    if (req.body.type !== undefined) {
+      existing.type = normalizeFacilityType(req.body.type);
+    }
+    if (req.body.location !== undefined) {
+      existing.location = normalizeOptionalText(req.body.location);
+    }
+    if (req.body.description !== undefined) {
+      existing.description = normalizeOptionalText(req.body.description);
+    }
+    if (req.body.hourlyRate !== undefined) {
+      existing.hourlyRate = Number(req.body.hourlyRate);
+    }
+    if (req.body.active !== undefined) {
+      existing.active = Boolean(req.body.active);
+    }
+    if (req.body.capacity !== undefined) {
+      existing.capacity = Number(req.body.capacity || 0);
+    }
+
+    const previousStoragePath = resolveFacilityStoredImagePath(existing.imageUrl, existing.imageStoragePath);
+    if (req.body.imageUrl !== undefined) {
+      const incomingImageUrl = String(req.body.imageUrl || '').trim();
+      if (!incomingImageUrl) {
+        existing.imageUrl = undefined;
+        existing.imageStoragePath = undefined;
+        existing.imageFileName = undefined;
+        existing.imageSizeBytes = undefined;
+      } else {
+        const persistedImage = await persistFacilityImageValue({
+          imageValue: incomingImageUrl,
+          tenantId: req.tenantId,
+          facilityName: existing.name,
+        });
+        writtenStoragePath = String(persistedImage.imageStoragePath || '');
+        existing.imageUrl = persistedImage.imageUrl;
+        existing.imageStoragePath = persistedImage.imageStoragePath;
+        existing.imageFileName = persistedImage.imageFileName;
+        existing.imageSizeBytes = persistedImage.imageSizeBytes;
+      }
     }
 
     const candidate = {
-      name: updates.name !== undefined ? updates.name : existing.name,
-      capacity: updates.capacity !== undefined ? Number(updates.capacity || 0) : Number(existing.capacity || 0),
+      name: existing.name,
+      capacity: Number(existing.capacity || 0),
     };
-    if (isBadmintonFacility(candidate)) updates.capacity = 8;
-    else if (isFootballTurfFacility(candidate) || isSwimmingPoolFacility(candidate)) updates.capacity = 1;
+    if (isBadmintonFacility(candidate)) existing.capacity = 8;
+    else if (isFootballTurfFacility(candidate) || isSwimmingPoolFacility(candidate)) existing.capacity = 1;
 
-    const facility = await Facility.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
-    if (!facility) return res.status(404).json({ success: false, error: 'Facility not found' });
+    await existing.save();
+    const nextStoragePath = resolveFacilityStoredImagePath(existing.imageUrl, existing.imageStoragePath);
+    writtenStoragePath = '';
+    if (previousStoragePath && previousStoragePath !== nextStoragePath) {
+      await removeStoredFacilityImage(previousStoragePath);
+    }
 
-    res.json({ success: true, data: facility, message: 'Facility updated' });
+    res.json({ success: true, data: existing, message: 'Facility updated' });
   } catch (error: any) {
+    if (writtenStoragePath) {
+      await removeStoredFacilityImage(writtenStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to update facility' });
   }
 });

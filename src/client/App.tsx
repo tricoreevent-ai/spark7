@@ -38,7 +38,9 @@ import { SalesDashboard } from './pages/SalesDashboard';
 import { SettlementCenter } from './pages/SettlementCenter';
 import { Settings } from './pages/Settings';
 import { Shifts } from './pages/Shifts';
+import { ServiceDesk } from './pages/ServiceDesk';
 import { UserManagement } from './pages/UserManagement';
+import { ValidationDashboard } from './validation/pages/ValidationDashboard';
 import publicMarketingShot from './assets/marketing/spark-dashboard-macbook.png';
 import { PublicSeo } from './public/PublicSeo';
 import { apiUrl, fetchApiJson } from './utils/api';
@@ -308,7 +310,7 @@ const DashboardHome: React.FC<{
       key: 'customers',
       title: 'Customer CRM',
       desc: 'Manage customer profiles, enquiries, follow-up, and history in one desk.',
-      path: '/customers/profiles',
+      path: '/customers/directory',
       icon: '🧑',
       category: 'Sales',
       accent: 'from-emerald-500/25 to-emerald-400/10',
@@ -411,6 +413,15 @@ const DashboardHome: React.FC<{
       icon: '🧾',
       category: 'People',
       accent: 'from-amber-500/25 to-amber-400/10',
+    },
+    {
+      key: 'facilities',
+      title: 'Service Desk',
+      desc: 'Track stringing, grip change, bat knocking, and other equipment jobs.',
+      path: '/services',
+      icon: '🧰',
+      category: 'Operations',
+      accent: 'from-fuchsia-500/25 to-fuchsia-400/10',
     },
     {
       key: 'facilities',
@@ -897,6 +908,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/inventory$/, title: 'Inventory' },
   { match: /^\/sales\/quotes$/, title: 'Quotations' },
   { match: /^\/sales$/, title: 'Sales' },
+  { match: /^\/customers\/directory$/, title: 'Customer Directory' },
   { match: /^\/customers\/profiles$/, title: 'Customer Profiles' },
   { match: /^\/customers\/enquiries$/, title: 'Customer Enquiries' },
   { match: /^\/customers\/campaigns$/, title: 'Customer Campaigns' },
@@ -923,6 +935,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/payroll$/, title: 'Payroll' },
   { match: /^\/events\/quotations$/, title: 'Event Quotations' },
   { match: /^\/events$/, title: 'Event Management' },
+  { match: /^\/services$/, title: 'Service Desk' },
   { match: /^\/facilities\/setup$/, title: 'Facility Setup' },
   { match: /^\/facilities$/, title: 'Facilities' },
   { match: /^\/membership-plans\/create$/, title: 'Membership Plan Setup' },
@@ -1717,8 +1730,9 @@ function App() {
               <Route path="/sales/quotes" element={permissions.sales ? <Quotations /> : <Navigate to={fallbackPath} replace />} />
               <Route
                 path="/customers"
-                element={hasCustomerCrmAccess ? <Navigate to="/customers/profiles" replace /> : <Navigate to={fallbackPath} replace />}
+                element={hasCustomerCrmAccess ? <Navigate to="/customers/directory" replace /> : <Navigate to={fallbackPath} replace />}
               />
+              <Route path="/customers/directory" element={hasCustomerCrmAccess ? <Customers initialTab="directory" /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/customers/profiles" element={hasCustomerCrmAccess ? <Customers initialTab="profiles" /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/customers/enquiries" element={hasCustomerCrmAccess ? <Customers initialTab="enquiries" /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/customers/campaigns" element={hasCustomerCrmAccess ? <Customers initialTab="campaigns" /> : <Navigate to={fallbackPath} replace />} />
@@ -1745,6 +1759,7 @@ function App() {
               />
               <Route path="/accounting" element={permissions.accounting ? <Accounting /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/accounting/settlements" element={permissions.accounting ? <SettlementCenter /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/accounting/validation" element={permissions.accounting ? <ValidationDashboard /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/reports" element={permissions.reports ? <Reports /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/help" element={<Navigate to="/user-manual" replace />} />
               <Route path="/user-manual" element={<HelpCenter />} />
@@ -1782,6 +1797,7 @@ function App() {
                   )
                 }
               />
+              <Route path="/services" element={permissions.facilities ? <ServiceDesk /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/facilities" element={permissions.facilities ? <Facilities /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/facilities/setup" element={permissions.facilities ? <FacilitySetup /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/memberships" element={permissions.memberships ? <Memberships /> : <Navigate to={fallbackPath} replace />} />

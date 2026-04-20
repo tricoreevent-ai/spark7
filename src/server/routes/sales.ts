@@ -13,6 +13,7 @@ import { postCustomerLedgerEntry } from '../services/customerLedger.js';
 import { maxDiscountForRole } from '../services/discountPolicy.js';
 import { normalizeProductItemType, productRequiresStock, resolveBaseProductPrice } from '../services/salesPricing.js';
 import { writeAuditLog } from '../services/audit.js';
+import { adjustBatchForStockChange, consumeStockFefo, postCogsJournal } from '../services/inventoryCosting.js';
 
 const router = Router();
 
@@ -32,6 +33,28 @@ const parseBoolean = (value: any, fallback = false): boolean => {
   const normalized = String(value).trim().toLowerCase();
   if (!normalized) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+const normalizeSerialNumbers = (value: any): string[] => {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((row: any) => String(row || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+};
+const normalizeVariantValue = (value: any): string => String(value || '').trim();
+const findVariantMatrixRow = (product: any, size: string, color: string) => {
+  const rows = Array.isArray((product as any)?.variantMatrix) ? (product as any).variantMatrix : [];
+  const normalizedSize = normalizeVariantValue(size).toLowerCase();
+  const normalizedColor = normalizeVariantValue(color).toLowerCase();
+  if (!normalizedSize && !normalizedColor) return null;
+  return rows.find((row: any) => {
+    const rowSize = normalizeVariantValue(row?.size).toLowerCase();
+    const rowColor = normalizeVariantValue(row?.color).toLowerCase();
+    return row?.isActive !== false && rowSize === normalizedSize && rowColor === normalizedColor;
+  }) || null;
 };
 const isDuplicateKeyError = (error: any): boolean =>
   Number(error?.code) === 11000 || String(error?.message || '').includes('E11000');
@@ -139,11 +162,11 @@ const processItems = async (
   const itemDiscountPercentages: number[] = [];
   const processedItems: any[] = [];
 
-  for (const item of items) {
-    const product = await Product.findById(item.productId);
-    if (!product) {
-      throw new Error(`Product not found: ${item.productId}`);
-    }
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        throw new Error(`Product not found: ${item.productId}`);
+      }
 
     const quantity = Number(item.quantity || 0);
     if (quantity <= 0) {
@@ -154,26 +177,42 @@ const processItems = async (
     if (expiryRequired && !item.expiryDate) {
       throw new Error(`Expiry date is required for product ${product.name}`);
     }
-    if (item.expiryDate) {
-      const exp = new Date(item.expiryDate);
-      if (exp.getTime() < Date.now()) {
-        throw new Error(`Cannot sell expired stock for product ${product.name}`);
-      }
-    }
-
-    const listPrice = (() => {
-      if (options.pricingMode === 'customer') {
-        const customerPrice = customerPriceForProduct(options.customer, String(product._id));
-        if (customerPrice !== null && customerPrice > 0) return customerPrice;
+      if (item.expiryDate) {
+        const exp = new Date(item.expiryDate);
+        if (exp.getTime() < Date.now()) {
+          throw new Error(`Cannot sell expired stock for product ${product.name}`);
+        }
       }
 
-      return resolveBaseProductPrice({
-        product,
-        quantity,
-        pricingMode: options.pricingMode,
-        customerTier: String(options.customer?.pricingTier || '').trim(),
-      });
-    })();
+      const serialNumbers = normalizeSerialNumbers(item.serialNumbers);
+      if (Boolean((product as any).serialNumberTracking)) {
+        if (serialNumbers.length !== quantity) {
+          throw new Error(`Enter exactly ${quantity} serial number(s) for product ${product.name}`);
+        }
+      }
+
+      const variantSize = normalizeVariantValue(item.variantSize);
+      const variantColor = normalizeVariantValue(item.variantColor);
+      const variantRow = findVariantMatrixRow(product, variantSize, variantColor);
+      if ((variantSize || variantColor) && !variantRow) {
+        throw new Error(`Selected size/color combination is not configured for product ${product.name}`);
+      }
+
+      const listPrice = (() => {
+        if (options.pricingMode === 'customer') {
+          const customerPrice = customerPriceForProduct(options.customer, String(product._id));
+          if (customerPrice !== null && customerPrice > 0) return customerPrice;
+        }
+
+        const basePrice = resolveBaseProductPrice({
+          product,
+          quantity,
+          pricingMode: options.pricingMode,
+          customerTier: String(options.customer?.pricingTier || '').trim(),
+        });
+        const variantPrice = Number((variantRow as any)?.price || 0);
+        return variantPrice > 0 ? variantPrice : basePrice;
+      })();
 
     let unitPrice = Number(item.unitPrice ?? listPrice);
     if (unitPrice < listPrice) {
@@ -226,16 +265,21 @@ const processItems = async (
     const sgst = taxType === 'gst' ? roundTo2(taxAmount / 2) : 0;
     const vatAmount = taxType === 'vat' ? taxAmount : 0;
 
-    processedItems.push({
-      productId: product._id,
-      productName: product.name,
-      sku: product.sku,
-      itemType: normalizeProductItemType((product as any).itemType),
-      hsnCode: item.hsnCode || product.hsnCode || '',
-      batchNo: item.batchNo || '',
-      expiryDate: item.expiryDate || undefined,
-      quantity,
-      listPrice: roundTo2(listPrice),
+      processedItems.push({
+        productId: product._id,
+        productName: product.name,
+        sku: product.sku,
+        category: (product as any).category || '',
+        subcategory: (product as any).subcategory || '',
+        itemType: normalizeProductItemType((product as any).itemType),
+        hsnCode: item.hsnCode || product.hsnCode || '',
+        batchNo: item.batchNo || '',
+        expiryDate: item.expiryDate || undefined,
+        serialNumbers,
+        variantSize,
+        variantColor,
+        quantity,
+        listPrice: roundTo2(listPrice),
       unitPrice: roundTo2(unitPrice),
       discountAmount: roundTo2(itemDiscountAmount),
       discountPercentage: roundTo2(itemDiscountPercentage),
@@ -262,12 +306,51 @@ const processItems = async (
   };
 };
 
-const decrementStockForItems = async (items: any[]) => {
+const issueStockForSale = async (sale: any, items: any[], userId?: string) => {
+  let totalCogs = 0;
+  const issuedItems: any[] = [];
+
   for (const item of items) {
-    const product = await Product.findById(item.productId).select('itemType');
-    if (!product || !productRequiresStock(product)) continue;
-    await Product.findByIdAndUpdate(item.productId, { $inc: { stock: -Number(item.quantity || 0) } });
+    const product = await Product.findById(item.productId).select('name sku itemType allowNegativeStock');
+    if (!product || !productRequiresStock(product)) {
+      issuedItems.push(item);
+      continue;
+    }
+
+    const issue = await consumeStockFefo({
+      productId: String(item.productId),
+      quantity: Number(item.quantity || 0),
+      allowNegative: Boolean((product as any).allowNegativeStock),
+      referenceType: 'sale',
+      referenceId: sale._id?.toString?.(),
+      referenceNo: sale.invoiceNumber || sale.saleNumber,
+      createdBy: userId,
+    });
+
+    const cogsAmount = roundTo2(Number(issue.cogsValue || 0));
+    totalCogs = roundTo2(totalCogs + cogsAmount);
+    issuedItems.push({
+      ...(item.toObject?.() || item),
+      batchAllocations: issue.allocations || [],
+      cogsAmount,
+    });
   }
+
+  if (totalCogs > 0) {
+    await postCogsJournal({
+      cogsValue: totalCogs,
+      referenceType: 'sale',
+      referenceId: sale._id?.toString?.(),
+      referenceNo: sale.invoiceNumber || sale.saleNumber,
+      createdBy: userId,
+      metadata: {
+        saleNumber: sale.saleNumber,
+        invoiceNumber: sale.invoiceNumber,
+      },
+    });
+  }
+
+  return { items: issuedItems, cogsValue: totalCogs };
 };
 
 const quantityMapFromItems = (items: any[] = []): Map<string, number> => {
@@ -423,11 +506,13 @@ const resolveCustomer = async (body: {
   customerName?: any;
   customerPhone?: any;
   customerEmail?: any;
+  customerAddress?: any;
   createdBy?: string;
 }) => {
   const normalizedPhone = normalizePhoneStrict(body.customerPhone);
   const normalizedEmail = normalizeEmail(body.customerEmail);
   const normalizedName = String(body.customerName || '').trim();
+  const normalizedAddress = String(body.customerAddress || '').trim();
 
   if (body.customerId) {
     const customer = await Customer.findById(body.customerId);
@@ -445,6 +530,10 @@ const resolveCustomer = async (body: {
       customer.name = normalizedName;
       changed = true;
     }
+    if (normalizedAddress && customer.address !== normalizedAddress) {
+      customer.address = normalizedAddress;
+      changed = true;
+    }
     if (changed) await customer.save();
     return customer;
   }
@@ -460,6 +549,10 @@ const resolveCustomer = async (body: {
     }
     if (normalizedEmail && !byPhone.email) {
       byPhone.email = normalizedEmail;
+      changed = true;
+    }
+    if (normalizedAddress && byPhone.address !== normalizedAddress) {
+      byPhone.address = normalizedAddress;
       changed = true;
     }
     if (changed) await byPhone.save();
@@ -484,6 +577,7 @@ const resolveCustomer = async (body: {
     name: finalName,
     phone: normalizedPhone,
     email: finalEmail || undefined,
+    address: normalizedAddress || undefined,
     accountType: 'cash',
     creditLimit: 0,
     creditDays: 0,
@@ -520,6 +614,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       customerName,
       customerPhone,
       customerEmail,
+      customerAddress,
       notes,
       discountAmount,
       discountPercentage,
@@ -547,6 +642,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ success: false, error: 'Sales must have at least one item' });
     }
 
+    const normalizedCustomerPhone = normalizePhoneStrict(customerPhone);
+    if (!normalizedCustomerPhone) {
+      return res.status(400).json({ success: false, error: 'A valid 10-digit customer phone number is required' });
+    }
+
     const userRole = await getRequestUserRole(req.userId);
     const normalizedInvoiceType = String(invoiceType || 'cash').toLowerCase() === 'credit' ? 'credit' : 'cash';
     const normalizedInvoiceStatus = String(invoiceStatus || 'posted').toLowerCase() === 'draft' ? 'draft' : 'posted';
@@ -555,10 +655,14 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     const customer = await resolveCustomer({
       customerId,
       customerName,
-      customerPhone,
+      customerPhone: normalizedCustomerPhone,
       customerEmail,
+      customerAddress,
       createdBy: req.userId,
     });
+    if (!customer) {
+      return res.status(400).json({ success: false, error: 'Customer could not be created from the provided phone number' });
+    }
     if (customer?.isBlocked) {
       return res.status(403).json({ success: false, error: 'Customer account is blocked for billing' });
     }
@@ -667,11 +771,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         outstandingAmount,
         creditAppliedAmount: 0,
         dueDate: finalDueDate,
-      customerId: customer?._id?.toString() || undefined,
-      customerCode: customer?.customerCode || customerCode,
-      customerName: customer?.name || customerName || 'Walk-in Customer',
-      customerPhone: customer?.phone || normalizePhoneStrict(customerPhone) || undefined,
-      customerEmail: customer?.email || normalizeEmail(customerEmail) || undefined,
+        customerId: customer?._id?.toString() || undefined,
+        customerCode: customer?.customerCode || customerCode,
+        customerName: customer?.name || customerName || `Customer ${normalizedCustomerPhone}`,
+        customerPhone: customer?.phone || normalizedCustomerPhone,
+        customerEmail: customer?.email || normalizeEmail(customerEmail) || undefined,
         notes,
         discountAmount: parsedDiscountAmount || 0,
         discountPercentage: parsedDiscountPercentage || 0,
@@ -714,7 +818,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         userId: req.userId,
       });
 
-      await decrementStockForItems(processedItems);
+      const stockIssue = await issueStockForSale(sale, processedItems, req.userId);
+      sale.items = stockIssue.items;
       await postSaleFinancials(sale, { userId: req.userId, paidAmount: paid });
       if (creditApplied.applied > 0 && sale.customerId) {
         await postCustomerLedgerEntry({
@@ -847,7 +952,8 @@ router.post('/:id/post', authMiddleware, async (req: AuthenticatedRequest, res: 
       }
     }
 
-    await decrementStockForItems(sale.items as any[]);
+    const stockIssue = await issueStockForSale(sale, sale.items as any[], req.userId);
+    sale.items = stockIssue.items;
 
     sale.invoiceStatus = 'posted';
     sale.saleStatus = 'completed';
@@ -963,6 +1069,7 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
       customerName,
       customerPhone,
       customerEmail,
+      customerAddress,
       paymentMethod,
       discountAmount,
       discountPercentage,
@@ -983,6 +1090,7 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
       customerName,
       customerPhone,
       customerEmail,
+      customerAddress,
       createdBy: req.userId,
     });
     if (customer?.isBlocked) {
@@ -1043,7 +1151,14 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
       const newQty = Number(newQtyMap.get(productId) || 0);
       const delta = newQty - oldQty;
       if (delta !== 0) {
-        await Product.findByIdAndUpdate(productId, { $inc: { stock: -delta } });
+        await adjustBatchForStockChange({
+          productId,
+          deltaQuantity: -delta,
+          referenceType: 'sale_edit',
+          referenceId: sale._id.toString(),
+          referenceNo: sale.invoiceNumber || sale.saleNumber,
+          createdBy: req.userId,
+        });
       }
     }
 
@@ -1310,6 +1425,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       customerName,
       customerPhone,
       customerEmail,
+      customerAddress,
       paymentMethod,
       discountAmount,
       discountPercentage,
@@ -1330,6 +1446,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       customerName,
       customerPhone,
       customerEmail,
+      customerAddress,
       createdBy: req.userId,
     });
     if (customer?.isBlocked) {

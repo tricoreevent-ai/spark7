@@ -5,6 +5,11 @@ export interface InvoiceLineItem {
   productName: string;
   sku?: string;
   hsnCode?: string;
+  batchNo?: string;
+  expiryDate?: string;
+  serialNumbers?: string[];
+  variantSize?: string;
+  variantColor?: string;
   quantity: number;
   unitPrice: number;
   gstRate?: number;
@@ -86,12 +91,23 @@ const buildThermal58Html = (sale: PrintableSale, settings: GeneralSettings): str
   const footerNote = settings.invoice.footerNote || 'Thank you for your business.';
 
   const itemRows = sale.items
-    .map((item, idx) => {
-      const lineTotal = item.lineTotal ?? item.quantity * item.unitPrice + (isGstBill ? (item.gstAmount || 0) : 0);
-      const sku = item.sku ? `<div class="sub">SKU: ${escapeHtml(item.sku)}</div>` : '';
-      return `
-        <tr>
-          <td class="item">${idx + 1}. ${escapeHtml(item.productName)}${sku}</td>
+      .map((item, idx) => {
+        const lineTotal = item.lineTotal ?? item.quantity * item.unitPrice + (isGstBill ? (item.gstAmount || 0) : 0);
+        const metaParts = [
+          item.sku ? `SKU: ${escapeHtml(item.sku)}` : '',
+          item.variantSize || item.variantColor
+            ? `Variant: ${escapeHtml([item.variantSize, item.variantColor].filter(Boolean).join(' / '))}`
+            : '',
+          item.batchNo ? `Batch: ${escapeHtml(item.batchNo)}` : '',
+          item.expiryDate ? `Expiry: ${escapeHtml(new Date(item.expiryDate).toLocaleDateString('en-IN'))}` : '',
+          Array.isArray(item.serialNumbers) && item.serialNumbers.length
+            ? `Serials: ${escapeHtml(item.serialNumbers.join(', '))}`
+            : '',
+        ].filter(Boolean);
+        const sku = metaParts.map((part) => `<div class="sub">${part}</div>`).join('');
+        return `
+          <tr>
+            <td class="item">${idx + 1}. ${escapeHtml(item.productName)}${sku}</td>
           <td class="num">${Number(item.quantity || 0)}</td>
           <td class="num">${formatCurrency(Number(item.unitPrice || 0))}</td>
           <td class="num">${formatCurrency(Number(lineTotal || 0))}</td>
@@ -194,19 +210,29 @@ export const buildInvoiceHtml = (sale: PrintableSale, settings: GeneralSettings)
   const invoiceSubtitle = isGstBill ? settings.invoice.subtitle : 'Bill of Supply (Non-GST)';
 
   const rows = sale.items
-    .map((item, idx) => {
-      const lineTotal = item.lineTotal ?? item.quantity * item.unitPrice + (isGstBill ? (item.gstAmount || 0) : 0);
-      const hsnCol = settings.invoice.showHsnCode ? `<td>${escapeHtml(item.hsnCode || '-')}</td>` : '';
-      const gstCol = showGstBreakup
-        ? `<td class="num">${item.gstRate ?? 0}%</td><td class="num">${formatCurrency(item.gstAmount || 0)}</td>`
-        : '';
+      .map((item, idx) => {
+        const lineTotal = item.lineTotal ?? item.quantity * item.unitPrice + (isGstBill ? (item.gstAmount || 0) : 0);
+        const hsnCol = settings.invoice.showHsnCode ? `<td>${escapeHtml(item.hsnCode || '-')}</td>` : '';
+        const gstCol = showGstBreakup
+          ? `<td class="num">${item.gstRate ?? 0}%</td><td class="num">${formatCurrency(item.gstAmount || 0)}</td>`
+          : '';
+        const productLabel = [
+          escapeHtml(item.productName),
+          item.variantSize || item.variantColor
+            ? `<div style="font-size:11px;color:#475569">Variant: ${escapeHtml([item.variantSize, item.variantColor].filter(Boolean).join(' / '))}</div>`
+            : '',
+          item.batchNo ? `<div style="font-size:11px;color:#475569">Batch: ${escapeHtml(item.batchNo)}</div>` : '',
+          Array.isArray(item.serialNumbers) && item.serialNumbers.length
+            ? `<div style="font-size:11px;color:#475569">Serials: ${escapeHtml(item.serialNumbers.join(', '))}</div>`
+            : '',
+        ].filter(Boolean).join('');
 
-      return `
-        <tr>
-          <td>${idx + 1}</td>
-          <td>${escapeHtml(item.productName)}</td>
-          <td>${escapeHtml(item.sku || '-')}</td>
-          ${hsnCol}
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${productLabel}</td>
+            <td>${escapeHtml(item.sku || '-')}</td>
+            ${hsnCol}
           <td class="num">${item.quantity}</td>
           <td class="num">${formatCurrency(item.unitPrice)}</td>
           ${gstCol}

@@ -24,6 +24,7 @@ import eventQuotationRoutes from './routes/eventQuotations.js';
 import shiftRoutes from './routes/shifts.js';
 import payrollRoutes from './routes/payroll.js';
 import membershipRoutes from './routes/memberships.js';
+import serviceRoutes from './routes/services.js';
 import userRoutes from './routes/users.js';
 import rbacRoutes from './routes/rbac.js';
 import customerRoutes from './routes/customers.js';
@@ -37,10 +38,13 @@ import gstRoutes from './routes/gst.js';
 import settingsRoutes from './routes/settings.js';
 import generalSettingsRoutes from './routes/generalSettings.js';
 import publicRoutes from './routes/public.js';
+import validationRoutes from './validation/routes/validationRoutes.js';
 import { authMiddleware } from './middleware/auth.js';
 import { requireAnyPageAccess, requirePageAccess } from './middleware/authorization.js';
+import { detectManagedImageMimeType } from './services/assetStorage.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
 import { redactSensitiveData } from './utils/redaction.js';
+import { startValidationScheduler } from './validation/jobs/scheduler.js';
 
 const entryDir = process.argv[1]
   ? path.dirname(path.resolve(process.argv[1]))
@@ -112,6 +116,52 @@ const enableHsts = parseBoolean(process.env.ENABLE_HSTS, String(process.env.NODE
 const allowedCorsOrigins = parseCsv(process.env.CORS_ORIGIN || process.env.FRONTEND_URL);
 const clientIndexPath = path.join(clientDistPath, 'index.html');
 
+const applyDetectedUploadContentType = (req: Request, res: Response, next: NextFunction): void => {
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    next();
+    return;
+  }
+
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+  try {
+    const relativePath = decodeURIComponent(String(req.path || '').trim()).replace(/^\/+/, '');
+    if (!relativePath) {
+      next();
+      return;
+    }
+
+    const absolutePath = path.resolve(uploadsRoot, relativePath);
+    const normalizedUploadsRoot = path.resolve(uploadsRoot);
+    if (absolutePath !== normalizedUploadsRoot && !absolutePath.startsWith(`${normalizedUploadsRoot}${path.sep}`)) {
+      next();
+      return;
+    }
+
+    const stat = fs.existsSync(absolutePath) ? fs.statSync(absolutePath) : null;
+    if (!stat?.isFile()) {
+      next();
+      return;
+    }
+
+    const fd = fs.openSync(absolutePath, 'r');
+    try {
+      const probe = Buffer.alloc(16);
+      const bytesRead = fs.readSync(fd, probe, 0, probe.length, 0);
+      const detectedMimeType = detectManagedImageMimeType(probe.subarray(0, bytesRead));
+      if (detectedMimeType) {
+        res.type(detectedMimeType);
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    // Leave content type resolution to express.static if inspection fails.
+  }
+
+  next();
+};
+
 const logRuntimeSummary = (): void => {
   console.log(
     'Runtime env summary:',
@@ -160,7 +210,7 @@ app.use(helmet({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use('/uploads', express.static(uploadsRoot));
+app.use('/uploads', applyDetectedUploadContentType, express.static(uploadsRoot));
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -240,6 +290,7 @@ app.use('/api/events/quotations', authMiddleware, requireAnyPageAccess(['event-q
 app.use('/api/shifts', authMiddleware, requirePageAccess('shifts'), shiftRoutes);
 app.use('/api/payroll', authMiddleware, requirePageAccess('payroll'), payrollRoutes);
 app.use('/api/memberships', authMiddleware, requirePageAccess('memberships'), membershipRoutes);
+app.use('/api/services', authMiddleware, requirePageAccess('facilities'), serviceRoutes);
 app.use('/api/users', authMiddleware, requirePageAccess('user-management'), userRoutes);
 app.use('/api/rbac', authMiddleware, requirePageAccess('user-management'), rbacRoutes);
 app.use('/api/customers', authMiddleware, requireAnyPageAccess(['customers', 'sales', 'facilities']), customerRoutes);
@@ -252,6 +303,7 @@ app.use('/api/settlements', authMiddleware, requirePageAccess('accounting'), set
 app.use('/api/gst', authMiddleware, requireAnyPageAccess(['accounting', 'customers', 'inventory', 'products', 'sales']), gstRoutes);
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
 app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
+app.use('/api/validate', authMiddleware, requirePageAccess('accounting'), validationRoutes);
 
 app.use('/api', (req: Request, res: Response) => {
   const detail = `API endpoint not found: ${req.method} ${req.originalUrl}`;
@@ -303,6 +355,7 @@ const startServer = async () => {
     if (allowedCorsOrigins.length > 0) {
       console.log(`CORS allowed origins: ${allowedCorsOrigins.join(', ')}`);
     }
+    startValidationScheduler();
   });
 
   void connectDbWithRetry().then(() => {

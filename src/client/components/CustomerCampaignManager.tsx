@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { showConfirmDialog } from '../utils/appDialogs';
+import { FloatingField } from './FloatingField';
 import {
   CustomerCampaignAudienceMode,
   CustomerCrmCampaignRow,
@@ -8,7 +9,6 @@ import {
   CustomerCrmDirectoryFilters,
 } from './customerCrmShared';
 
-const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500';
 const buttonClass = 'rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60';
 const sectionTitleClass = 'text-sm font-semibold uppercase tracking-[0.28em] text-cyan-200';
 
@@ -335,16 +335,22 @@ export const CustomerCampaignManager: React.FC<CustomerCampaignManagerProps> = (
           {error && <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>}
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <input className={inputClass} placeholder="Campaign name" value={form.name} onChange={(e) => setForm((previous) => ({ ...previous, name: e.target.value }))} />
-            <input className={inputClass} placeholder="Email subject" value={form.subject} onChange={(e) => setForm((previous) => ({ ...previous, subject: e.target.value }))} />
-            <input className={`${inputClass} md:col-span-2`} placeholder="Headline shown inside the email (optional)" value={form.headline} onChange={(e) => setForm((previous) => ({ ...previous, headline: e.target.value }))} />
+            <FloatingField label="Campaign Name" value={form.name} onChange={(value) => setForm((previous) => ({ ...previous, name: value }))} />
+            <FloatingField label="Email Subject" value={form.subject} onChange={(value) => setForm((previous) => ({ ...previous, subject: value }))} />
+            <FloatingField
+              className="md:col-span-2"
+              label="Headline Shown Inside The Email (optional)"
+              value={form.headline}
+              onChange={(value) => setForm((previous) => ({ ...previous, headline: value }))}
+            />
           </div>
 
-          <textarea
-            className={`${inputClass} mt-3 min-h-[180px]`}
-            placeholder="Write the campaign message here. Example: Dear customer, we are sharing our latest facility brochure and current event offers."
+          <FloatingField
+            className="mt-3"
+            label="Campaign Message"
+            rows={7}
             value={form.message}
-            onChange={(e) => setForm((previous) => ({ ...previous, message: e.target.value }))}
+            onChange={(value) => setForm((previous) => ({ ...previous, message: value }))}
           />
 
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[0.9fr_1.1fr]">

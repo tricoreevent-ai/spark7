@@ -1,49 +1,93 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { CardTabs } from '../components/CardTabs';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
-import { getGeneralSettings } from '../utils/generalSettings';
+import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
 
 type ReportTabKey =
+  | 'profit-loss-store-report'
+  | 'balance-sheet-store-report'
+  | 'sales-summary-shift-report'
   | 'daily-sales-summary'
   | 'item-wise-sales'
   | 'customer-wise-sales'
   | 'sales-return-report'
   | 'gross-profit-report'
+  | 'hsn-wise-sales-report'
+  | 'taxability-breakup-report'
+  | 'b2b-vs-b2c-report'
+  | 'gst-note-register-report'
+  | 'sales-register-detailed-report'
+  | 'payment-reconciliation-report'
+  | 'z-report'
+  | 'pos-inventory-movement-report'
+  | 'membership-sales-report'
+  | 'gst-handoff-report'
   | 'outstanding-receivables-report'
   | 'attendance-report'
   | 'cash-vs-credit-sales-report'
-  | 'user-wise-sales-report';
+  | 'user-wise-sales-report'
+  | 'tax-summary-report';
 
 const REPORT_TAB_KEYS: ReportTabKey[] = [
+  'profit-loss-store-report',
+  'balance-sheet-store-report',
+  'sales-summary-shift-report',
   'daily-sales-summary',
   'item-wise-sales',
   'customer-wise-sales',
   'sales-return-report',
   'gross-profit-report',
+  'hsn-wise-sales-report',
+  'taxability-breakup-report',
+  'b2b-vs-b2c-report',
+  'gst-note-register-report',
+  'sales-register-detailed-report',
+  'payment-reconciliation-report',
+  'z-report',
+  'pos-inventory-movement-report',
+  'membership-sales-report',
+  'gst-handoff-report',
   'outstanding-receivables-report',
   'attendance-report',
   'cash-vs-credit-sales-report',
   'user-wise-sales-report',
+  'tax-summary-report',
 ];
 
 const REPORT_TAB_LABEL: Record<ReportTabKey, string> = {
+  'profit-loss-store-report': 'Profit & Loss (Store-level)',
+  'balance-sheet-store-report': 'Balance Sheet (Store-level)',
+  'sales-summary-shift-report': 'Sales Summary (Daily / Shift)',
   'daily-sales-summary': 'Daily Sales Summary',
   'item-wise-sales': 'Item-wise Sales Report',
   'customer-wise-sales': 'Customer-wise Sales Report',
   'sales-return-report': 'Sales Return Report',
   'gross-profit-report': 'Gross Profit Report',
+  'hsn-wise-sales-report': 'HSN-wise Sales Report',
+  'taxability-breakup-report': 'Taxable / Exempt / Nil / Non-GST',
+  'b2b-vs-b2c-report': 'B2B vs B2C Invoice Report',
+  'gst-note-register-report': 'Credit / Debit Note Register (GST)',
+  'sales-register-detailed-report': 'Sales Register (Detailed)',
+  'payment-reconciliation-report': 'Payment Reconciliation Report',
+  'z-report': 'Z-Report (End of Day)',
+  'pos-inventory-movement-report': 'Inventory Movement (POS only)',
+  'membership-sales-report': 'Membership Sales Report',
+  'gst-handoff-report': 'GST Handoff Datasets',
   'outstanding-receivables-report': 'Outstanding Receivables Report',
   'attendance-report': 'Attendance Report',
   'cash-vs-credit-sales-report': 'Cash vs Credit Sales Report',
   'user-wise-sales-report': 'User-wise Sales Report',
+  'tax-summary-report': 'Tax Summary Report',
 };
 
 const KEY_METRIC_TABS: ReportTabKey[] = [
   'gross-profit-report',
   'outstanding-receivables-report',
   'sales-return-report',
+  'tax-summary-report',
 ];
 
 const REPORT_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -60,6 +104,19 @@ interface ExportDataset {
   columns: string[];
   rows: Array<Array<string | number>>;
   summary?: Array<[string, string | number]>;
+}
+
+interface RichReportSection {
+  title: string;
+  columns: string[];
+  rows: Array<Array<string | number>>;
+}
+
+interface RichReportDefinition {
+  title: string;
+  summary?: Array<[string, string | number]>;
+  notes?: string[];
+  sections: RichReportSection[];
 }
 
 const toNumber = (value: any): number => Number(value || 0);
@@ -94,6 +151,25 @@ const imageFormatFromDataUrl = (dataUrl: string): 'PNG' | 'JPEG' => {
   return 'JPEG';
 };
 
+const resolveAssetImageToDataUrl = async (value: string): Promise<string> => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('data:')) return raw;
+
+  const resolvedUrl = resolveGeneralSettingsAssetUrl(raw);
+  if (!resolvedUrl) return '';
+
+  const response = await fetch(resolvedUrl);
+  if (!response.ok) return '';
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read report logo'));
+    reader.readAsDataURL(blob);
+  }).catch(() => '');
+};
+
 export const Reports: React.FC = () => {
   const today = new Date().toISOString().slice(0, 10);
   const firstOfMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
@@ -103,16 +179,30 @@ export const Reports: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const [profitLossStore, setProfitLossStore] = useState<any>(null);
+  const [balanceSheetStore, setBalanceSheetStore] = useState<any>(null);
+  const [salesSummaryShift, setSalesSummaryShift] = useState<any>(null);
   const [dailySales, setDailySales] = useState<any[]>([]);
   const [itemSales, setItemSales] = useState<any[]>([]);
   const [customerSales, setCustomerSales] = useState<any[]>([]);
   const [returnsReport, setReturnsReport] = useState<{ summary: any; rows: any[] } | null>(null);
   const [grossProfit, setGrossProfit] = useState<any>(null);
+  const [hsnWiseSales, setHsnWiseSales] = useState<any>(null);
+  const [taxabilityBreakup, setTaxabilityBreakup] = useState<any>(null);
+  const [b2bVsB2c, setB2bVsB2c] = useState<any>(null);
+  const [gstNoteRegister, setGstNoteRegister] = useState<any>(null);
+  const [salesRegisterDetailed, setSalesRegisterDetailed] = useState<any>(null);
+  const [paymentReconciliation, setPaymentReconciliation] = useState<any>(null);
+  const [zReport, setZReport] = useState<any>(null);
+  const [posInventoryMovement, setPosInventoryMovement] = useState<any>(null);
+  const [membershipSales, setMembershipSales] = useState<any>(null);
+  const [gstHandoff, setGstHandoff] = useState<any>(null);
   const [receivables, setReceivables] = useState<{ totalOutstanding: number; rows: any[] } | null>(null);
   const [attendanceSummary, setAttendanceSummary] = useState<any[]>([]);
   const [cashVsCredit, setCashVsCredit] = useState<{ cash: any; credit: any } | null>(null);
   const [userSales, setUserSales] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<ReportTabKey>('daily-sales-summary');
+  const [taxSummary, setTaxSummary] = useState<{ salesTax: any[]; returnTax: any[] } | null>(null);
+  const [activeTab, setActiveTab] = useState<ReportTabKey>('profit-loss-store-report');
   const [reportPageByTab, setReportPageByTab] = useState<Record<ReportTabKey, number>>(() => createTabState(1));
   const [reportPageSizeByTab, setReportPageSizeByTab] = useState<Record<ReportTabKey, number>>(() => createTabState(25));
   const [tabLoaded, setTabLoaded] = useState<Record<ReportTabKey, boolean>>(() => createTabState(false));
@@ -131,15 +221,29 @@ export const Reports: React.FC = () => {
 
   const queryRange = `startDate=${startDate}&endDate=${endDate}`;
   const reportMenu: Array<{ key: ReportTabKey; label: string }> = [
+    { key: 'profit-loss-store-report', label: 'Profit & Loss (Store-level)' },
+    { key: 'balance-sheet-store-report', label: 'Balance Sheet (Store-level)' },
+    { key: 'sales-summary-shift-report', label: 'Sales Summary (Daily / Shift)' },
     { key: 'daily-sales-summary', label: 'Daily Sales Summary' },
     { key: 'item-wise-sales', label: 'Item-wise Sales Report' },
     { key: 'customer-wise-sales', label: 'Customer-wise Sales Report' },
     { key: 'sales-return-report', label: 'Sales Return Report' },
     { key: 'gross-profit-report', label: 'Gross Profit Report' },
+    { key: 'hsn-wise-sales-report', label: 'HSN-wise Sales Report' },
+    { key: 'taxability-breakup-report', label: 'Taxable / Exempt / Nil / Non-GST' },
+    { key: 'b2b-vs-b2c-report', label: 'B2B vs B2C Invoice Report' },
+    { key: 'gst-note-register-report', label: 'Credit / Debit Note Register (GST)' },
+    { key: 'sales-register-detailed-report', label: 'Sales Register (Detailed)' },
+    { key: 'payment-reconciliation-report', label: 'Payment Reconciliation Report' },
+    { key: 'z-report', label: 'Z-Report (End of Day)' },
+    { key: 'pos-inventory-movement-report', label: 'Inventory Movement (POS only)' },
+    { key: 'membership-sales-report', label: 'Membership Sales Report' },
+    { key: 'gst-handoff-report', label: 'GST Handoff Datasets' },
     { key: 'outstanding-receivables-report', label: 'Outstanding Receivables Report' },
     { key: 'attendance-report', label: 'Attendance Report' },
     { key: 'cash-vs-credit-sales-report', label: 'Cash vs Credit Sales Report' },
     { key: 'user-wise-sales-report', label: 'User-wise Sales Report' },
+    { key: 'tax-summary-report', label: 'Tax Summary Report' },
   ];
 
   const setSearchForTab = (tab: ReportTabKey, value: string) => {
@@ -313,7 +417,7 @@ export const Reports: React.FC = () => {
     const direction = reportSortDirectionByTab[tab];
     const rows = itemSales.filter((row) => {
       if (q) {
-        const hay = `${row?.productName || ''} ${row?.quantity || 0} ${row?.taxableValue || 0} ${row?.tax || 0} ${row?.amount || 0}`.toLowerCase();
+        const hay = `${row?.productName || ''} ${row?.category || ''} ${row?.subcategory || ''} ${row?.variantSize || ''} ${row?.variantColor || ''} ${row?.quantity || 0} ${row?.taxableValue || 0} ${row?.tax || 0} ${row?.amount || 0}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (filter === 'high-qty' && Number(row?.quantity || 0) < 5) return false;
@@ -323,6 +427,11 @@ export const Reports: React.FC = () => {
     return [...rows].sort((a, b) => {
       const keyMap: Record<string, [unknown, unknown]> = {
         item: [String(a?.productName || ''), String(b?.productName || '')],
+        category: [String(a?.category || ''), String(b?.category || '')],
+        variant: [
+          `${String(a?.variantSize || '')} ${String(a?.variantColor || '')}`.trim(),
+          `${String(b?.variantSize || '')} ${String(b?.variantColor || '')}`.trim(),
+        ],
         quantity: [Number(a?.quantity || 0), Number(b?.quantity || 0)],
         taxableValue: [Number(a?.taxableValue || 0), Number(b?.taxableValue || 0)],
         tax: [Number(a?.tax || 0), Number(b?.tax || 0)],
@@ -527,6 +636,65 @@ export const Reports: React.FC = () => {
     });
   }, [reportFilterByTab, reportSearchByTab, reportSortDirectionByTab, reportSortFieldByTab, userSales]);
 
+  const taxSummaryRows = useMemo(
+    () => [
+      ...(taxSummary?.salesTax || []).map((row: any, index: number) => ({
+        id: `sales-${row._id ?? index}`,
+        source: 'Sales',
+        gstRate: Number(row.gstRate ?? row._id ?? 0),
+        taxableValue: Number(row.taxableValue || 0),
+        taxAmount: Number(row.taxAmount || 0),
+        cgstAmount: Number(row.cgstAmount || 0),
+        sgstAmount: Number(row.sgstAmount || 0),
+        igstAmount: Number(row.igstAmount || 0),
+        cessAmount: Number(row.cessAmount || 0),
+      })),
+      ...(taxSummary?.returnTax || []).map((row: any, index: number) => ({
+        id: `returns-${row._id ?? index}`,
+        source: 'Returns',
+        gstRate: Number(row.gstRate ?? row._id ?? 0),
+        taxableValue: Number(row.taxableValue || 0),
+        taxAmount: Number(row.taxAmount || 0),
+        cgstAmount: Number(row.cgstAmount || 0),
+        sgstAmount: Number(row.sgstAmount || 0),
+        igstAmount: Number(row.igstAmount || 0),
+        cessAmount: Number(row.cessAmount || 0),
+      })),
+    ],
+    [taxSummary]
+  );
+
+  const taxSummaryView = useMemo(() => {
+    const tab: ReportTabKey = 'tax-summary-report';
+    const q = normalizeText(reportSearchByTab[tab]);
+    const filter = reportFilterByTab[tab];
+    const sortField = reportSortFieldByTab[tab];
+    const direction = reportSortDirectionByTab[tab];
+    const rows = taxSummaryRows.filter((row) => {
+      if (q) {
+        const hay = `${row.source} ${row.gstRate} ${row.taxableValue} ${row.taxAmount} ${row.cgstAmount} ${row.sgstAmount} ${row.igstAmount} ${row.cessAmount}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filter !== 'all' && normalizeText(row.source) !== filter) return false;
+      return true;
+    });
+    return [...rows].sort((a, b) => {
+      const keyMap: Record<string, [unknown, unknown]> = {
+        source: [a.source, b.source],
+        gstRate: [a.gstRate, b.gstRate],
+        taxableValue: [a.taxableValue, b.taxableValue],
+        taxAmount: [a.taxAmount, b.taxAmount],
+        cgstAmount: [a.cgstAmount, b.cgstAmount],
+        sgstAmount: [a.sgstAmount, b.sgstAmount],
+        igstAmount: [a.igstAmount, b.igstAmount],
+        cessAmount: [a.cessAmount, b.cessAmount],
+      };
+      const pair = keyMap[sortField];
+      if (!pair) return 0;
+      return compareSortValues(pair[0], pair[1], direction);
+    });
+  }, [reportFilterByTab, reportSearchByTab, reportSortDirectionByTab, reportSortFieldByTab, taxSummaryRows]);
+
   const renderSortHeader = (
     tab: ReportTabKey,
     label: string,
@@ -579,7 +747,597 @@ export const Reports: React.FC = () => {
     </div>
   );
 
+  const buildRichExportDataset = (report: RichReportDefinition): ExportDataset => {
+    if (report.sections.length === 1) {
+      return {
+        title: report.title,
+        columns: report.sections[0].columns,
+        rows: report.sections[0].rows,
+        summary: report.summary,
+      };
+    }
+
+    const maxColumns = Math.max(...report.sections.map((section) => section.columns.length));
+    const columns = ['Section', ...Array.from({ length: maxColumns }, (_, index) => `Value ${index + 1}`)];
+    const rows: Array<Array<string | number>> = [];
+
+    report.sections.forEach((section) => {
+      if (!section.rows.length) return;
+      section.rows.forEach((row, index) => {
+        const padded = [...row, ...Array(Math.max(0, maxColumns - row.length)).fill('')];
+        rows.push([index === 0 ? section.title : '', ...padded]);
+      });
+      rows.push(['', ...Array(maxColumns).fill('')]);
+    });
+
+    if (rows.length && rows[rows.length - 1].every((cell) => cell === '')) {
+      rows.pop();
+    }
+
+    return {
+      title: report.title,
+      columns,
+      rows,
+      summary: report.summary,
+    };
+  };
+
+  const renderRichReportTab = (tab: ReportTabKey, report: RichReportDefinition) => {
+    const placeholder = renderTabPlaceholder(tab);
+    if (placeholder) return placeholder;
+
+    const q = normalizeText(reportSearchByTab[tab]);
+    const renderRows = (section: RichReportSection) => {
+      const filtered = q
+        ? section.rows.filter((row) => row.some((cell) => String(cell || '').toLowerCase().includes(q)))
+        : section.rows;
+      if (report.sections.length === 1) {
+        return paginateRows(tab, filtered);
+      }
+      return { rows: filtered, currentPage: 1, totalPages: 1, pageSize: filtered.length, totalRows: filtered.length };
+    };
+
+    return (
+      <div className="space-y-4 rounded-xl border border-white/10 bg-white/5 p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-white">{report.title}</h2>
+          {report.sections.length === 1 && renderReportControls(tab, `Filter ${report.title.toLowerCase()}...`)}
+        </div>
+
+        {report.summary?.length ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {report.summary.map(([label, value]) => (
+              <div key={`${report.title}-${label}`} className="rounded-lg border border-white/10 bg-black/10 p-3">
+                <p className="text-xs text-gray-400">{label}</p>
+                <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {report.notes?.length ? (
+          <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-3 text-xs text-amber-100">
+            {report.notes.map((note, index) => (
+              <p key={`${report.title}-note-${index}`}>{note}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {report.sections.map((section) => {
+          const paged = renderRows(section);
+          return (
+            <div key={`${report.title}-${section.title}`} className="overflow-x-auto rounded-lg border border-white/10 bg-black/10 p-3">
+              <h3 className="mb-3 text-sm font-semibold text-white">{section.title}</h3>
+              <table className="min-w-full divide-y divide-white/10">
+                <thead>
+                  <tr>
+                    {section.columns.map((column) => (
+                      <th key={`${section.title}-${column}`} className="px-2 py-2 text-left text-xs font-semibold text-gray-300">
+                        {column}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {paged.rows.map((row, rowIndex) => (
+                    <tr key={`${section.title}-${rowIndex}`}>
+                      {section.columns.map((_, cellIndex) => (
+                        <td key={`${section.title}-${rowIndex}-${cellIndex}`} className="px-2 py-2 text-sm text-gray-200">
+                          {row[cellIndex] ?? '-'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {!paged.rows.length && (
+                    <tr>
+                      <td colSpan={section.columns.length} className="px-2 py-3 text-center text-sm text-gray-400">
+                        No data
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {report.sections.length === 1 ? renderPagination(tab, paged.totalRows) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const richReportDefinitions = useMemo<Partial<Record<ReportTabKey, RichReportDefinition>>>(() => {
+    const formatDateCell = (value: unknown) => (value ? String(value).slice(0, 10) : '-');
+
+    return {
+      'profit-loss-store-report': {
+        title: 'Profit & Loss (Store-level)',
+        summary: [
+          ['Net Sales', formatCurrency(Number(profitLossStore?.posSummary?.netSales || 0))],
+          ['COGS', formatCurrency(Number(profitLossStore?.posSummary?.cogs || 0))],
+          ['Gross Profit', formatCurrency(Number(profitLossStore?.posSummary?.grossProfit || 0))],
+          ['Margin %', `${Number(profitLossStore?.posSummary?.marginPercent || 0).toFixed(2)}%`],
+        ],
+        sections: [
+          {
+            title: 'Accounting Statement',
+            columns: ['Section', 'Particulars', 'Amount'],
+            rows: (profitLossStore?.statement?.rows || []).map((row: any) => [
+              String(row.section || ''),
+              String(row.particulars || ''),
+              formatCurrency(Number(row.amount || 0)),
+            ]),
+          },
+          {
+            title: 'Register / Cashier Performance',
+            columns: ['Register', 'Shift', 'Invoices', 'Net Sales', 'Tax', 'COGS', 'Gross Profit'],
+            rows: (profitLossStore?.registerRows || []).map((row: any) => [
+              String(row.register || ''),
+              String(row.shiftName || ''),
+              Number(row.invoices || 0),
+              formatCurrency(Number(row.netSales || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.cogsAmount || 0)),
+              formatCurrency(Number(row.grossProfit || 0)),
+            ]),
+          },
+        ],
+      },
+      'balance-sheet-store-report': {
+        title: 'Balance Sheet (Store-level)',
+        summary: [
+          ['Total Assets', formatCurrency(Number(balanceSheetStore?.report?.totals?.totalAssets || 0))],
+          ['Total Liabilities', formatCurrency(Number(balanceSheetStore?.report?.totals?.totalLiabilities || 0))],
+          ['Total Equity', formatCurrency(Number(balanceSheetStore?.report?.totals?.totalEquity || 0))],
+          ['Inventory Value', formatCurrency(Number(balanceSheetStore?.operationalSummary?.inventoryValue || 0))],
+        ],
+        sections: [
+          {
+            title: 'Balance Sheet Rows',
+            columns: ['Section', 'Account', 'Amount'],
+            rows: [
+              ...(balanceSheetStore?.report?.assets || []).map((row: any) => ['Asset', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
+              ...(balanceSheetStore?.report?.liabilities || []).map((row: any) => ['Liability', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
+              ...(balanceSheetStore?.report?.equityRows || []).map((row: any) => ['Equity', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
+            ],
+          },
+          {
+            title: 'Cash Drawer Balances',
+            columns: ['Drawer', 'Calculated', 'Physical', 'Variance', 'Count Date'],
+            rows: (balanceSheetStore?.cashDrawerRows || []).map((row: any) => [
+              String(row.drawerName || ''),
+              formatCurrency(Number(row.calculatedBalance || 0)),
+              formatCurrency(Number(row.physicalAmount || 0)),
+              formatCurrency(Number(row.varianceAmount || 0)),
+              formatDateCell(row.countDate),
+            ]),
+          },
+          {
+            title: 'Undeposited Receipts',
+            columns: ['Source', 'Reference', 'Customer', 'Method', 'Expected Settlement', 'Amount'],
+            rows: (balanceSheetStore?.undepositedRows || []).map((row: any) => [
+              String(row.source || ''),
+              String(row.referenceNo || ''),
+              String(row.customerName || ''),
+              String(row.paymentMethod || ''),
+              formatDateCell(row.expectedSettlementDate),
+              formatCurrency(Number(row.amount || 0)),
+            ]),
+          },
+          {
+            title: 'Membership Receivables',
+            columns: ['Member Code', 'Member', 'Amount Due', 'Amount Paid', 'End Date'],
+            rows: (balanceSheetStore?.membershipReceivableRows || []).map((row: any) => [
+              String(row.memberCode || ''),
+              String(row.memberName || ''),
+              formatCurrency(Number(row.amountDue || 0)),
+              formatCurrency(Number(row.amountPaid || 0)),
+              formatDateCell(row.endDate),
+            ]),
+          },
+        ],
+      },
+      'sales-summary-shift-report': {
+        title: 'Sales Summary (Daily / Shift)',
+        summary: [
+          ['Gross Sales', formatCurrency(Number(salesSummaryShift?.summary?.grossSales || 0))],
+          ['Returns', formatCurrency(Number(salesSummaryShift?.summary?.returns || 0))],
+          ['Discounts', formatCurrency(Number(salesSummaryShift?.summary?.discounts || 0))],
+          ['Net Sales', formatCurrency(Number(salesSummaryShift?.summary?.netSales || 0))],
+        ],
+        sections: [
+          {
+            title: 'Shift Summary',
+            columns: ['Date', 'Shift', 'Invoices', 'Gross Sales', 'Returns', 'Discounts', 'Taxes', 'Net Sales', 'Cash', 'Card', 'UPI', 'Other'],
+            rows: (salesSummaryShift?.rows || []).map((row: any) => [
+              String(row.dateKey || ''),
+              String(row.shiftName || ''),
+              Number(row.invoices || 0),
+              formatCurrency(Number(row.grossSales || 0)),
+              formatCurrency(Number(row.returns || 0)),
+              formatCurrency(Number(row.discounts || 0)),
+              formatCurrency(Number(row.taxes || 0)),
+              formatCurrency(Number(row.netSalesAfterReturns || 0)),
+              formatCurrency(Number(row.cash || 0)),
+              formatCurrency(Number(row.card || 0)),
+              formatCurrency(Number(row.upi || 0)),
+              formatCurrency(Number(row.other || 0)),
+            ]),
+          },
+        ],
+      },
+      'hsn-wise-sales-report': {
+        title: 'HSN-wise Sales Report',
+        summary: [
+          ['HSN Rows', Number(hsnWiseSales?.summary?.hsnCodes || 0)],
+          ['Taxable Value', formatCurrency(Number(hsnWiseSales?.summary?.taxableValue || 0))],
+          ['Tax Amount', formatCurrency(Number(hsnWiseSales?.summary?.taxAmount || 0))],
+        ],
+        sections: [
+          {
+            title: 'HSN Summary',
+            columns: ['HSN', 'Quantity', 'Taxable Value', 'Tax Amount', 'CGST', 'SGST', 'IGST', 'Cess', 'Total'],
+            rows: (hsnWiseSales?.rows || []).map((row: any) => [
+              String(row.hsnCode || ''),
+              Number(row.quantity || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.cgstAmount || 0)),
+              formatCurrency(Number(row.sgstAmount || 0)),
+              formatCurrency(Number(row.igstAmount || 0)),
+              formatCurrency(Number(row.cessAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+            ]),
+          },
+        ],
+      },
+      'taxability-breakup-report': {
+        title: 'Taxable / Exempt / Nil / Non-GST',
+        notes: taxabilityBreakup?.notes || [],
+        sections: [
+          {
+            title: 'Taxability Breakup',
+            columns: ['Category', 'Taxable Value', 'Tax Amount'],
+            rows: (taxabilityBreakup?.rows || []).map((row: any) => [
+              String(row.category || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+            ]),
+          },
+        ],
+      },
+      'b2b-vs-b2c-report': {
+        title: 'B2B vs B2C Invoice Report',
+        summary: [
+          ['B2B', Number(b2bVsB2c?.summary?.b2bInvoices || 0)],
+          ['B2CL', Number(b2bVsB2c?.summary?.b2clInvoices || 0)],
+          ['B2CS', Number(b2bVsB2c?.summary?.b2csInvoices || 0)],
+          ['Taxable Value', formatCurrency(Number(b2bVsB2c?.summary?.taxableValue || 0))],
+        ],
+        sections: [
+          {
+            title: 'Invoice Classification',
+            columns: ['Invoice', 'Date', 'Customer', 'GSTIN', 'Class', 'Place Of Supply', 'Payment', 'Taxable', 'Tax', 'Total', 'Shift'],
+            rows: (b2bVsB2c?.rows || []).map((row: any) => [
+              String(row.invoiceNumber || ''),
+              formatDateCell(row.invoiceDate),
+              String(row.customerName || ''),
+              String(row.customerGstin || ''),
+              String(row.classification || ''),
+              String(row.placeOfSupply || ''),
+              String(row.paymentMethod || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+              String(row.shiftName || ''),
+            ]),
+          },
+        ],
+      },
+      'gst-note-register-report': {
+        title: 'Credit / Debit Note Register (GST)',
+        summary: [
+          ['Notes', Number(gstNoteRegister?.summary?.notes || 0)],
+          ['Taxable Value', formatCurrency(Number(gstNoteRegister?.summary?.taxableValue || 0))],
+          ['Tax Amount', formatCurrency(Number(gstNoteRegister?.summary?.taxAmount || 0))],
+          ['Total', formatCurrency(Number(gstNoteRegister?.summary?.totalAmount || 0))],
+        ],
+        sections: [
+          {
+            title: 'GST Note Register',
+            columns: ['Note No', 'Date', 'Category', 'Reference Invoice', 'Customer', 'GSTIN', 'Taxable', 'Tax', 'Total', 'Status'],
+            rows: (gstNoteRegister?.rows || []).map((row: any) => [
+              String(row.noteNumber || ''),
+              formatDateCell(row.noteDate),
+              String(row.category || ''),
+              String(row.referenceInvoiceNumber || ''),
+              String(row.customerName || ''),
+              String(row.customerGstin || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+              String(row.status || ''),
+            ]),
+          },
+        ],
+      },
+      'sales-register-detailed-report': {
+        title: 'Sales Register (Detailed)',
+        summary: [
+          ['Rows', Number(salesRegisterDetailed?.summary?.rows || 0)],
+          ['Invoices', Number(salesRegisterDetailed?.summary?.invoices || 0)],
+          ['Taxable Value', formatCurrency(Number(salesRegisterDetailed?.summary?.taxableValue || 0))],
+          ['Total Amount', formatCurrency(Number(salesRegisterDetailed?.summary?.totalAmount || 0))],
+        ],
+        sections: [
+          {
+            title: 'Detailed Register',
+            columns: ['Date', 'Invoice', 'Customer', 'GSTIN', 'Item', 'SKU', 'HSN', 'Qty', 'Rate', 'Taxable', 'Discount', 'Tax', 'Total', 'Payment', 'Shift'],
+            rows: (salesRegisterDetailed?.rows || []).map((row: any) => [
+              formatDateCell(row.invoiceDate),
+              String(row.invoiceNumber || ''),
+              String(row.customerName || ''),
+              String(row.customerGstin || ''),
+              String(row.itemName || ''),
+              String(row.sku || ''),
+              String(row.hsnCode || ''),
+              Number(row.quantity || 0),
+              formatCurrency(Number(row.unitPrice || 0)),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.discountAmount || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+              String(row.paymentMethod || ''),
+              String(row.shiftName || ''),
+            ]),
+          },
+        ],
+      },
+      'payment-reconciliation-report': {
+        title: 'Payment Reconciliation Report',
+        summary: [
+          ['Methods', Number(paymentReconciliation?.summary?.methods || 0)],
+          ['Total Amount', formatCurrency(Number(paymentReconciliation?.summary?.totalAmount || 0))],
+          ['Outstanding', formatCurrency(Number(paymentReconciliation?.summary?.outstandingAmount || 0))],
+        ],
+        sections: [
+          {
+            title: 'Payment Reconciliation',
+            columns: ['Method', 'Channel', 'Invoices', 'Taxable', 'Tax', 'Total', 'Outstanding', 'Pending Settlement'],
+            rows: (paymentReconciliation?.rows || []).map((row: any) => [
+              String(row.paymentMethod || ''),
+              String(row.channel || ''),
+              Number(row.invoices || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+              formatCurrency(Number(row.outstandingAmount || 0)),
+              formatCurrency(Number(row.pendingSettlement || 0)),
+            ]),
+          },
+        ],
+      },
+      'z-report': {
+        title: 'Z-Report (End of Day)',
+        summary: [
+          ['Days', Number(zReport?.summary?.days || 0)],
+          ['Gross Sales', formatCurrency(Number(zReport?.summary?.grossSales || 0))],
+          ['Returns', formatCurrency(Number(zReport?.summary?.returns || 0))],
+          ['Net Sales', formatCurrency(Number(zReport?.summary?.netSales || 0))],
+        ],
+        sections: [
+          {
+            title: 'Daily Closing',
+            columns: ['Date', 'Invoices', 'Gross Sales', 'Returns', 'Net Sales', 'Tax', 'Discounts', 'Cash Sales', 'Digital Sales', 'System Closing Cash', 'Physical Closing Cash', 'Variance'],
+            rows: (zReport?.rows || []).map((row: any) => [
+              String(row.dateKey || ''),
+              Number(row.invoices || 0),
+              formatCurrency(Number(row.grossSales || 0)),
+              formatCurrency(Number(row.returns || 0)),
+              formatCurrency(Number(row.netSales || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.discounts || 0)),
+              formatCurrency(Number(row.cashSales || 0)),
+              formatCurrency(Number(row.digitalSales || 0)),
+              formatCurrency(Number(row.systemClosingCash || 0)),
+              formatCurrency(Number(row.physicalClosingCash || 0)),
+              formatCurrency(Number(row.variance || 0)),
+            ]),
+          },
+        ],
+      },
+      'pos-inventory-movement-report': {
+        title: 'Inventory Movement (POS only)',
+        summary: [
+          ['Sold Items', Number(posInventoryMovement?.summary?.soldItems || 0)],
+          ['Quantity Sold', Number(posInventoryMovement?.summary?.quantitySold || 0)],
+          ['COGS', formatCurrency(Number(posInventoryMovement?.summary?.cogsAmount || 0))],
+          ['Stock Alerts', Number(posInventoryMovement?.summary?.stockAlerts || 0)],
+        ],
+        sections: [
+          {
+            title: 'Sold Items',
+            columns: ['Item', 'SKU', 'Qty Sold', 'Taxable Value', 'COGS', 'Gross Profit'],
+            rows: (posInventoryMovement?.soldRows || []).map((row: any) => [
+              String(row.productName || ''),
+              String(row.sku || ''),
+              Number(row.quantitySold || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.cogsAmount || 0)),
+              formatCurrency(Number(row.grossProfit || 0)),
+            ]),
+          },
+          {
+            title: 'Stock Alerts',
+            columns: ['Item', 'SKU', 'Stock', 'Min Stock', 'Alert'],
+            rows: (posInventoryMovement?.stockAlerts || []).map((row: any) => [
+              String(row.productName || ''),
+              String(row.sku || ''),
+              Number(row.stock || 0),
+              Number(row.minStock || 0),
+              String(row.alert || ''),
+            ]),
+          },
+        ],
+      },
+      'membership-sales-report': {
+        title: 'Membership Sales Report',
+        summary: [
+          ['Events', Number(membershipSales?.summary?.events || 0)],
+          ['Amount Paid', formatCurrency(Number(membershipSales?.summary?.amountPaid || 0))],
+          ['Recognised Revenue', formatCurrency(Number(membershipSales?.summary?.recognizedRevenue || 0))],
+          ['Deferred Revenue', formatCurrency(Number(membershipSales?.summary?.deferredRevenue || 0))],
+        ],
+        sections: [
+          {
+            title: 'Membership Sales',
+            columns: ['Event', 'Date', 'Member Code', 'Member', 'Plan', 'Amount Paid', 'Amount Due', 'Recognised', 'Deferred'],
+            rows: (membershipSales?.rows || []).map((row: any) => [
+              String(row.eventType || ''),
+              formatDateCell(row.eventDate),
+              String(row.memberCode || ''),
+              String(row.memberName || ''),
+              String(row.planName || ''),
+              formatCurrency(Number(row.amountPaid || 0)),
+              formatCurrency(Number(row.amountDue || 0)),
+              formatCurrency(Number(row.recognizedRevenue || 0)),
+              formatCurrency(Number(row.deferredRevenue || 0)),
+            ]),
+          },
+        ],
+      },
+      'gst-handoff-report': {
+        title: 'GST Handoff Datasets',
+        notes: ['This tab prepares POS verification and sync datasets only. GSTR JSON generation remains in the main GST Workspace.'],
+        summary: [
+          ['B2B Invoices', Number(gstHandoff?.summary?.b2bInvoices || 0)],
+          ['B2C Invoices', Number(gstHandoff?.summary?.b2cInvoices || 0)],
+          ['HSN Rows', Number(gstHandoff?.summary?.hsnRows || 0)],
+          ['Tax Liability', formatCurrency(Number(gstHandoff?.summary?.taxLiability || 0))],
+        ],
+        sections: [
+          {
+            title: 'Monthly Tax Liability',
+            columns: ['Month', 'Taxable Value', 'Tax Amount', 'CGST', 'SGST', 'IGST', 'Cess'],
+            rows: (gstHandoff?.monthlyTaxLiability || []).map((row: any) => [
+              String(row.monthKey || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.cgstAmount || 0)),
+              formatCurrency(Number(row.sgstAmount || 0)),
+              formatCurrency(Number(row.igstAmount || 0)),
+              formatCurrency(Number(row.cessAmount || 0)),
+            ]),
+          },
+          {
+            title: 'Advance Receipts',
+            columns: ['Voucher', 'Date', 'Customer', 'Mode', 'Amount', 'Unapplied'],
+            rows: (gstHandoff?.advanceReceipts || []).map((row: any) => [
+              String(row.voucherNumber || ''),
+              formatDateCell(row.entryDate),
+              String(row.customerName || ''),
+              String(row.mode || ''),
+              formatCurrency(Number(row.amount || 0)),
+              formatCurrency(Number(row.unappliedAmount || 0)),
+            ]),
+          },
+          {
+            title: 'B2B Invoices',
+            columns: ['Invoice', 'Date', 'Customer', 'GSTIN', 'Taxable', 'Tax', 'Total'],
+            rows: (gstHandoff?.b2bInvoices || []).map((row: any) => [
+              String(row.invoiceNumber || ''),
+              formatDateCell(row.invoiceDate),
+              String(row.customerName || ''),
+              String(row.customerGstin || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+            ]),
+          },
+          {
+            title: 'B2C Invoices',
+            columns: ['Invoice', 'Date', 'Customer', 'Class', 'Taxable', 'Tax', 'Total'],
+            rows: (gstHandoff?.b2cInvoices || []).map((row: any) => [
+              String(row.invoiceNumber || ''),
+              formatDateCell(row.invoiceDate),
+              String(row.customerName || ''),
+              String(String(row.classification || '').toUpperCase()),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+            ]),
+          },
+          {
+            title: 'HSN Summary',
+            columns: ['HSN', 'Quantity', 'Taxable', 'Tax', 'CGST', 'SGST', 'IGST'],
+            rows: (gstHandoff?.hsnSummary || []).map((row: any) => [
+              String(row.hsnCode || ''),
+              Number(row.quantity || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.cgstAmount || 0)),
+              formatCurrency(Number(row.sgstAmount || 0)),
+              formatCurrency(Number(row.igstAmount || 0)),
+            ]),
+          },
+          {
+            title: 'GST Notes',
+            columns: ['Note No', 'Date', 'Category', 'Invoice', 'Customer', 'Taxable', 'Tax', 'Total'],
+            rows: (gstHandoff?.notes || []).map((row: any) => [
+              String(row.noteNumber || ''),
+              formatDateCell(row.noteDate),
+              String(row.category || ''),
+              String(row.referenceInvoiceNumber || ''),
+              String(row.customerName || ''),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.taxAmount || 0)),
+              formatCurrency(Number(row.totalAmount || 0)),
+            ]),
+          },
+        ],
+      },
+    };
+  }, [
+    b2bVsB2c,
+    balanceSheetStore,
+    gstHandoff,
+    gstNoteRegister,
+    hsnWiseSales,
+    membershipSales,
+    paymentReconciliation,
+    posInventoryMovement,
+    profitLossStore,
+    salesRegisterDetailed,
+    salesSummaryShift,
+    taxabilityBreakup,
+    zReport,
+  ]);
+
   const activeReportExport = useMemo<ExportDataset>(() => {
+    const richReport = richReportDefinitions[activeTab];
+    if (richReport) {
+      return buildRichExportDataset(richReport);
+    }
+
     if (activeTab === 'daily-sales-summary') {
       return {
         title: 'Daily Sales Summary',
@@ -597,9 +1355,11 @@ export const Reports: React.FC = () => {
     if (activeTab === 'item-wise-sales') {
       return {
         title: 'Item-wise Sales Report',
-        columns: ['Item', 'Qty', 'Taxable', 'Tax', 'Total'],
+        columns: ['Item', 'Category', 'Variant', 'Qty', 'Taxable', 'Tax', 'Total'],
         rows: itemSalesView.map((row) => [
           String(row.productName || ''),
+          [String(row.category || ''), String(row.subcategory || '')].filter(Boolean).join(' / '),
+          [String(row.variantSize || ''), String(row.variantColor || '')].filter(Boolean).join(' / ') || '-',
           toNumber(row.quantity),
           toFixed2(row.taxableValue),
           toFixed2(row.tax),
@@ -692,6 +1452,34 @@ export const Reports: React.FC = () => {
       };
     }
 
+    if (activeTab === 'tax-summary-report') {
+      const totalSalesTax = taxSummaryRows
+        .filter((row) => row.source === 'Sales')
+        .reduce((sum, row) => sum + toNumber(row.taxAmount), 0);
+      const totalReturnTax = taxSummaryRows
+        .filter((row) => row.source === 'Returns')
+        .reduce((sum, row) => sum + toNumber(row.taxAmount), 0);
+      return {
+        title: 'Tax Summary Report',
+        columns: ['Source', 'GST Rate %', 'Taxable Value', 'Tax Amount', 'CGST', 'SGST', 'IGST', 'Cess'],
+        summary: [
+          ['Sales Tax', toFixed2(totalSalesTax)],
+          ['Return Tax Reversal', toFixed2(totalReturnTax)],
+          ['Net Tax', toFixed2(totalSalesTax - totalReturnTax)],
+        ],
+        rows: taxSummaryView.map((row) => [
+          row.source,
+          toFixed2(row.gstRate),
+          toFixed2(row.taxableValue),
+          toFixed2(row.taxAmount),
+          toFixed2(row.cgstAmount),
+          toFixed2(row.sgstAmount),
+          toFixed2(row.igstAmount),
+          toFixed2(row.cessAmount),
+        ]),
+      };
+    }
+
     return {
       title: 'User-wise Sales Report',
       columns: ['User', 'Invoices', 'Total', 'Cash', 'UPI', 'Card'],
@@ -716,6 +1504,9 @@ export const Reports: React.FC = () => {
     receivablesView,
     returnsReport,
     salesReturnView,
+    taxSummaryRows,
+    taxSummaryView,
+    richReportDefinitions,
     userSalesView,
   ]);
 
@@ -817,10 +1608,11 @@ export const Reports: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const exportActiveToPdf = () => {
+  const exportActiveToPdf = async () => {
     const currentSettings = getGeneralSettings();
-    const reportLogoDataUrl =
+    const reportLogoValue =
       currentSettings.business.reportLogoDataUrl || currentSettings.business.invoiceLogoDataUrl || '';
+    const reportLogoDataUrl = await resolveAssetImageToDataUrl(reportLogoValue);
     const isWide = activeReportExport.columns.length > 5;
     const doc = new jsPDF({ orientation: isWide ? 'landscape' : 'portrait' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -1020,6 +1812,21 @@ export const Reports: React.FC = () => {
     setTabLoading((prev) => ({ ...prev, [tab]: true }));
     try {
       switch (tab) {
+        case 'profit-loss-store-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/profit-loss-store?${queryRange}`), { headers });
+          setProfitLossStore(response?.data || null);
+          break;
+        }
+        case 'balance-sheet-store-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/balance-sheet-store?${queryRange}`), { headers });
+          setBalanceSheetStore(response?.data || null);
+          break;
+        }
+        case 'sales-summary-shift-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/sales-summary-shift?${queryRange}`), { headers });
+          setSalesSummaryShift(response?.data || null);
+          break;
+        }
         case 'daily-sales-summary': {
           const response = await fetchApiJson(apiUrl(`/api/reports/daily-sales-summary?${queryRange}`), { headers });
           setDailySales(Array.isArray(response?.data) ? response.data : []);
@@ -1045,6 +1852,56 @@ export const Reports: React.FC = () => {
           setGrossProfit(response?.data || null);
           break;
         }
+        case 'hsn-wise-sales-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/hsn-wise-sales?${queryRange}`), { headers });
+          setHsnWiseSales(response?.data || null);
+          break;
+        }
+        case 'taxability-breakup-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/taxability-breakup?${queryRange}`), { headers });
+          setTaxabilityBreakup(response?.data || null);
+          break;
+        }
+        case 'b2b-vs-b2c-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/b2b-vs-b2c?${queryRange}`), { headers });
+          setB2bVsB2c(response?.data || null);
+          break;
+        }
+        case 'gst-note-register-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/gst-note-register?${queryRange}`), { headers });
+          setGstNoteRegister(response?.data || null);
+          break;
+        }
+        case 'sales-register-detailed-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/sales-register-detailed?${queryRange}`), { headers });
+          setSalesRegisterDetailed(response?.data || null);
+          break;
+        }
+        case 'payment-reconciliation-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/payment-reconciliation?${queryRange}`), { headers });
+          setPaymentReconciliation(response?.data || null);
+          break;
+        }
+        case 'z-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/z-report?${queryRange}`), { headers });
+          setZReport(response?.data || null);
+          break;
+        }
+        case 'pos-inventory-movement-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/pos-inventory-movement?${queryRange}`), { headers });
+          setPosInventoryMovement(response?.data || null);
+          break;
+        }
+        case 'membership-sales-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/membership-sales?${queryRange}`), { headers });
+          setMembershipSales(response?.data || null);
+          break;
+        }
+        case 'gst-handoff-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/gst-handoff?${queryRange}`), { headers });
+          setGstHandoff(response?.data || null);
+          break;
+        }
         case 'outstanding-receivables-report': {
           const response = await fetchApiJson(apiUrl(`/api/reports/outstanding-receivables?${queryRange}`), { headers });
           setReceivables(response?.data || null);
@@ -1063,6 +1920,14 @@ export const Reports: React.FC = () => {
         case 'user-wise-sales-report': {
           const response = await fetchApiJson(apiUrl(`/api/reports/user-wise-sales?${queryRange}`), { headers });
           setUserSales(Array.isArray(response?.data) ? response.data : []);
+          break;
+        }
+        case 'tax-summary-report': {
+          const response = await fetchApiJson(apiUrl(`/api/reports/tax-summary?${queryRange}`), { headers });
+          setTaxSummary({
+            salesTax: Array.isArray(response?.data?.salesTax) ? response.data.salesTax : [],
+            returnTax: Array.isArray(response?.data?.returnTax) ? response.data.returnTax : [],
+          });
           break;
         }
         default:
@@ -1128,6 +1993,11 @@ export const Reports: React.FC = () => {
   };
 
   const renderActiveTab = () => {
+    const richReport = richReportDefinitions[activeTab];
+    if (richReport) {
+      return renderRichReportTab(activeTab, richReport);
+    }
+
     if (activeTab === 'daily-sales-summary') {
       const placeholder = renderTabPlaceholder('daily-sales-summary');
       if (placeholder) return placeholder;
@@ -1177,7 +2047,7 @@ export const Reports: React.FC = () => {
       return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
           <h2 className="mb-2 text-lg font-semibold text-white">Item-wise Sales Report</h2>
-          {renderReportControls(tab, 'Filter by item, qty, taxable, tax or total...', [
+          {renderReportControls(tab, 'Filter by item, category, variant, qty, taxable, tax or total...', [
             { value: 'all', label: 'All items' },
             { value: 'high-qty', label: 'High qty (>=5)' },
             { value: 'low-qty', label: 'Low qty (<5)' },
@@ -1186,6 +2056,8 @@ export const Reports: React.FC = () => {
             <thead>
               <tr>
                 {renderSortHeader(tab, 'Item', 'item')}
+                {renderSortHeader(tab, 'Category', 'category')}
+                {renderSortHeader(tab, 'Variant', 'variant')}
                 {renderSortHeader(tab, 'Qty', 'quantity')}
                 {renderSortHeader(tab, 'Taxable', 'taxableValue')}
                 {renderSortHeader(tab, 'Tax', 'tax')}
@@ -1196,13 +2068,19 @@ export const Reports: React.FC = () => {
               {paged.rows.map((row, idx) => (
                 <tr key={idx}>
                   <td className="px-2 py-2 text-sm text-white">{row.productName}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">
+                    {[row.category, row.subcategory].filter(Boolean).join(' / ') || '-'}
+                  </td>
+                  <td className="px-2 py-2 text-sm text-cyan-200">
+                    {[row.variantSize, row.variantColor].filter(Boolean).join(' / ') || '-'}
+                  </td>
                   <td className="px-2 py-2 text-sm text-gray-300">{row.quantity}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.taxableValue || 0))}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.tax || 0))}</td>
                   <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.amount || 0))}</td>
                 </tr>
               ))}
-              {!itemSalesView.length && <tr><td colSpan={5} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
+              {!itemSalesView.length && <tr><td colSpan={7} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
             </tbody>
           </table>
           {renderPagination(tab, itemSalesView.length)}
@@ -1444,6 +2322,64 @@ export const Reports: React.FC = () => {
       );
     }
 
+    if (activeTab === 'tax-summary-report') {
+      const placeholder = renderTabPlaceholder('tax-summary-report');
+      if (placeholder) return placeholder;
+      const tab: ReportTabKey = 'tax-summary-report';
+      const paged = paginateRows(tab, taxSummaryView);
+      const totalSalesTax = taxSummaryRows
+        .filter((row) => row.source === 'Sales')
+        .reduce((sum, row) => sum + Number(row.taxAmount || 0), 0);
+      const totalReturnTax = taxSummaryRows
+        .filter((row) => row.source === 'Returns')
+        .reduce((sum, row) => sum + Number(row.taxAmount || 0), 0);
+      return (
+        <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
+          <h2 className="mb-2 text-lg font-semibold text-white">Tax Summary Report</h2>
+          {renderReportControls(tab, 'Filter by source, GST rate, taxable value, or tax amount...', [
+            { value: 'all', label: 'All sources' },
+            { value: 'sales', label: 'Sales only' },
+            { value: 'returns', label: 'Returns only' },
+          ])}
+          <div className="mb-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <div className="rounded border border-white/10 p-2 text-gray-300">Sales Tax: {formatCurrency(totalSalesTax)}</div>
+            <div className="rounded border border-white/10 p-2 text-gray-300">Return Reversal: {formatCurrency(totalReturnTax)}</div>
+            <div className="rounded border border-white/10 p-2 text-emerald-300">Net Tax: {formatCurrency(totalSalesTax - totalReturnTax)}</div>
+          </div>
+          <table className="min-w-full divide-y divide-white/10">
+            <thead>
+              <tr>
+                {renderSortHeader(tab, 'Source', 'source')}
+                {renderSortHeader(tab, 'GST Rate %', 'gstRate')}
+                {renderSortHeader(tab, 'Taxable Value', 'taxableValue')}
+                {renderSortHeader(tab, 'Tax Amount', 'taxAmount')}
+                {renderSortHeader(tab, 'CGST', 'cgstAmount')}
+                {renderSortHeader(tab, 'SGST', 'sgstAmount')}
+                {renderSortHeader(tab, 'IGST', 'igstAmount')}
+                {renderSortHeader(tab, 'Cess', 'cessAmount')}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {paged.rows.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-2 py-2 text-sm text-white">{row.source}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{Number(row.gstRate || 0).toFixed(2)}%</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.taxableValue || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-cyan-200">{formatCurrency(Number(row.taxAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.cgstAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.sgstAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.igstAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.cessAmount || 0))}</td>
+                </tr>
+              ))}
+              {!taxSummaryView.length && <tr><td colSpan={8} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
+            </tbody>
+          </table>
+          {renderPagination(tab, taxSummaryView.length)}
+        </div>
+      );
+    }
+
     if (activeTab !== 'user-wise-sales-report') {
       return null;
     }
@@ -1496,10 +2432,11 @@ export const Reports: React.FC = () => {
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">Advanced Reports</h1>
-          <p className="text-sm text-gray-300">Date-wise reports for sales, returns, profit, receivables, attendance and user performance.</p>
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Sales & POS Reports</h1>
+          <p className="text-sm text-gray-300">Operational sales reports, POS accounting views, GST verification datasets, and handoff data for the main GST workspace.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          <ManualHelpLink anchor="sales-reports-tabs" />
           <div>
             <label className="mb-1 block text-xs text-gray-400">Start Date</label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" />
@@ -1542,7 +2479,7 @@ export const Reports: React.FC = () => {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-gray-400">Gross Profit Report</p>
           <p className="mt-1 text-xl font-semibold text-emerald-300">{formatCurrency(Number(grossProfit?.grossProfit || 0))}</p>
@@ -1558,6 +2495,12 @@ export const Reports: React.FC = () => {
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-gray-400">Sales Return Report</p>
           <p className="mt-1 text-xl font-semibold text-red-300">{formatCurrency(Number(returnsReport?.summary?.refundAmount || 0))}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs text-gray-400">Tax Summary Report</p>
+          <p className="mt-1 text-xl font-semibold text-cyan-200">
+            {formatCurrency(taxSummaryRows.reduce((sum, row) => sum + (row.source === 'Sales' ? Number(row.taxAmount || 0) : -Number(row.taxAmount || 0)), 0))}
+          </p>
         </div>
       </div>
 

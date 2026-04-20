@@ -8,6 +8,7 @@ import { DayBookEntry } from '../models/DayBookEntry.js';
 import { CreditNote } from '../models/CreditNote.js';
 import { ReceiptVoucher } from '../models/ReceiptVoucher.js';
 import { ChartAccount, AccountType, AccountSubType } from '../models/ChartAccount.js';
+import { AccountGroup, AccountGroupUnder } from '../models/AccountGroup.js';
 import { AccountLedgerEntry, LedgerVoucherType } from '../models/AccountLedgerEntry.js';
 import { AccountingVoucher, IAccountingVoucherDocumentFields, VoucherType } from '../models/AccountingVoucher.js';
 import { OpeningBalanceSetup } from '../models/OpeningBalanceSetup.js';
@@ -19,6 +20,7 @@ import { Employee } from '../models/Employee.js';
 import { TreasuryAccount } from '../models/TreasuryAccount.js';
 import { BankFeedTransaction } from '../models/BankFeedTransaction.js';
 import accountingCoreRoutes from './accountingCore.js';
+import tdsRoutes from './tds.js';
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js';
 import {
   ensureTreasuryDefaults,
@@ -27,6 +29,13 @@ import {
   upsertPaymentMethodRoute,
   upsertTreasuryAccount,
 } from '../services/treasury.js';
+import {
+  buildBalanceSheetReport,
+  buildIncomeExpenseReports,
+  buildProfitLossStatement,
+  buildRetainedEarningsUntil,
+  buildTrialBalanceReport,
+} from '../services/accountingReports.js';
 
 const router = Router();
 const accountingReportRateLimit = createRateLimitMiddleware({
@@ -38,6 +47,7 @@ const accountingReportRateLimit = createRateLimitMiddleware({
 });
 
 router.use('/core', accountingCoreRoutes);
+router.use('/tds', tdsRoutes);
 // Backward-compatibility alias so accounting core APIs work with clients
 // that call /api/accounting/* instead of /api/accounting/core/*.
 router.use('/', accountingCoreRoutes);
@@ -173,6 +183,12 @@ const sendSalaryPayslip = async (args: {
   payDate: Date;
   baseAmount: number;
   bonusAmount: number;
+  grossSalary?: number;
+  statutoryDeductions?: number;
+  voluntaryDeductions?: number;
+  employerPayrollTaxes?: number;
+  benefitsExpense?: number;
+  netPay?: number;
   totalAmount: number;
   paymentMethod: string;
   notes?: string;
@@ -198,7 +214,12 @@ const sendSalaryPayslip = async (args: {
         `Pay Date: ${dateLabel}`,
         `Base Salary: ${formatAmount(args.baseAmount)}`,
         `Bonus: ${formatAmount(args.bonusAmount)}`,
-        `Total Paid: ${formatAmount(args.totalAmount)}`,
+        `Gross Salary: ${formatAmount(args.grossSalary ?? args.baseAmount + args.bonusAmount)}`,
+        `Statutory Deductions: ${formatAmount(args.statutoryDeductions || 0)}`,
+        `Voluntary Deductions: ${formatAmount(args.voluntaryDeductions || 0)}`,
+        `Net Pay: ${formatAmount(args.netPay ?? args.totalAmount)}`,
+        `Employer Payroll Taxes: ${formatAmount(args.employerPayrollTaxes || 0)}`,
+        `Benefits Expense: ${formatAmount(args.benefitsExpense || 0)}`,
         `Payment Method: ${String(args.paymentMethod || '').toUpperCase()}`,
         args.notes ? `Notes: ${args.notes}` : '',
       ].filter(Boolean).join('\n'),
@@ -213,7 +234,12 @@ const sendSalaryPayslip = async (args: {
             <tr><td style="padding:4px 12px 4px 0"><strong>Pay Date</strong></td><td style="padding:4px 0">${dateLabel}</td></tr>
             <tr><td style="padding:4px 12px 4px 0"><strong>Base Salary</strong></td><td style="padding:4px 0">${formatAmount(args.baseAmount)}</td></tr>
             <tr><td style="padding:4px 12px 4px 0"><strong>Bonus</strong></td><td style="padding:4px 0">${formatAmount(args.bonusAmount)}</td></tr>
-            <tr><td style="padding:4px 12px 4px 0"><strong>Total Paid</strong></td><td style="padding:4px 0">${formatAmount(args.totalAmount)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Gross Salary</strong></td><td style="padding:4px 0">${formatAmount(args.grossSalary ?? args.baseAmount + args.bonusAmount)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Statutory Deductions</strong></td><td style="padding:4px 0">${formatAmount(args.statutoryDeductions || 0)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Voluntary Deductions</strong></td><td style="padding:4px 0">${formatAmount(args.voluntaryDeductions || 0)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Net Pay</strong></td><td style="padding:4px 0">${formatAmount(args.netPay ?? args.totalAmount)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Employer Payroll Taxes</strong></td><td style="padding:4px 0">${formatAmount(args.employerPayrollTaxes || 0)}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0"><strong>Benefits Expense</strong></td><td style="padding:4px 0">${formatAmount(args.benefitsExpense || 0)}</td></tr>
             <tr><td style="padding:4px 12px 4px 0"><strong>Payment Method</strong></td><td style="padding:4px 0">${String(args.paymentMethod || '').toUpperCase()}</td></tr>
             ${args.notes ? `<tr><td style="padding:4px 12px 4px 0"><strong>Notes</strong></td><td style="padding:4px 0">${args.notes}</td></tr>` : ''}
           </table>
@@ -274,13 +300,124 @@ const CORE_ACCOUNTS: Array<{ accountCode: string; accountName: string; accountTy
   { accountCode: '4020', accountName: 'Contract Expense', accountType: 'expense', subType: 'general' },
 ];
 
+const DEFAULT_ACCOUNT_GROUPS: Array<{
+  groupName: string;
+  groupCode: string;
+  under: AccountGroupUnder;
+  parentGroupName?: string;
+}> = [
+  { groupName: 'Current Assets', groupCode: '101', under: 'asset' },
+  { groupName: 'Cash-in-hand', groupCode: '201', under: 'asset', parentGroupName: 'Current Assets' },
+  { groupName: 'Bank Accounts', groupCode: '211', under: 'asset', parentGroupName: 'Current Assets' },
+  { groupName: 'Fixed Assets', groupCode: '235', under: 'asset' },
+  { groupName: 'Stock in Hand', groupCode: '251', under: 'asset', parentGroupName: 'Current Assets' },
+  { groupName: 'Sundry Debtors', groupCode: '311', under: 'asset', parentGroupName: 'Current Assets' },
+  { groupName: 'Loans (Liability)', groupCode: '141', under: 'liability' },
+  { groupName: 'Current Liabilities', groupCode: '421', under: 'liability' },
+  { groupName: 'Sundry Creditors', groupCode: '441', under: 'liability', parentGroupName: 'Current Liabilities' },
+  { groupName: 'Duties & Taxes', groupCode: '481', under: 'liability', parentGroupName: 'Current Liabilities' },
+  { groupName: 'Capital Account', groupCode: '121', under: 'liability' },
+  { groupName: 'Suspense A/c', groupCode: '154', under: 'asset' },
+  { groupName: 'Direct Incomes', groupCode: '317', under: 'income' },
+  { groupName: 'Indirect Incomes', groupCode: '370', under: 'income' },
+  { groupName: 'Sales Accounts', groupCode: '3110', under: 'income', parentGroupName: 'Direct Incomes' },
+  { groupName: 'Direct Expenses', groupCode: '411', under: 'expense' },
+  { groupName: 'Indirect Expenses', groupCode: '432', under: 'expense' },
+  { groupName: 'Office Expenses', groupCode: '413', under: 'expense', parentGroupName: 'Indirect Expenses' },
+  { groupName: 'Repair & Maintenance', groupCode: '499', under: 'expense', parentGroupName: 'Indirect Expenses' },
+  { groupName: 'Profit & Loss Account', groupCode: '501', under: 'liability' },
+];
+
+const normalizeGroupUnder = (value: unknown): AccountGroupUnder => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['asset', 'assets'].includes(normalized)) return 'asset';
+  if (['liability', 'liabilities'].includes(normalized)) return 'liability';
+  if (['income', 'incomes'].includes(normalized)) return 'income';
+  if (['expense', 'expenses'].includes(normalized)) return 'expense';
+  return 'asset';
+};
+
+const accountTypeToUnderLabel = (value?: string) => {
+  switch (String(value || '').toLowerCase()) {
+    case 'asset':
+      return 'Assets';
+    case 'liability':
+      return 'Liabilities';
+    case 'income':
+      return 'Income';
+    case 'expense':
+      return 'Expenses';
+    default:
+      return 'Assets';
+  }
+};
+
+const getFallbackGroupName = (account: { groupName?: string; subType?: string; accountType?: string }) => {
+  if (account.groupName) return account.groupName;
+  if (account.subType === 'cash') return 'Cash-in-hand';
+  if (account.subType === 'bank') return 'Bank Accounts';
+  if (account.subType === 'customer') return 'Sundry Debtors';
+  if (account.subType === 'supplier') return 'Sundry Creditors';
+  if (account.subType === 'stock') return 'Stock in Hand';
+  return accountTypeToUnderLabel(account.accountType);
+};
+
+const ensureDefaultAccountGroups = async () => {
+  for (const row of DEFAULT_ACCOUNT_GROUPS.filter((group) => !group.parentGroupName)) {
+    await AccountGroup.findOneAndUpdate(
+      { groupCode: row.groupCode },
+      {
+        $setOnInsert: {
+          groupName: row.groupName,
+          groupCode: row.groupCode,
+          under: row.under,
+          parentGroupName: 'SELF',
+          isSystem: true,
+          isActive: true,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  }
+
+  for (const row of DEFAULT_ACCOUNT_GROUPS.filter((group) => group.parentGroupName)) {
+    const parent = await AccountGroup.findOne({ groupName: row.parentGroupName });
+    await AccountGroup.findOneAndUpdate(
+      { groupCode: row.groupCode },
+      {
+        $setOnInsert: {
+          groupName: row.groupName,
+          groupCode: row.groupCode,
+          under: row.under,
+          parentGroupId: parent?._id,
+          parentGroupName: parent?.groupName || row.parentGroupName || 'SELF',
+          isSystem: true,
+          isActive: true,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  }
+};
+
 const ensureDefaultChartAccounts = async () => {
+  await ensureDefaultAccountGroups();
+  const groups = await AccountGroup.find({}).select('_id groupName').lean();
+  const groupByName = new Map(groups.map((group: any) => [String(group.groupName), group]));
+  const defaultGroupFor = (row: { accountType: AccountType; subType: AccountSubType }) => {
+    const groupName = getFallbackGroupName(row);
+    return groupByName.get(groupName) || null;
+  };
+
   for (const row of CORE_ACCOUNTS) {
+    const group = defaultGroupFor(row);
     await ChartAccount.findOneAndUpdate(
       { accountCode: row.accountCode },
       {
         $setOnInsert: {
           ...row,
+          groupId: group?._id,
+          groupName: group?.groupName || getFallbackGroupName(row),
           openingBalance: 0,
           openingSide: 'debit',
           isSystem: true,
@@ -839,6 +976,204 @@ const markLedgerRowsDeleted = async (
   });
 };
 
+const positiveMoney = (value: any): number => round2(Math.max(0, Number(value || 0)));
+
+const salaryPayrollCostExpression = {
+  $ifNull: [
+    '$totalPayrollCost',
+    {
+      $add: [
+        { $ifNull: ['$grossSalary', '$amount'] },
+        { $ifNull: ['$employerPayrollTaxes', 0] },
+        { $ifNull: ['$benefitsExpense', 0] },
+      ],
+    },
+  ],
+};
+
+const aggregateSalaryCost = async (start: Date, end: Date) => {
+  const result = await SalaryPayment.aggregate([
+    { $match: { payDate: { $gte: start, $lte: end } } },
+    { $project: { payrollCost: salaryPayrollCostExpression } },
+    { $group: { _id: null, total: { $sum: '$payrollCost' } } },
+  ]);
+  return Number(result[0]?.total || 0);
+};
+
+const salaryPayrollCostOfDoc = (row: any) =>
+  round2(Number(row?.totalPayrollCost ?? (Number(row?.grossSalary ?? row?.amount ?? 0) + Number(row?.employerPayrollTaxes || 0) + Number(row?.benefitsExpense || 0))));
+
+const resolveSalaryComponents = (body: any, existing?: any) => {
+  const baseAmount = body?.amount !== undefined
+    ? positiveMoney(body.amount)
+    : positiveMoney(existing?.baseAmount ?? existing?.amount);
+  const bonusAmount = body?.bonusAmount !== undefined
+    ? positiveMoney(body.bonusAmount)
+    : positiveMoney(existing?.bonusAmount);
+  const fallbackGross = round2(baseAmount + bonusAmount);
+  const grossSalary = body?.grossSalary !== undefined
+    ? positiveMoney(body.grossSalary)
+    : positiveMoney(existing?.grossSalary ?? fallbackGross);
+
+  const employeePf = body?.employeePf !== undefined ? positiveMoney(body.employeePf) : positiveMoney(existing?.employeePf);
+  const employeeEsi = body?.employeeEsi !== undefined ? positiveMoney(body.employeeEsi) : positiveMoney(existing?.employeeEsi);
+  const professionalTax = body?.professionalTax !== undefined ? positiveMoney(body.professionalTax) : positiveMoney(existing?.professionalTax);
+  const tdsAmount = body?.tdsAmount !== undefined ? positiveMoney(body.tdsAmount) : positiveMoney(existing?.tdsAmount);
+  const knownStatutory = round2(employeePf + employeeEsi + professionalTax + tdsAmount);
+  const statutoryDeductions = body?.statutoryDeductions !== undefined
+    ? Math.max(knownStatutory, positiveMoney(body.statutoryDeductions))
+    : Math.max(knownStatutory, positiveMoney(existing?.statutoryDeductions));
+  const otherStatutoryDeductions = round2(Math.max(0, statutoryDeductions - knownStatutory));
+
+  const retirementContribution = body?.retirementContribution !== undefined ? positiveMoney(body.retirementContribution) : positiveMoney(existing?.retirementContribution);
+  const insurancePremium = body?.insurancePremium !== undefined ? positiveMoney(body.insurancePremium) : positiveMoney(existing?.insurancePremium);
+  const otherDeductions = body?.otherDeductions !== undefined ? positiveMoney(body.otherDeductions) : positiveMoney(existing?.otherDeductions);
+  const knownVoluntary = round2(retirementContribution + insurancePremium + otherDeductions);
+  const voluntaryDeductions = body?.voluntaryDeductions !== undefined
+    ? Math.max(knownVoluntary, positiveMoney(body.voluntaryDeductions))
+    : Math.max(knownVoluntary, positiveMoney(existing?.voluntaryDeductions));
+  const unclassifiedVoluntaryDeductions = round2(Math.max(0, voluntaryDeductions - knownVoluntary));
+  const totalDeductions = round2(statutoryDeductions + voluntaryDeductions);
+
+  const employerPf = body?.employerPf !== undefined ? positiveMoney(body.employerPf) : positiveMoney(existing?.employerPf);
+  const employerEsi = body?.employerEsi !== undefined ? positiveMoney(body.employerEsi) : positiveMoney(existing?.employerEsi);
+  const knownEmployerTaxes = round2(employerPf + employerEsi);
+  const employerPayrollTaxes = body?.employerPayrollTaxes !== undefined
+    ? Math.max(knownEmployerTaxes, positiveMoney(body.employerPayrollTaxes))
+    : Math.max(knownEmployerTaxes, positiveMoney(existing?.employerPayrollTaxes));
+  const otherEmployerPayrollTaxes = round2(Math.max(0, employerPayrollTaxes - knownEmployerTaxes));
+  const benefitsExpense = body?.benefitsExpense !== undefined ? positiveMoney(body.benefitsExpense) : positiveMoney(existing?.benefitsExpense);
+  const netPay = round2(Math.max(0, grossSalary - totalDeductions));
+  const totalPayrollCost = round2(grossSalary + employerPayrollTaxes + benefitsExpense);
+
+  return {
+    baseAmount,
+    bonusAmount,
+    grossSalary,
+    employeePf,
+    employeeEsi,
+    professionalTax,
+    tdsAmount,
+    statutoryDeductions,
+    otherStatutoryDeductions,
+    retirementContribution,
+    insurancePremium,
+    otherDeductions,
+    voluntaryDeductions,
+    unclassifiedVoluntaryDeductions,
+    totalDeductions,
+    employerPf,
+    employerEsi,
+    employerPayrollTaxes,
+    otherEmployerPayrollTaxes,
+    benefitsExpense,
+    netPay,
+    totalPayrollCost,
+  };
+};
+
+const getPayrollPostingAccounts = async (createdBy?: string) => {
+  const account = (accountName: string, accountType: AccountType) => getOrCreateAccount({
+    accountName,
+    accountType,
+    subType: 'general',
+    isSystem: true,
+    createdBy,
+  });
+
+  const [
+    salaryExpense,
+    employerTaxExpense,
+    benefitsExpenseAccount,
+    payrollTaxPayable,
+    socialSecurityPayable,
+    retirementPayable,
+    insurancePayable,
+    otherDeductionPayable,
+    employeeBenefitsPayable,
+  ] = await Promise.all([
+    account('Salary Expense', 'expense'),
+    account('Employer Payroll Tax Expense', 'expense'),
+    account('Employee Benefits Expense', 'expense'),
+    account('Payroll Tax Payable', 'liability'),
+    account('PF / ESI Payable', 'liability'),
+    account('Retirement Contributions Payable', 'liability'),
+    account('Insurance Premiums Payable', 'liability'),
+    account('Other Payroll Deductions Payable', 'liability'),
+    account('Employee Benefits Payable', 'liability'),
+  ]);
+
+  return {
+    salaryExpense,
+    employerTaxExpense,
+    benefitsExpenseAccount,
+    payrollTaxPayable,
+    socialSecurityPayable,
+    retirementPayable,
+    insurancePayable,
+    otherDeductionPayable,
+    employeeBenefitsPayable,
+  };
+};
+
+const postSalaryComponentLedger = async (params: {
+  payment: any;
+  components: ReturnType<typeof resolveSalaryComponents>;
+  cashBank: any;
+  voucherNumber: string;
+  paymentMode: PaymentMode;
+  treasuryAccountId?: string;
+  createdBy?: string;
+}) => {
+  const accounts = await getPayrollPostingAccounts(params.createdBy);
+  const sourceId = params.payment._id.toString();
+  const narration = `Salary payment - ${params.payment.employeeName} (${params.payment.month})`;
+  const metadata = {
+    source: 'salary_payment',
+    sourceId,
+    treasuryAccountId: params.treasuryAccountId,
+    payrollComponents: true,
+  };
+  const postedAccountIds: string[] = [];
+  const line = async (accountId: any, debit: number, credit: number, note: string) => {
+    const debitAmount = round2(debit);
+    const creditAmount = round2(credit);
+    if (debitAmount <= 0 && creditAmount <= 0) return;
+    await postLedger({
+      accountId,
+      entryDate: params.payment.payDate,
+      voucherType: 'salary',
+      voucherNumber: params.voucherNumber,
+      referenceNo: sourceId,
+      narration: `${narration} - ${note}`,
+      debit: debitAmount,
+      credit: creditAmount,
+      paymentMode: normalizePaymentMode(params.paymentMode),
+      createdBy: params.createdBy,
+      metadata,
+    });
+    postedAccountIds.push(String(accountId));
+  };
+
+  const c = params.components;
+  const payrollTaxPayable = round2(c.tdsAmount + c.professionalTax + c.otherStatutoryDeductions + c.otherEmployerPayrollTaxes);
+  const socialSecurityPayable = round2(c.employeePf + c.employeeEsi + c.employerPf + c.employerEsi);
+  const otherDeductionPayable = round2(c.otherDeductions + c.unclassifiedVoluntaryDeductions);
+
+  await line(accounts.salaryExpense._id, c.grossSalary, 0, 'gross salary');
+  await line(accounts.employerTaxExpense._id, c.employerPayrollTaxes, 0, 'employer payroll taxes');
+  await line(accounts.benefitsExpenseAccount._id, c.benefitsExpense, 0, 'benefits expense');
+  await line(accounts.payrollTaxPayable._id, 0, payrollTaxPayable, 'tax withheld payable');
+  await line(accounts.socialSecurityPayable._id, 0, socialSecurityPayable, 'PF / ESI payable');
+  await line(accounts.retirementPayable._id, 0, c.retirementContribution, 'retirement contribution payable');
+  await line(accounts.insurancePayable._id, 0, c.insurancePremium, 'insurance premium payable');
+  await line(accounts.otherDeductionPayable._id, 0, otherDeductionPayable, 'other deduction payable');
+  await line(accounts.employeeBenefitsPayable._id, 0, c.benefitsExpense, 'employee benefits payable');
+  await line(params.cashBank._id, 0, c.netPay, 'net pay transfer');
+
+  return postedAccountIds;
+};
+
 const markDayBookRowsDeleted = async (
   filter: Record<string, any>,
   actorId: string | undefined,
@@ -967,17 +1302,15 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
     const { employeeId, employeeName, designation, month, payDate, amount, bonusAmount, paymentMethod, notes } = req.body;
 
     if (!month || amount === undefined) {
-      return res.status(400).json({ success: false, error: 'month and amount are required' });
+      return res.status(400).json({ success: false, error: 'month and gross salary amount are required' });
     }
     if (!isYearMonth(String(month))) {
       return res.status(400).json({ success: false, error: 'Invalid month format. Use YYYY-MM' });
     }
 
-    const baseAmount = round2(Number(amount || 0));
-    const bonus = round2(Math.max(0, Number(bonusAmount || 0)));
-    const totalAmount = round2(baseAmount + bonus);
-    if (totalAmount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
+    const components = resolveSalaryComponents({ ...req.body, amount, bonusAmount });
+    if (components.grossSalary <= 0) {
+      return res.status(400).json({ success: false, error: 'gross salary must be greater than 0' });
     }
 
     let finalEmployeeName = String(employeeName || '').trim();
@@ -1036,21 +1369,31 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
       month,
       payDate: payDateValue,
       payDateKey,
-      baseAmount,
-      bonusAmount: bonus,
-      amount: totalAmount,
+      baseAmount: components.baseAmount,
+      bonusAmount: components.bonusAmount,
+      grossSalary: components.grossSalary,
+      employeePf: components.employeePf,
+      employeeEsi: components.employeeEsi,
+      professionalTax: components.professionalTax,
+      tdsAmount: components.tdsAmount,
+      statutoryDeductions: components.statutoryDeductions,
+      retirementContribution: components.retirementContribution,
+      insurancePremium: components.insurancePremium,
+      otherDeductions: components.otherDeductions,
+      voluntaryDeductions: components.voluntaryDeductions,
+      totalDeductions: components.totalDeductions,
+      employerPf: components.employerPf,
+      employerEsi: components.employerEsi,
+      employerPayrollTaxes: components.employerPayrollTaxes,
+      benefitsExpense: components.benefitsExpense,
+      netPay: components.netPay,
+      totalPayrollCost: components.totalPayrollCost,
+      amount: components.netPay,
       paymentMethod: salaryMode,
       notes,
       createdBy: req.userId,
     });
 
-    const salaryExpense = await getOrCreateAccount({
-      accountName: 'Salary Expense',
-      accountType: 'expense',
-      subType: 'general',
-      isSystem: true,
-      createdBy: req.userId,
-    });
     const salaryTreasuryRoute = await resolveTreasuryRoute({
       paymentMethod: payment.paymentMethod,
       treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
@@ -1061,39 +1404,14 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
     }
     const voucherNumber = await generateNumber('salary_voucher', { prefix: 'SP-', datePart: true, padTo: 5 });
 
-    await postLedger({
-      accountId: salaryExpense._id,
-      entryDate: payment.payDate,
-      voucherType: 'salary',
+    await postSalaryComponentLedger({
+      payment,
+      components,
+      cashBank,
       voucherNumber,
-      referenceNo: payment._id.toString(),
-      narration: `Salary payment - ${payment.employeeName} (${payment.month})`,
-      debit: totalAmount,
-      credit: 0,
       paymentMode: normalizePaymentMode(salaryMode),
+      treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
       createdBy: req.userId,
-      metadata: {
-        source: 'salary_payment',
-        sourceId: payment._id.toString(),
-        treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
-      },
-    });
-    await postLedger({
-      accountId: cashBank._id,
-      entryDate: payment.payDate,
-      voucherType: 'salary',
-      voucherNumber,
-      referenceNo: payment._id.toString(),
-      narration: `Salary payment - ${payment.employeeName} (${payment.month})`,
-      debit: 0,
-      credit: totalAmount,
-      paymentMode: normalizePaymentMode(salaryMode),
-      createdBy: req.userId,
-      metadata: {
-        source: 'salary_payment',
-        sourceId: payment._id.toString(),
-        treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
-      },
     });
 
     const payslipStatus = await sendSalaryPayslip({
@@ -1102,9 +1420,15 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
       designation: payment.designation,
       month: payment.month,
       payDate: payment.payDate,
-      baseAmount: Number(payment.baseAmount || baseAmount || 0),
-      bonusAmount: Number(payment.bonusAmount || bonus || 0),
-      totalAmount: Number(payment.amount || totalAmount || 0),
+      baseAmount: Number(payment.baseAmount || components.baseAmount || 0),
+      bonusAmount: Number(payment.bonusAmount || components.bonusAmount || 0),
+      grossSalary: Number(payment.grossSalary || components.grossSalary || 0),
+      statutoryDeductions: Number(payment.statutoryDeductions || components.statutoryDeductions || 0),
+      voluntaryDeductions: Number(payment.voluntaryDeductions || components.voluntaryDeductions || 0),
+      employerPayrollTaxes: Number(payment.employerPayrollTaxes || components.employerPayrollTaxes || 0),
+      benefitsExpense: Number(payment.benefitsExpense || components.benefitsExpense || 0),
+      netPay: Number(payment.netPay || components.netPay || 0),
+      totalAmount: Number(payment.amount || components.netPay || 0),
       paymentMethod: payment.paymentMethod,
       notes: payment.notes,
     });
@@ -1129,6 +1453,13 @@ router.post('/salary', authMiddleware, async (req: AuthenticatedRequest, res: Re
         payDateKey: payment.payDateKey,
         baseAmount: payment.baseAmount,
         bonusAmount: payment.bonusAmount,
+        grossSalary: payment.grossSalary,
+        statutoryDeductions: payment.statutoryDeductions,
+        voluntaryDeductions: payment.voluntaryDeductions,
+        employerPayrollTaxes: payment.employerPayrollTaxes,
+        benefitsExpense: payment.benefitsExpense,
+        netPay: payment.netPay,
+        totalPayrollCost: payment.totalPayrollCost,
         totalAmount: payment.amount,
         payslipSent: payslipStatus.sent,
         payslipMessage: payslipStatus.message,
@@ -1212,15 +1543,9 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
       return res.status(400).json({ success: false, error: 'Pay date must be within selected salary month' });
     }
 
-    const updatedBaseAmount = req.body?.amount !== undefined
-      ? round2(Number(req.body.amount || 0))
-      : round2(Number(payment.baseAmount ?? payment.amount ?? 0));
-    const updatedBonus = req.body?.bonusAmount !== undefined
-      ? round2(Math.max(0, Number(req.body.bonusAmount || 0)))
-      : round2(Number(payment.bonusAmount || 0));
-    const updatedTotalAmount = round2(updatedBaseAmount + updatedBonus);
-    if (updatedTotalAmount <= 0) {
-      return res.status(400).json({ success: false, error: 'Amount must be greater than 0' });
+    const components = resolveSalaryComponents(req.body, payment);
+    if (components.grossSalary <= 0) {
+      return res.status(400).json({ success: false, error: 'Gross salary must be greater than 0' });
     }
 
     const updatedMode = req.body?.paymentMethod
@@ -1249,9 +1574,26 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
     payment.month = updatedMonth;
     payment.payDate = updatedPayDate;
     payment.payDateKey = updatedPayDateKey;
-    payment.baseAmount = updatedBaseAmount;
-    payment.bonusAmount = updatedBonus;
-    payment.amount = updatedTotalAmount;
+    payment.baseAmount = components.baseAmount;
+    payment.bonusAmount = components.bonusAmount;
+    (payment as any).grossSalary = components.grossSalary;
+    (payment as any).employeePf = components.employeePf;
+    (payment as any).employeeEsi = components.employeeEsi;
+    (payment as any).professionalTax = components.professionalTax;
+    (payment as any).tdsAmount = components.tdsAmount;
+    (payment as any).statutoryDeductions = components.statutoryDeductions;
+    (payment as any).retirementContribution = components.retirementContribution;
+    (payment as any).insurancePremium = components.insurancePremium;
+    (payment as any).otherDeductions = components.otherDeductions;
+    (payment as any).voluntaryDeductions = components.voluntaryDeductions;
+    (payment as any).totalDeductions = components.totalDeductions;
+    (payment as any).employerPf = components.employerPf;
+    (payment as any).employerEsi = components.employerEsi;
+    (payment as any).employerPayrollTaxes = components.employerPayrollTaxes;
+    (payment as any).benefitsExpense = components.benefitsExpense;
+    (payment as any).netPay = components.netPay;
+    (payment as any).totalPayrollCost = components.totalPayrollCost;
+    payment.amount = components.netPay;
     payment.paymentMethod = updatedMode as any;
     if (req.body?.designation !== undefined) payment.designation = String(req.body.designation || '').trim();
     if (req.body?.notes !== undefined) payment.notes = String(req.body.notes || '').trim();
@@ -1270,13 +1612,6 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
       'metadata.sourceId': sourceId,
     }, req.userId, `Superseded by salary payment update ${sourceId}`);
 
-    const salaryExpense = await getOrCreateAccount({
-      accountName: 'Salary Expense',
-      accountType: 'expense',
-      subType: 'general',
-      isSystem: true,
-      createdBy: req.userId,
-    });
     const salaryTreasuryRoute = await resolveTreasuryRoute({
       paymentMethod: payment.paymentMethod,
       treasuryAccountId: req.body?.treasuryAccountId ? String(req.body.treasuryAccountId) : undefined,
@@ -1287,34 +1622,17 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
     }
     const voucherNumber = oldVoucherNo || await generateNumber('salary_voucher', { prefix: 'SP-', datePart: true, padTo: 5 });
 
-    await postLedger({
-      accountId: salaryExpense._id,
-      entryDate: payment.payDate,
-      voucherType: 'salary',
+    const newAccountIds = await postSalaryComponentLedger({
+      payment,
+      components,
+      cashBank,
       voucherNumber,
-      referenceNo: sourceId,
-      narration: `Salary payment - ${payment.employeeName} (${payment.month})`,
-      debit: updatedTotalAmount,
-      credit: 0,
       paymentMode: normalizePaymentMode(payment.paymentMethod),
+      treasuryAccountId: salaryTreasuryRoute.treasuryAccount._id.toString(),
       createdBy: req.userId,
-      metadata: { source: 'salary_payment', sourceId },
-    });
-    await postLedger({
-      accountId: cashBank._id,
-      entryDate: payment.payDate,
-      voucherType: 'salary',
-      voucherNumber,
-      referenceNo: sourceId,
-      narration: `Salary payment - ${payment.employeeName} (${payment.month})`,
-      debit: 0,
-      credit: updatedTotalAmount,
-      paymentMode: normalizePaymentMode(payment.paymentMethod),
-      createdBy: req.userId,
-      metadata: { source: 'salary_payment', sourceId },
     });
 
-    await recalculateRunningBalancesForAccounts([...oldAccountIds, salaryExpense._id.toString(), cashBank._id.toString()]);
+    await recalculateRunningBalancesForAccounts([...oldAccountIds, ...newAccountIds, cashBank._id.toString()]);
 
     await writeAuditLog({
       module: 'accounting',
@@ -1329,6 +1647,13 @@ router.put('/salary/:id', authMiddleware, async (req: AuthenticatedRequest, res:
         payDateKey: payment.payDateKey,
         baseAmount: payment.baseAmount,
         bonusAmount: payment.bonusAmount,
+        grossSalary: (payment as any).grossSalary,
+        statutoryDeductions: (payment as any).statutoryDeductions,
+        voluntaryDeductions: (payment as any).voluntaryDeductions,
+        employerPayrollTaxes: (payment as any).employerPayrollTaxes,
+        benefitsExpense: (payment as any).benefitsExpense,
+        netPay: (payment as any).netPay,
+        totalPayrollCost: (payment as any).totalPayrollCost,
         totalAmount: payment.amount,
       },
       before,
@@ -1837,6 +2162,8 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
     const stock = parseLine(req.body.openingStock || { amount: req.body.openingStockValue, side: req.body.openingStockSide });
 
     const posted: Array<Record<string, any>> = [];
+    let openingDebitTotal = 0;
+    let openingCreditTotal = 0;
     const postOpening = async (account: any, amount: number, side: 'debit' | 'credit', narration: string) => {
       if (amount <= 0) return;
       await postLedger({
@@ -1850,6 +2177,8 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
         createdBy: req.userId,
         metadata: { source: 'opening_balance' },
       });
+      openingDebitTotal = round2(openingDebitTotal + (side === 'debit' ? amount : 0));
+      openingCreditTotal = round2(openingCreditTotal + (side === 'credit' ? amount : 0));
       account.openingBalance = round2(Number(account.openingBalance || 0) + amount);
       account.openingSide = side;
       await account.save();
@@ -1904,6 +2233,24 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
       await postOpening(account, amount, side, `Opening balance - Supplier (${name})`);
     }
 
+    const openingDifference = round2(openingDebitTotal - openingCreditTotal);
+    if (openingDifference !== 0) {
+      const equityAccount = await getOrCreateAccount({
+        accountName: 'Opening Balance Equity',
+        accountType: 'liability',
+        subType: 'general',
+        isSystem: true,
+        createdBy: req.userId,
+      });
+      const equitySide: 'debit' | 'credit' = openingDifference > 0 ? 'credit' : 'debit';
+      await postOpening(
+        equityAccount,
+        Math.abs(openingDifference),
+        equitySide,
+        'Opening balance auto-balancing entry'
+      );
+    }
+
     setup.initializedAt = new Date();
     setup.initializedBy = req.userId;
     if (Boolean(req.body.lockAfterSave)) {
@@ -1937,6 +2284,272 @@ router.post('/opening-balances/lock', authMiddleware, async (req: AuthenticatedR
     res.json({ success: true, data: setup, message: 'Opening balances locked' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to lock opening balances' });
+  }
+});
+
+// Account groups, ledger masters, and chart of accounts
+router.get('/groups', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ensureDefaultAccountGroups();
+    const rows = await AccountGroup.find({}).sort({ under: 1, groupName: 1 });
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to load account groups' });
+  }
+});
+
+router.post('/groups', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const groupName = String(req.body.groupName || '').trim();
+    if (!groupName) {
+      return res.status(400).json({ success: false, error: 'Group name is required' });
+    }
+
+    const under = normalizeGroupUnder(req.body.under);
+    const groupCode = req.body.groupCode
+      ? String(req.body.groupCode).trim().toUpperCase()
+      : await generateNumber('account_group', { prefix: 'GR-', padTo: 4 });
+
+    const existing = await AccountGroup.findOne({
+      $or: [
+        { groupName: { $regex: `^${escapeRegex(groupName)}$`, $options: 'i' } },
+        { groupCode },
+      ],
+    });
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'Group name or code already exists' });
+    }
+
+    const parent = req.body.parentGroupId ? await AccountGroup.findById(req.body.parentGroupId) : null;
+    const created = await AccountGroup.create({
+      groupName,
+      groupCode,
+      under,
+      parentGroupId: parent?._id,
+      parentGroupName: parent?.groupName || 'SELF',
+      isSystem: false,
+      isActive: true,
+      createdBy: req.userId,
+    });
+
+    await writeAuditLog({
+      module: 'accounting',
+      action: 'CREATE',
+      entityType: 'account_group',
+      entityId: created._id.toString(),
+      referenceNo: created.groupCode,
+      userId: req.userId,
+      ipAddress: req.ip,
+      after: created.toObject(),
+    });
+
+    res.status(201).json({ success: true, data: created, message: 'Account group created' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to create account group' });
+  }
+});
+
+router.put('/groups/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const row = await AccountGroup.findById(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: 'Account group not found' });
+
+    const before = row.toObject();
+    if (req.body.groupName !== undefined) {
+      const groupName = String(req.body.groupName || '').trim();
+      if (!groupName) return res.status(400).json({ success: false, error: 'Group name is required' });
+      row.groupName = groupName;
+    }
+    if (req.body.groupCode !== undefined && !row.isSystem) {
+      const groupCode = String(req.body.groupCode || '').trim().toUpperCase();
+      if (groupCode) row.groupCode = groupCode;
+    }
+    if (req.body.under !== undefined && !row.isSystem) {
+      row.under = normalizeGroupUnder(req.body.under);
+    }
+    if (req.body.parentGroupId !== undefined) {
+      const parentId = String(req.body.parentGroupId || '').trim();
+      if (parentId && parentId !== row._id.toString()) {
+        const parent = await AccountGroup.findById(parentId);
+        row.parentGroupId = parent?._id;
+        row.parentGroupName = parent?.groupName || 'SELF';
+      } else {
+        row.parentGroupId = undefined;
+        row.parentGroupName = 'SELF';
+      }
+    }
+    if (req.body.isActive !== undefined && !row.isSystem) row.isActive = Boolean(req.body.isActive);
+
+    await row.save();
+
+    await ChartAccount.updateMany(
+      { groupId: row._id },
+      { $set: { groupName: row.groupName, accountType: row.under } }
+    );
+
+    await writeAuditLog({
+      module: 'accounting',
+      action: 'UPDATE',
+      entityType: 'account_group',
+      entityId: row._id.toString(),
+      referenceNo: row.groupCode,
+      userId: req.userId,
+      ipAddress: req.ip,
+      before,
+      after: row.toObject(),
+    });
+
+    res.json({ success: true, data: row, message: 'Account group updated' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to update account group' });
+  }
+});
+
+router.get('/ledgers', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await ensureDefaultChartAccounts();
+    const { groupId, q, isActive } = req.query;
+    const filter: Record<string, any> = {};
+    if (groupId) filter.groupId = groupId;
+    if (isActive !== undefined) filter.isActive = String(isActive) === 'true';
+    if (q) {
+      filter.$or = [
+        { accountCode: { $regex: String(q), $options: 'i' } },
+        { accountName: { $regex: String(q), $options: 'i' } },
+        { groupName: { $regex: String(q), $options: 'i' } },
+        { gstNumber: { $regex: String(q), $options: 'i' } },
+        { panNumber: { $regex: String(q), $options: 'i' } },
+      ];
+    }
+
+    const rows = await ChartAccount.find(filter).sort({ accountType: 1, accountCode: 1 });
+    const data = rows.map((row: any) => ({
+      ...row.toObject(),
+      folioNo: row.accountCode,
+      groupName: getFallbackGroupName(row),
+      underLabel: accountTypeToUnderLabel(row.accountType),
+    }));
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to load ledgers' });
+  }
+});
+
+router.post('/ledgers', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const accountName = String(req.body.accountName || '').trim();
+    const groupId = String(req.body.groupId || '').trim();
+    if (!accountName || !groupId) {
+      return res.status(400).json({ success: false, error: 'Account name and group are required' });
+    }
+
+    const group = await AccountGroup.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, error: 'Selected group was not found' });
+
+    const safeSubType: AccountSubType = ['cash', 'bank', 'customer', 'supplier', 'stock', 'general'].includes(String(req.body.subType))
+      ? (String(req.body.subType) as AccountSubType)
+      : 'general';
+
+    const code = req.body.accountCode
+      ? String(req.body.accountCode).trim().toUpperCase()
+      : await generateNumber('ledger_account', { prefix: 'LD-', padTo: 5 });
+
+    const exists = await ChartAccount.findOne({ accountCode: code });
+    if (exists) {
+      return res.status(409).json({ success: false, error: 'Folio number / account code already exists' });
+    }
+
+    const created = await ChartAccount.create({
+      accountCode: code,
+      accountName,
+      accountType: group.under,
+      subType: safeSubType,
+      groupId: group._id,
+      groupName: group.groupName,
+      towerBlockFlat: String(req.body.towerBlockFlat || '').trim(),
+      gstNumber: String(req.body.gstNumber || '').trim().toUpperCase(),
+      panNumber: String(req.body.panNumber || '').trim().toUpperCase(),
+      openingBalance: round2(Number(req.body.openingBalance || 0)),
+      openingSide: String(req.body.openingSide || 'debit').toLowerCase() === 'credit' ? 'credit' : 'debit',
+      isSystem: false,
+      isActive: true,
+      createdBy: req.userId,
+    });
+
+    await writeAuditLog({
+      module: 'accounting',
+      action: 'CREATE',
+      entityType: 'ledger',
+      entityId: created._id.toString(),
+      referenceNo: created.accountCode,
+      userId: req.userId,
+      ipAddress: req.ip,
+      after: created.toObject(),
+    });
+
+    res.status(201).json({ success: true, data: created, message: 'Ledger created' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to create ledger' });
+  }
+});
+
+router.put('/ledgers/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const row = await ChartAccount.findById(req.params.id);
+    if (!row) return res.status(404).json({ success: false, error: 'Ledger not found' });
+
+    const before = row.toObject();
+    if (req.body.accountName !== undefined) {
+      const accountName = String(req.body.accountName || '').trim();
+      if (!accountName) return res.status(400).json({ success: false, error: 'Account name is required' });
+      row.accountName = accountName;
+    }
+    if (req.body.accountCode !== undefined && !row.isSystem) {
+      const nextCode = String(req.body.accountCode || '').trim().toUpperCase();
+      if (nextCode && nextCode !== row.accountCode) {
+        const duplicate = await ChartAccount.findOne({ accountCode: nextCode, _id: { $ne: row._id } });
+        if (duplicate) return res.status(409).json({ success: false, error: 'Folio number / account code already exists' });
+        row.accountCode = nextCode;
+      }
+    }
+    if (req.body.groupId !== undefined) {
+      const group = await AccountGroup.findById(req.body.groupId);
+      if (!group) return res.status(404).json({ success: false, error: 'Selected group was not found' });
+      row.groupId = group._id;
+      row.groupName = group.groupName;
+      if (!row.isSystem) row.accountType = group.under;
+    }
+    if (req.body.subType !== undefined && !row.isSystem) {
+      row.subType = ['cash', 'bank', 'customer', 'supplier', 'stock', 'general'].includes(String(req.body.subType))
+        ? (String(req.body.subType) as AccountSubType)
+        : row.subType;
+    }
+    if (req.body.towerBlockFlat !== undefined) row.towerBlockFlat = String(req.body.towerBlockFlat || '').trim();
+    if (req.body.gstNumber !== undefined) row.gstNumber = String(req.body.gstNumber || '').trim().toUpperCase();
+    if (req.body.panNumber !== undefined) row.panNumber = String(req.body.panNumber || '').trim().toUpperCase();
+    if (req.body.openingBalance !== undefined) row.openingBalance = round2(Number(req.body.openingBalance || 0));
+    if (req.body.openingSide !== undefined) {
+      row.openingSide = String(req.body.openingSide || 'debit').toLowerCase() === 'credit' ? 'credit' : 'debit';
+    }
+    if (req.body.isActive !== undefined && !row.isSystem) row.isActive = Boolean(req.body.isActive);
+
+    await row.save();
+
+    await writeAuditLog({
+      module: 'accounting',
+      action: 'UPDATE',
+      entityType: 'ledger',
+      entityId: row._id.toString(),
+      referenceNo: row.accountCode,
+      userId: req.userId,
+      ipAddress: req.ip,
+      before,
+      after: row.toObject(),
+    });
+
+    res.json({ success: true, data: row, message: 'Ledger updated' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to update ledger' });
   }
 });
 
@@ -2676,31 +3289,7 @@ router.post('/books/bank/reconcile', authMiddleware, async (req: AuthenticatedRe
 });
 
 const computeNetUntil = async (end: Date) => {
-  const fromStart = new Date('1970-01-01T00:00:00.000Z');
-
-  const sales = await aggregateSum(Sale, 'totalAmount', 'createdAt', fromStart, end, postedSaleMatch);
-  const returns = await aggregateSum(Return, 'refundAmount', 'createdAt', fromStart, end, approvedReturnMatch);
-  const creditRefunds = await CreditNote.aggregate([
-    { $unwind: '$entries' },
-    {
-      $match: {
-        'entries.type': 'refund',
-        'entries.createdAt': { $gte: fromStart, $lte: end },
-      },
-    },
-    { $group: { _id: null, total: { $sum: '$entries.amount' } } },
-  ]);
-  const salaries = await aggregateSum(SalaryPayment, 'amount', 'payDate', fromStart, end);
-  const contracts = await aggregateSum(ContractPayment, 'amount', 'paymentDate', fromStart, end, {
-    status: { $in: ['paid', 'partial'] },
-  });
-  const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'income', status: 'active' });
-  const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', fromStart, end, { entryType: 'expense', status: 'active' });
-
-  const income = sales + manualIncome;
-  const expense = returns + (creditRefunds[0]?.total || 0) + salaries + contracts + manualExpense;
-
-  return income - expense;
+  return buildRetainedEarningsUntil(end);
 };
 
 const collectBookEvents = async (book: BookType, start: Date, end: Date): Promise<BookEvent[]> => {
@@ -2883,7 +3472,7 @@ router.get('/day-book', authMiddleware, async (req: AuthenticatedRequest, res: R
         time: s.payDate,
         source: 'salary',
         type: 'expense',
-        amount: s.amount,
+        amount: salaryPayrollCostOfDoc(s),
         narration: `Salary - ${s.employeeName} (${s.month})`,
         paymentMethod: s.paymentMethod,
         reference: s._id,
@@ -2949,77 +3538,17 @@ router.get('/reports/expense', authMiddleware, accountingReportRateLimit, async 
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
-
-    const [manualExpenses, salaries, contracts, returns] = await Promise.all([
-      DayBookEntry.find({ entryType: 'expense', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
-      SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: -1 }),
-      ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: -1 }),
-      Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: -1 }),
-    ]);
-
-    const rows: Array<Record<string, any>> = [];
-    manualExpenses.forEach((row) =>
-      rows.push({
-        date: row.entryDate,
-        category: row.category,
-        source: 'expense',
-        amount: round2(Number(row.amount || 0)),
-        paymentMethod: row.paymentMethod,
-        reference: row.referenceNo || row._id,
-        narration: row.narration,
-      })
-    );
-    salaries.forEach((row) =>
-      rows.push({
-        date: row.payDate,
-        category: 'Salary',
-        source: 'salary',
-        amount: round2(Number(row.amount || 0)),
-        paymentMethod: row.paymentMethod,
-        reference: row._id,
-        narration: `${row.employeeName} (${row.month})`,
-      })
-    );
-    contracts.forEach((row) =>
-      rows.push({
-        date: row.paymentDate,
-        category: 'Contract',
-        source: 'contract',
-        amount: round2(Number(row.amount || 0)),
-        paymentMethod: row.paymentMethod,
-        reference: row._id,
-        narration: `${row.contractorName} - ${row.contractTitle}`,
-      })
-    );
-    returns.forEach((row) =>
-      rows.push({
-        date: row.createdAt,
-        category: 'Sales Return',
-        source: 'return',
-        amount: round2(Number(row.refundAmount || 0)),
-        paymentMethod: row.refundMethod,
-        reference: row.returnNumber,
-        narration: row.reason,
-      })
-    );
-
-    rows.sort((a, b) => new Date(b.date as any).getTime() - new Date(a.date as any).getTime());
-
-    const byCategoryMap = new Map<string, number>();
-    rows.forEach((row) => {
-      byCategoryMap.set(
-        String(row.category || 'Other'),
-        round2((byCategoryMap.get(String(row.category || 'Other')) || 0) + Number(row.amount || 0))
-      );
-    });
+    const report = await buildIncomeExpenseReports(start, end);
 
     res.json({
       success: true,
       data: {
         period: { startDate: start, endDate: end },
-        totalExpense: round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
-        byCategory: Array.from(byCategoryMap.entries()).map(([category, amount]) => ({ category, amount })),
-        rows,
+        totalExpense: report.totalExpense,
+        byCategory: report.expenseByCategory,
+        rows: report.expenseRows,
+        sourceSummary: report.sourceSummary,
+        formula: 'Expense ledger debits minus credits, plus legacy expense rows only when no ledger posting exists.',
       },
     });
   } catch (error: any) {
@@ -3031,46 +3560,17 @@ router.get('/reports/income', authMiddleware, accountingReportRateLimit, async (
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
-
-    const [salesRows, incomeRows] = await Promise.all([
-      Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: -1 }),
-      DayBookEntry.find({ entryType: 'income', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
-    ]);
-
-    const rows: Array<Record<string, any>> = [
-      ...salesRows.map((row) => ({
-        date: row.createdAt,
-        category: 'Sales',
-        source: 'sales',
-        amount: round2(Number(row.totalAmount || 0)),
-        paymentMethod: row.paymentMethod,
-        reference: row.invoiceNumber || row.saleNumber,
-      })),
-      ...incomeRows.map((row) => ({
-        date: row.entryDate,
-        category: row.category,
-        source: 'income',
-        amount: round2(Number(row.amount || 0)),
-        paymentMethod: row.paymentMethod,
-        reference: row.referenceNo || row._id,
-      })),
-    ].sort((a, b) => new Date(b.date as any).getTime() - new Date(a.date as any).getTime());
-
-    const byCategoryMap = new Map<string, number>();
-    rows.forEach((row) => {
-      byCategoryMap.set(
-        String(row.category || 'Other'),
-        round2((byCategoryMap.get(String(row.category || 'Other')) || 0) + Number(row.amount || 0))
-      );
-    });
+    const report = await buildIncomeExpenseReports(start, end);
 
     res.json({
       success: true,
       data: {
         period: { startDate: start, endDate: end },
-        totalIncome: round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
-        byCategory: Array.from(byCategoryMap.entries()).map(([category, amount]) => ({ category, amount })),
-        rows,
+        totalIncome: report.totalIncome,
+        byCategory: report.incomeByCategory,
+        rows: report.incomeRows,
+        sourceSummary: report.sourceSummary,
+        formula: 'Income ledger credits minus debits. Legacy POS sales are included net of GST, and sales returns reduce income.',
       },
     });
   } catch (error: any) {
@@ -3082,44 +3582,9 @@ router.get('/reports/trial-balance', authMiddleware, accountingReportRateLimit, 
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
-    const accounts = await ChartAccount.find({ isActive: true }).sort({ accountType: 1, accountCode: 1 });
-    const rows: Array<Record<string, any>> = [];
+    const data = await buildTrialBalanceReport(start, end);
 
-    for (const account of accounts) {
-      const opening = await getAccountClosing(account._id, new Date(start.getTime() - 1));
-      const agg = await AccountLedgerEntry.aggregate([
-        { $match: { accountId: account._id, isDeleted: { $ne: true }, entryDate: { $gte: start, $lte: end } } },
-        { $group: { _id: null, debit: { $sum: '$debit' }, credit: { $sum: '$credit' } } },
-      ]);
-      const debit = round2(Number(agg[0]?.debit || 0));
-      const credit = round2(Number(agg[0]?.credit || 0));
-      const closing = round2(opening + debit - credit);
-
-      rows.push({
-        accountId: account._id,
-        accountCode: account.accountCode,
-        accountName: account.accountName,
-        accountType: account.accountType,
-        openingBalance: round2(opening),
-        debit,
-        credit,
-        closingBalance: closing,
-        debitBalance: closing > 0 ? closing : 0,
-        creditBalance: closing < 0 ? Math.abs(closing) : 0,
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        period: { startDate: start, endDate: end },
-        rows,
-        totals: {
-          debitBalance: round2(rows.reduce((sum, row) => sum + Number(row.debitBalance || 0), 0)),
-          creditBalance: round2(rows.reduce((sum, row) => sum + Number(row.creditBalance || 0), 0)),
-        },
-      },
-    });
+    res.json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate trial balance' });
   }
@@ -3129,34 +3594,9 @@ router.get('/reports/profit-loss', authMiddleware, accountingReportRateLimit, as
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
+    const data = await buildProfitLossStatement(start, end);
 
-    const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, {
-      ...postedSaleMatch,
-    });
-    const nonSalesIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income', status: 'active' });
-    const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
-    const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, { status: { $in: ['paid', 'partial'] } });
-    const returnExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
-    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense', status: 'active' });
-
-    const totalIncome = round2(salesIncome + nonSalesIncome);
-    const totalExpense = round2(salaryExpense + contractExpense + returnExpense + manualExpense);
-
-    res.json({
-      success: true,
-      data: {
-        period: { startDate: start, endDate: end },
-        income: { salesIncome: round2(salesIncome), nonSalesIncome: round2(nonSalesIncome), totalIncome },
-        expenses: {
-          salaryExpense: round2(salaryExpense),
-          contractExpense: round2(contractExpense),
-          salesReturnExpense: round2(returnExpense),
-          manualExpense: round2(manualExpense),
-          totalExpense,
-        },
-        netProfit: round2(totalIncome - totalExpense),
-      },
-    });
+    res.json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate profit and loss statement' });
   }
@@ -3166,42 +3606,9 @@ router.get('/reports/balance-sheet', authMiddleware, accountingReportRateLimit, 
   try {
     const asOnDate = req.query.asOnDate ? new Date(String(req.query.asOnDate)) : new Date();
     asOnDate.setHours(23, 59, 59, 999);
-    const accounts = await ChartAccount.find({ isActive: true }).sort({ accountType: 1, accountCode: 1 });
+    const data = await buildBalanceSheetReport(asOnDate);
 
-    const assets: Array<Record<string, any>> = [];
-    const liabilities: Array<Record<string, any>> = [];
-
-    for (const account of accounts) {
-      const closing = round2(await getAccountClosing(account._id, asOnDate));
-      if (account.accountType === 'asset' && closing !== 0) {
-        assets.push({ accountCode: account.accountCode, accountName: account.accountName, amount: closing });
-      }
-      if (account.accountType === 'liability') {
-        const amount = round2(closing < 0 ? Math.abs(closing) : closing === 0 ? 0 : -closing);
-        if (amount !== 0) liabilities.push({ accountCode: account.accountCode, accountName: account.accountName, amount });
-      }
-    }
-
-    const retainedEarnings = round2(await computeNetUntil(asOnDate));
-    const totalAssets = round2(assets.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-    const totalLiabilities = round2(liabilities.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-    const liabilitiesAndEquity = round2(totalLiabilities + retainedEarnings);
-
-    res.json({
-      success: true,
-      data: {
-        asOnDate,
-        assets,
-        liabilities,
-        equity: retainedEarnings,
-        totals: {
-          totalAssets,
-          totalLiabilities,
-          liabilitiesAndEquity,
-          difference: round2(totalAssets - liabilitiesAndEquity),
-        },
-      },
-    });
+    res.json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate balance sheet' });
   }
@@ -3234,17 +3641,8 @@ router.get('/reports/summary', authMiddleware, accountingReportRateLimit, async 
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
-
-    const salesIncome = await aggregateSum(Sale, 'totalAmount', 'createdAt', start, end, postedSaleMatch);
-    const manualIncome = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'income', status: 'active' });
-
-    const salaryExpense = await aggregateSum(SalaryPayment, 'amount', 'payDate', start, end);
-    const contractExpense = await aggregateSum(ContractPayment, 'amount', 'paymentDate', start, end, {
-      status: { $in: ['paid', 'partial'] },
-    });
-    const returnsExpense = await aggregateSum(Return, 'refundAmount', 'createdAt', start, end, approvedReturnMatch);
-    const manualExpense = await aggregateSum(DayBookEntry, 'amount', 'entryDate', start, end, { entryType: 'expense', status: 'active' });
-    const [creditIssuedRows, creditBalanceRows, creditAdjustRows, creditRefundRows] = await Promise.all([
+    const [profitLoss, creditIssuedRows, creditBalanceRows, creditAdjustRows, creditRefundRows] = await Promise.all([
+      buildProfitLossStatement(start, end),
       CreditNote.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } },
@@ -3265,8 +3663,6 @@ router.get('/reports/summary', authMiddleware, accountingReportRateLimit, async 
     ]);
 
     const creditRefundExpense = creditRefundRows[0]?.total || 0;
-    const totalIncome = salesIncome + manualIncome;
-    const totalExpense = salaryExpense + contractExpense + returnsExpense + creditRefundExpense + manualExpense;
 
     const [salaryCount, contractCount, dayBookCount] = await Promise.all([
       SalaryPayment.countDocuments({ payDate: { $gte: start, $lte: end } }),
@@ -3279,17 +3675,22 @@ router.get('/reports/summary', authMiddleware, accountingReportRateLimit, async 
       data: {
         period: { startDate: start, endDate: end },
         income: {
-          salesIncome,
-          manualIncome,
-          totalIncome,
+          salesIncome: profitLoss.income.salesIncome,
+          salesReturnContra: profitLoss.income.salesReturnContra,
+          manualIncome: profitLoss.income.nonSalesIncome,
+          totalIncome: profitLoss.income.totalIncome,
         },
         expenses: {
-          salaryExpense,
-          contractExpense,
-          returnsExpense,
+          salaryExpense: profitLoss.expenses.salaryExpense,
+          contractExpense: profitLoss.expenses.contractExpense,
+          returnsExpense: 0,
           creditRefundExpense,
-          manualExpense,
-          totalExpense,
+          manualExpense: profitLoss.expenses.manualExpense,
+          cogsExpense: profitLoss.expenses.cogsExpense,
+          depreciationExpense: profitLoss.expenses.depreciationExpense,
+          payrollTaxExpense: profitLoss.expenses.payrollTaxExpense,
+          benefitsExpense: profitLoss.expenses.benefitsExpense,
+          totalExpense: profitLoss.expenses.totalExpense,
         },
         creditNotes: {
           issued: creditIssuedRows[0]?.total || 0,
@@ -3297,12 +3698,13 @@ router.get('/reports/summary', authMiddleware, accountingReportRateLimit, async 
           refunded: creditRefundRows[0]?.total || 0,
           customerCreditBalance: creditBalanceRows[0]?.total || 0,
         },
-        netProfit: totalIncome - totalExpense,
+        netProfit: profitLoss.netProfit,
         counts: {
           salaryPayments: salaryCount,
           contractPayments: contractCount,
           dayBookEntries: dayBookCount,
         },
+        sourceSummary: profitLoss.sourceSummary,
       },
     });
   } catch (error: any) {

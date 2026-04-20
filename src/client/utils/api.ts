@@ -9,7 +9,7 @@ const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 const LOCAL_API_BASE_URL = 'http://127.0.0.1:3000';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
-const isLocalHost = (value: string): boolean => LOCAL_HOSTS.has(String(value || '').trim().toLowerCase());
+export const isLocalHost = (value: string): boolean => LOCAL_HOSTS.has(String(value || '').trim().toLowerCase());
 
 const shouldUseConfiguredBase = (configured: string): boolean => {
   if (typeof window === 'undefined') return true;
@@ -54,6 +54,42 @@ export const apiUrl = (path: string): string => {
     return `${base}${path}`;
   }
   return `${base}/${path}`;
+};
+
+export const resolveAppAssetUrl = (path: string): string => {
+  const normalizedPath = String(path || '').trim();
+  if (!normalizedPath) return '';
+
+  const relativePath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+  if (typeof window === 'undefined') {
+    return apiUrl(relativePath);
+  }
+
+  if (window.location.protocol === 'file:') {
+    return `${LOCAL_API_BASE_URL}${relativePath}`;
+  }
+
+  const base = getApiBaseUrl();
+  if (!base) {
+    return relativePath;
+  }
+
+  try {
+    const parsedBase = new URL(base, window.location.origin);
+    const sameOrigin = parsedBase.origin === window.location.origin;
+    const browserUsesHttp = ['http:', 'https:'].includes(window.location.protocol);
+    const bothLocalHosts = isLocalHost(window.location.hostname) && isLocalHost(parsedBase.hostname);
+
+    // During local development we prefer same-origin asset URLs so Vite can proxy them
+    // and the browser does not block image previews due to cross-origin resource policy.
+    if (sameOrigin || (browserUsesHttp && bothLocalHosts)) {
+      return relativePath;
+    }
+  } catch {
+    return apiUrl(relativePath);
+  }
+
+  return `${base}${relativePath}`;
 };
 
 const snippet = (value: string, max = 160): string => {

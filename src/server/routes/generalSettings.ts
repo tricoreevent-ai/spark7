@@ -1,18 +1,22 @@
-import { randomBytes } from 'crypto';
-import { existsSync } from 'fs';
-import fs from 'fs/promises';
-import path from 'path';
 import { Router, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { AppSetting } from '../models/AppSetting.js';
 import { User } from '../models/User.js';
 import { writeAuditLog } from '../services/audit.js';
 import {
+  parseImageDataUrl,
+  persistManagedImageValue,
+  removeManagedStoredFile,
+  resolveManagedStoragePath,
+  uploadImageBufferToManagedStorage,
+} from '../services/assetStorage.js';
+import {
   findGeneralSettingsRowForTenant,
   GENERAL_SETTINGS_KEY,
   GENERAL_SETTINGS_KEYS,
   loadTenantGeneralSettings,
   mergeGeneralSettingsWithDefaults,
+  saveTenantGeneralSettingsRow,
 } from '../services/generalSettings.js';
 import {
   isValidEmailAddress,
@@ -24,34 +28,6 @@ import { canAccessPage } from '../services/rbac.js';
 
 const router = Router();
 const MAX_BACKGROUND_FILE_BYTES = 6 * 1024 * 1024;
-const ALLOWED_IMAGE_MIME_TYPES = new Map<string, string>([
-  ['image/jpeg', '.jpg'],
-  ['image/png', '.png'],
-  ['image/webp', '.webp'],
-  ['image/gif', '.gif'],
-]);
-
-const entryDir = process.argv[1]
-  ? path.dirname(path.resolve(process.argv[1]))
-  : path.resolve(process.cwd(), 'src', 'server');
-
-const runtimeRootCandidates = [
-  path.resolve(process.cwd()),
-  path.resolve(entryDir, '..', '..'),
-  path.resolve(entryDir, '..'),
-];
-
-const runtimeRoot =
-  runtimeRootCandidates.find((candidate, index) => {
-    if (index === 0) return true;
-    return ['package.json', 'dist', 'src'].some((name) => fsExists(path.join(candidate, name)));
-  }) || path.resolve(process.cwd());
-
-const uploadsRoot = path.join(runtimeRoot, 'uploads');
-
-function fsExists(targetPath: string): boolean {
-  return existsSync(targetPath);
-}
 
 const tenantFilter = (req: AuthenticatedRequest, extra: Record<string, any> = {}) => {
   const filter: Record<string, any> = { ...extra };
@@ -66,29 +42,6 @@ const sanitizeFileName = (value: string): string => {
     .replace(/\s+/g, ' ')
     .slice(0, 120);
   return base || 'background-image';
-};
-
-const parseImageDataUrl = (dataUrl: string): { mimeType: string; buffer: Buffer } => {
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i.exec(String(dataUrl || '').trim());
-  if (!match) {
-    throw new Error('Please upload a valid image file.');
-  }
-
-  const mimeType = String(match[1] || '').toLowerCase();
-  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
-    throw new Error('Supported image types are JPG, PNG, WEBP, and GIF.');
-  }
-
-  const buffer = Buffer.from(match[2], 'base64');
-  if (!buffer.length) {
-    throw new Error('Uploaded image is empty.');
-  }
-
-  if (buffer.length > MAX_BACKGROUND_FILE_BYTES) {
-    throw new Error('Background image size should be less than 6 MB.');
-  }
-
-  return { mimeType, buffer };
 };
 
 const ensureOtpMailSettingsReady = async (settings: any) => {
@@ -150,19 +103,11 @@ const ensureSettingsPermission = async (req: AuthenticatedRequest, res: Response
 };
 
 const saveTenantGeneralSettings = async (req: AuthenticatedRequest, settings: any) => {
-  const normalized = mergeGeneralSettingsWithDefaults(settings);
-  return AppSetting.findOneAndUpdate(
-    tenantFilter(req, { key: GENERAL_SETTINGS_KEY }),
-    {
-      $set: {
-        key: GENERAL_SETTINGS_KEY,
-        tenantId: req.tenantId,
-        value: normalized,
-        updatedBy: req.userId,
-      },
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  return saveTenantGeneralSettingsRow({
+    tenantId: req.tenantId,
+    settings,
+    updatedBy: req.userId,
+  });
 };
 
 const migrateLegacyGeneralSettings = async (req: AuthenticatedRequest) => {
@@ -192,23 +137,34 @@ const migrateLegacyGeneralSettings = async (req: AuthenticatedRequest) => {
   return AppSetting.findOne(tenantFilter(req, { key: GENERAL_SETTINGS_KEY })).select('value updatedAt');
 };
 
-const removeStoredFile = async (storagePath?: string) => {
-  const relativePath = String(storagePath || '').trim();
-  if (!relativePath) return;
+const removeStoredFile = async (storagePath?: string) => removeManagedStoredFile(storagePath);
 
-  const absolutePath = path.resolve(runtimeRoot, relativePath);
-  const normalizedUploadsRoot = path.resolve(uploadsRoot);
-  if (!absolutePath.startsWith(`${normalizedUploadsRoot}${path.sep}`)) {
-    return;
-  }
+const prepareManagedSettingImageField = async (args: {
+  nextValue?: string;
+  currentValue?: string;
+  currentStoragePath?: string;
+  tenantId?: string;
+  fileBaseName: string;
+}) => {
+  const previousStoragePath = resolveManagedStoragePath(args.currentValue, args.currentStoragePath);
+  const persisted = await persistManagedImageValue({
+    imageValue: String(args.nextValue || '').trim(),
+    tenantId: args.tenantId,
+    directorySegments: ['general-settings', 'logos'],
+    fileBaseName: args.fileBaseName,
+  });
+  const nextStoragePath = resolveManagedStoragePath(persisted.url, persisted.storagePath);
 
-  try {
-    await fs.unlink(absolutePath);
-  } catch (error: any) {
-    if (error?.code !== 'ENOENT') {
-      console.warn('Failed to remove uploaded settings file:', error);
-    }
-  }
+  return {
+    value: persisted.url,
+    storagePath: nextStoragePath,
+    fileName: persisted.fileName || (nextStoragePath ? nextStoragePath.split('/').pop() || '' : ''),
+    writtenStoragePath: persisted.wroteNewFile ? nextStoragePath : '',
+    staleStoragePaths:
+      previousStoragePath && previousStoragePath !== nextStoragePath
+        ? [previousStoragePath]
+        : [],
+  };
 };
 
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
@@ -233,6 +189,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 router.put('/', async (req: AuthenticatedRequest, res: Response) => {
+  const writtenStoragePaths: string[] = [];
   try {
     const user = await ensureSettingsPermission(req, res);
     if (!user) return;
@@ -244,7 +201,36 @@ router.put('/', async (req: AuthenticatedRequest, res: Response) => {
 
     const existing = await findGeneralSettingsRowForTenant(req.tenantId);
     const before = existing?.value || null;
+    const existingSettings = mergeGeneralSettingsWithDefaults(before || {});
     const normalized = mergeGeneralSettingsWithDefaults(settings);
+
+    const invoiceLogo = await prepareManagedSettingImageField({
+      nextValue: normalized?.business?.invoiceLogoDataUrl,
+      currentValue: existingSettings?.business?.invoiceLogoDataUrl,
+      currentStoragePath: existingSettings?.business?.invoiceLogoStoragePath,
+      tenantId: req.tenantId,
+      fileBaseName: 'invoice-logo',
+    });
+    const reportLogo = await prepareManagedSettingImageField({
+      nextValue: normalized?.business?.reportLogoDataUrl,
+      currentValue: existingSettings?.business?.reportLogoDataUrl,
+      currentStoragePath: existingSettings?.business?.reportLogoStoragePath,
+      tenantId: req.tenantId,
+      fileBaseName: 'report-logo',
+    });
+
+    if (invoiceLogo.writtenStoragePath) writtenStoragePaths.push(invoiceLogo.writtenStoragePath);
+    if (reportLogo.writtenStoragePath) writtenStoragePaths.push(reportLogo.writtenStoragePath);
+
+    normalized.business = {
+      ...(normalized.business && typeof normalized.business === 'object' ? normalized.business : {}),
+      invoiceLogoDataUrl: invoiceLogo.value,
+      invoiceLogoStoragePath: invoiceLogo.storagePath,
+      invoiceLogoFileName: invoiceLogo.fileName,
+      reportLogoDataUrl: reportLogo.value,
+      reportLogoStoragePath: reportLogo.storagePath,
+      reportLogoFileName: reportLogo.fileName,
+    };
 
     if (normalized.security.emailOtpEnabled) {
       await ensureOtpMailSettingsReady(normalized);
@@ -252,6 +238,7 @@ router.put('/', async (req: AuthenticatedRequest, res: Response) => {
     ensureEmployeeAttendanceLocationReady(normalized);
 
     const saved = await saveTenantGeneralSettings(req, normalized);
+    writtenStoragePaths.length = 0;
     if (existing && existing.key !== GENERAL_SETTINGS_KEY) {
       await AppSetting.deleteMany(
         tenantFilter(req, {
@@ -269,6 +256,16 @@ router.put('/', async (req: AuthenticatedRequest, res: Response) => {
       after: saved?.value || normalized,
     });
 
+    const activeManagedPaths = new Set(
+      [invoiceLogo.storagePath, reportLogo.storagePath].filter(Boolean)
+    );
+    const staleStoragePaths = [...invoiceLogo.staleStoragePaths, ...reportLogo.staleStoragePaths]
+      .filter((storagePath, index, rows) => storagePath && rows.indexOf(storagePath) === index)
+      .filter((storagePath) => !activeManagedPaths.has(storagePath));
+    for (const storagePath of staleStoragePaths) {
+      await removeStoredFile(storagePath);
+    }
+
     res.json({
       success: true,
       message: 'General settings saved',
@@ -278,8 +275,19 @@ router.put('/', async (req: AuthenticatedRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    for (const storagePath of writtenStoragePaths) {
+      await removeStoredFile(storagePath);
+    }
     const message = error.message || 'Failed to save general settings';
-    const status = message.includes('Configure SMTP') ? 400 : 500;
+    const status = (
+      message.includes('Configure SMTP')
+      || message.includes('Please upload a valid image')
+      || message.includes('Supported image types')
+      || message.includes('less than 6 MB')
+      || message.includes('empty')
+    )
+      ? 400
+      : 500;
     res.status(status).json({ success: false, error: message });
   }
 });
@@ -293,24 +301,25 @@ router.post('/appearance/home-backgrounds/upload', async (req: AuthenticatedRequ
 
     const dataUrl = String(req.body?.dataUrl || '').trim();
     const originalFileName = sanitizeFileName(String(req.body?.fileName || 'background-image'));
-    const { mimeType, buffer } = parseImageDataUrl(dataUrl);
-    const extension = ALLOWED_IMAGE_MIME_TYPES.get(mimeType) || path.extname(originalFileName).toLowerCase() || '.png';
-    const tenantSegment = String(req.tenantId || 'global').replace(/[^a-zA-Z0-9_-]+/g, '-');
-    const generatedFileName = `${Date.now()}-${randomBytes(6).toString('hex')}${extension}`;
-    const relativeDir = path.posix.join('uploads', 'tenants', tenantSegment, 'general-settings', 'home-backgrounds');
-    const relativePath = path.posix.join(relativeDir, generatedFileName);
-    const absoluteDir = path.join(runtimeRoot, relativeDir);
-    const absolutePath = path.join(runtimeRoot, relativePath);
-
-    await fs.mkdir(absoluteDir, { recursive: true });
-    await fs.writeFile(absolutePath, buffer);
-    writtenStoragePath = relativePath;
+    const { mimeType, buffer } = parseImageDataUrl(dataUrl, {
+      maxBytes: MAX_BACKGROUND_FILE_BYTES,
+      sizeMessage: 'Background image size should be less than 6 MB.',
+    });
+    const persisted = await uploadImageBufferToManagedStorage({
+      buffer,
+      contentType: mimeType,
+      tenantId: req.tenantId,
+      directorySegments: ['general-settings', 'home-backgrounds'],
+      fileBaseName: originalFileName,
+      originalFileName,
+    });
+    writtenStoragePath = String(persisted.storagePath || '');
 
     const settings = await loadTenantGeneralSettings(req.tenantId);
     const image = {
-      id: randomBytes(12).toString('hex'),
-      url: `/${relativePath.replace(/\\/g, '/')}`,
-      storagePath: relativePath.replace(/\\/g, '/'),
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+      url: persisted.url,
+      storagePath: persisted.storagePath || '',
       fileName: originalFileName,
       uploadedAt: new Date().toISOString(),
     };
@@ -324,6 +333,7 @@ router.post('/appearance/home-backgrounds/upload', async (req: AuthenticatedRequ
     });
 
     const saved = await saveTenantGeneralSettings(req, updatedSettings);
+    writtenStoragePath = '';
 
     await writeAuditLog({
       module: 'settings',

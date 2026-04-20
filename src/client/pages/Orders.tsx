@@ -37,6 +37,8 @@ interface HistoryRow {
   paymentStatus: string;
   status: string;
   source: 'sales' | 'orders';
+  reservationStatus?: string;
+  deliveryStatus?: string;
 }
 
 interface ProductOption {
@@ -134,15 +136,20 @@ const normalizeOrdersRows = (rows: any[]): HistoryRow[] =>
       const product = item.productId;
       const productName = typeof product === 'object' ? product?.name : '';
       return {
-        name: productName || 'Item',
+        productId: typeof product === 'object' ? String(product?._id || '') : String(product || ''),
+        name: item.productName || productName || item.sku || 'Item',
         quantity: Number(item.quantity || 0),
         amount: Number(item.price || 0),
+        unitPrice: Number(item.quantity || 0) > 0 ? Number(item.price || 0) / Number(item.quantity || 1) : 0,
+        gstRate: Number(item.gstRate || 0),
       };
     }),
     totalAmount: Number(order.totalAmount || 0),
     paymentMethod: order.paymentMethod || '-',
     paymentStatus: order.paymentStatus || '-',
     status: order.orderStatus || '-',
+    reservationStatus: order.reservationStatus || '',
+    deliveryStatus: order.deliveryStatus || '',
     source: 'orders',
   }));
 
@@ -181,6 +188,7 @@ export const Orders: React.FC = () => {
   const [savingEdit, setSavingEdit] = useState(false);
   const [printingSaleId, setPrintingSaleId] = useState('');
   const [postingDraftId, setPostingDraftId] = useState('');
+  const [orderActionId, setOrderActionId] = useState('');
   const [editError, setEditError] = useState('');
   const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
@@ -234,33 +242,25 @@ export const Orders: React.FC = () => {
       setError('');
       const headers = getAuthHeaders();
 
-      try {
-        const salesResp = await fetchApiJson(
-          apiUrl(`/api/sales?${params.toString()}`),
-          { headers }
-        );
-        const salesRows = normalizeSalesRows(salesResp.data || []);
-        const total = Number(salesResp?.pagination?.total || salesRows.length || 0);
-        const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
-        setRows(salesRows);
-        setTotalHistoryRows(total);
-        setHistoryTotalPages(totalPages);
-        if (safePage > totalPages) {
-          setHistoryPage(totalPages);
-        }
-        return;
-      } catch {
-        // fallback below
+      const [salesResult, ordersResult] = await Promise.allSettled([
+        fetchApiJson(apiUrl(`/api/sales?${params.toString()}`), { headers }),
+        fetchApiJson(apiUrl(`/api/orders?${params.toString()}`), { headers }),
+      ]);
+
+      if (salesResult.status === 'rejected' && ordersResult.status === 'rejected') {
+        throw salesResult.reason || ordersResult.reason;
       }
 
-      const ordersResp = await fetchApiJson(
-        apiUrl(`/api/orders?${params.toString()}`),
-        { headers }
-      );
+      const salesResp = salesResult.status === 'fulfilled' ? salesResult.value : { data: [], pagination: { total: 0 } };
+      const ordersResp = ordersResult.status === 'fulfilled' ? ordersResult.value : { data: [], pagination: { total: 0 } };
+      const salesRows = normalizeSalesRows(salesResp.data || []);
       const orderRows = normalizeOrdersRows(ordersResp.data || []);
-      const total = Number(ordersResp?.pagination?.total || orderRows.length || 0);
+      const combinedRows = [...salesRows, ...orderRows]
+        .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime());
+      const total = Number(salesResp?.pagination?.total || salesRows.length || 0)
+        + Number(ordersResp?.pagination?.total || orderRows.length || 0);
       const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
-      setRows(orderRows);
+      setRows(combinedRows);
       setTotalHistoryRows(total);
       setHistoryTotalPages(totalPages);
       if (safePage > totalPages) {
@@ -610,6 +610,11 @@ export const Orders: React.FC = () => {
         productName: item?.productName || item?.name || 'Item',
         sku: item?.sku,
         hsnCode: item?.hsnCode,
+        batchNo: item?.batchNo,
+        expiryDate: item?.expiryDate,
+        serialNumbers: Array.isArray(item?.serialNumbers) ? item.serialNumbers : [],
+        variantSize: item?.variantSize,
+        variantColor: item?.variantColor,
         quantity: Number(item?.quantity || 0),
         unitPrice: Number(item?.unitPrice || 0),
         gstRate: Number(item?.gstRate || 0),
@@ -658,6 +663,31 @@ export const Orders: React.FC = () => {
       setError(err?.message || 'Failed to post draft invoice');
     } finally {
       setPostingDraftId('');
+    }
+  };
+
+  const runOrderWorkflowAction = async (
+    row: HistoryRow,
+    action: 'reserve' | 'delivery-challan' | 'invoice'
+  ) => {
+    if (row.source !== 'orders') return;
+    setOrderActionId(`${row._id}:${action}`);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await fetchApiJson(apiUrl(`/api/orders/${row._id}/${action}`), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({}),
+      });
+      await fetchHistory(historyPage, historyQuery);
+      void fetchProducts(true);
+      setSuccessMessage(response?.message || 'Order workflow updated');
+      setTimeout(() => setSuccessMessage(''), 3500);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update order workflow');
+    } finally {
+      setOrderActionId('');
     }
   };
 
@@ -800,9 +830,16 @@ export const Orders: React.FC = () => {
       header: 'Status',
       sortValue: (row) => row.status || '',
       render: (row) => (
-        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset capitalize ${statusClass(row.status)}`}>
-          {row.status}
-        </span>
+        <div className="space-y-1">
+          <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset capitalize ${statusClass(row.status)}`}>
+            {row.status}
+          </span>
+          {row.source === 'orders' && (
+            <div className="text-[11px] text-gray-400">
+              Reserve: {row.reservationStatus || '-'} | Delivery: {row.deliveryStatus || '-'}
+            </div>
+          )}
+        </div>
       ),
     },
     {
@@ -814,6 +851,39 @@ export const Orders: React.FC = () => {
           && row.invoiceStatus === 'posted'
           && Array.isArray(row.items)
           && row.items.some((item) => Boolean(item.productId) && Number(item.quantity || 0) > 0);
+
+        if (row.source === 'orders') {
+          const disabled = row.status === 'cancelled' || row.status === 'invoiced' || Boolean(orderActionId);
+          const actionBusy = (action: string) => orderActionId === `${row._id}:${action}`;
+          return (
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                disabled={disabled || row.status === 'dispatched'}
+                className="rounded-md bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void runOrderWorkflowAction(row, 'reserve')}
+              >
+                {actionBusy('reserve') ? 'Reserving...' : 'Reserve'}
+              </button>
+              <button
+                type="button"
+                disabled={disabled || !['reserved', 'partially_reserved', 'back_order'].includes(row.status)}
+                className="rounded-md bg-amber-500/20 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void runOrderWorkflowAction(row, 'delivery-challan')}
+              >
+                {actionBusy('delivery-challan') ? 'Creating...' : 'Challan'}
+              </button>
+              <button
+                type="button"
+                disabled={disabled || !['dispatched', 'partially_dispatched'].includes(row.status)}
+                className="rounded-md bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void runOrderWorkflowAction(row, 'invoice')}
+              >
+                {actionBusy('invoice') ? 'Invoicing...' : 'Invoice'}
+              </button>
+            </div>
+          );
+        }
 
         return row.source === 'sales' ? (
           <div className="flex flex-wrap items-center gap-1">

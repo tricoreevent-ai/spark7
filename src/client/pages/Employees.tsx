@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PaginationControls } from '../components/PaginationControls';
+import { FloatingField } from '../components/FloatingField';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -11,11 +12,29 @@ interface Employee {
   name: string;
   phone?: string;
   email?: string;
+  address?: string;
   designation?: string;
+  pan?: string;
+  aadhaar?: string;
+  uan?: string;
+  esiNumber?: string;
+  pfAccountNumber?: string;
+  state?: string;
   employmentType: 'salaried' | 'daily' | 'contractor';
   monthlySalary?: number;
+  basicSalary?: number;
+  dearnessAllowance?: number;
+  hra?: number;
+  conveyanceAllowance?: number;
+  specialAllowance?: number;
   dailyRate?: number;
   overtimeHourlyRate?: number;
+  pfEnabled?: boolean;
+  esiEnabled?: boolean;
+  professionalTaxEnabled?: boolean;
+  professionalTax?: number;
+  tdsEnabled?: boolean;
+  monthlyTdsOverride?: number;
   paidLeave: boolean;
   active: boolean;
 }
@@ -52,11 +71,29 @@ export const Employees: React.FC = () => {
     name: '',
     phone: '',
     email: '',
+    address: '',
     designation: '',
+    pan: '',
+    aadhaar: '',
+    uan: '',
+    esiNumber: '',
+    pfAccountNumber: '',
+    state: '',
     employmentType: 'salaried',
     monthlySalary: '',
+    basicSalary: '',
+    dearnessAllowance: '',
+    hra: '',
+    conveyanceAllowance: '',
+    specialAllowance: '',
     dailyRate: '',
     overtimeHourlyRate: '',
+    pfEnabled: true,
+    esiEnabled: true,
+    professionalTaxEnabled: false,
+    professionalTax: '',
+    tdsEnabled: false,
+    monthlyTdsOverride: '',
     paidLeave: true,
     active: true,
   });
@@ -88,11 +125,29 @@ export const Employees: React.FC = () => {
         name: '',
         phone: '',
         email: '',
+        address: '',
         designation: '',
+        pan: '',
+        aadhaar: '',
+        uan: '',
+        esiNumber: '',
+        pfAccountNumber: '',
+        state: '',
       employmentType: 'salaried',
       monthlySalary: '',
+      basicSalary: '',
+      dearnessAllowance: '',
+      hra: '',
+      conveyanceAllowance: '',
+      specialAllowance: '',
       dailyRate: '',
       overtimeHourlyRate: '',
+      pfEnabled: true,
+      esiEnabled: true,
+      professionalTaxEnabled: false,
+      professionalTax: '',
+      tdsEnabled: false,
+      monthlyTdsOverride: '',
       paidLeave: true,
       active: true,
     });
@@ -107,8 +162,15 @@ export const Employees: React.FC = () => {
       const body = {
         ...form,
         monthlySalary: Number(form.monthlySalary || 0),
+        basicSalary: Number(form.basicSalary || 0),
+        dearnessAllowance: Number(form.dearnessAllowance || 0),
+        hra: Number(form.hra || 0),
+        conveyanceAllowance: Number(form.conveyanceAllowance || 0),
+        specialAllowance: Number(form.specialAllowance || 0),
         dailyRate: Number(form.dailyRate || 0),
         overtimeHourlyRate: Number(form.overtimeHourlyRate || 0),
+        professionalTax: Number(form.professionalTax || 0),
+        monthlyTdsOverride: Number(form.monthlyTdsOverride || 0),
       };
 
       await fetchApiJson(apiUrl(editingId ? `/api/employees/${editingId}` : '/api/employees'), {
@@ -134,11 +196,29 @@ export const Employees: React.FC = () => {
         name: employee.name || '',
         phone: employee.phone || '',
         email: employee.email || '',
+        address: employee.address || '',
         designation: employee.designation || '',
+        pan: employee.pan || '',
+        aadhaar: employee.aadhaar || '',
+        uan: employee.uan || '',
+        esiNumber: employee.esiNumber || '',
+        pfAccountNumber: employee.pfAccountNumber || '',
+        state: employee.state || '',
       employmentType: employee.employmentType || 'salaried',
       monthlySalary: String(employee.monthlySalary ?? ''),
+      basicSalary: String(employee.basicSalary ?? ''),
+      dearnessAllowance: String(employee.dearnessAllowance ?? ''),
+      hra: String(employee.hra ?? ''),
+      conveyanceAllowance: String(employee.conveyanceAllowance ?? ''),
+      specialAllowance: String(employee.specialAllowance ?? ''),
       dailyRate: String(employee.dailyRate ?? ''),
       overtimeHourlyRate: String(employee.overtimeHourlyRate ?? ''),
+      pfEnabled: employee.pfEnabled !== false,
+      esiEnabled: employee.esiEnabled !== false,
+      professionalTaxEnabled: Boolean(employee.professionalTaxEnabled),
+      professionalTax: String(employee.professionalTax ?? ''),
+      tdsEnabled: Boolean(employee.tdsEnabled),
+      monthlyTdsOverride: String(employee.monthlyTdsOverride ?? ''),
       paidLeave: Boolean(employee.paidLeave),
       active: Boolean(employee.active),
     });
@@ -163,6 +243,21 @@ export const Employees: React.FC = () => {
     }
   };
 
+  const seedSampleEmployees = async () => {
+    setError('');
+    setMessage('');
+    try {
+      const data = await fetchApiJson(apiUrl('/api/employees/demo-seed'), {
+        method: 'POST',
+        headers,
+      });
+      setMessage(data.message || 'Sample employees added');
+      await loadEmployees();
+    } catch (e: any) {
+      setError(e.message || 'Failed to add sample employees');
+    }
+  };
+
   const loadSalarySummary = async () => {
     if (!selectedId) return;
     setError('');
@@ -180,8 +275,15 @@ export const Employees: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white sm:text-3xl">Employees</h1>
+        <button
+          type="button"
+          onClick={seedSampleEmployees}
+          className="rounded-md border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-400/20"
+        >
+          Add Sample Employees
+        </button>
       </div>
 
       {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
@@ -190,20 +292,47 @@ export const Employees: React.FC = () => {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <form onSubmit={saveEmployee} className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-3">
           <h2 className="text-lg font-semibold text-white">{editingId ? 'Edit Employee' : 'Add Employee'}</h2>
-          <input className={inputClass} placeholder="Employee Code" required value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value.toUpperCase() })} />
-          <input className={inputClass} placeholder="Name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className={inputClass} placeholder="Phone Number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <input className={inputClass} type="email" placeholder="Email ID" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className={inputClass} placeholder="Designation" value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
-          <select className={selectClass} value={form.employmentType} onChange={(e) => setForm({ ...form, employmentType: e.target.value })}>
-            <option value="salaried">Salaried</option>
-            <option value="daily">Daily Wage</option>
-            <option value="contractor">Contractor</option>
-          </select>
-          <input className={inputClass} type="number" min="0" step="0.01" placeholder="Monthly Salary" value={form.monthlySalary} onChange={(e) => setForm({ ...form, monthlySalary: e.target.value })} />
-          <input className={inputClass} type="number" min="0" step="0.01" placeholder="Daily Rate" value={form.dailyRate} onChange={(e) => setForm({ ...form, dailyRate: e.target.value })} />
-          <input className={inputClass} type="number" min="0" step="0.01" placeholder="Overtime Hourly Rate" value={form.overtimeHourlyRate} onChange={(e) => setForm({ ...form, overtimeHourlyRate: e.target.value })} />
+          <FloatingField label="Employee Code" required value={form.employeeCode} onChange={(value) => setForm({ ...form, employeeCode: value.toUpperCase() })} />
+          <FloatingField label="Name" required value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+          <FloatingField label="Phone Number" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} />
+          <FloatingField label="Email ID" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} />
+          <FloatingField label="Address for Form 16" rows={2} value={form.address} onChange={(value) => setForm({ ...form, address: value })} />
+          <FloatingField label="Designation" value={form.designation} onChange={(value) => setForm({ ...form, designation: value })} />
+          <div className="grid grid-cols-2 gap-2">
+            <FloatingField label="PAN" value={form.pan} onChange={(value) => setForm({ ...form, pan: value.toUpperCase() })} />
+            <FloatingField label="Aadhaar" value={form.aadhaar} onChange={(value) => setForm({ ...form, aadhaar: value })} />
+            <FloatingField label="UAN" value={form.uan} onChange={(value) => setForm({ ...form, uan: value })} />
+            <FloatingField label="ESI No." value={form.esiNumber} onChange={(value) => setForm({ ...form, esiNumber: value })} />
+            <FloatingField label="PF Account No." value={form.pfAccountNumber} onChange={(value) => setForm({ ...form, pfAccountNumber: value })} />
+            <FloatingField label="State for PT" value={form.state} onChange={(value) => setForm({ ...form, state: value })} />
+          </div>
+          <FloatingField
+            label="Employment Type"
+            value={form.employmentType}
+            onChange={(value) => setForm({ ...form, employmentType: value })}
+            options={[
+              { value: 'salaried', label: 'Salaried' },
+              { value: 'daily', label: 'Daily Wage' },
+              { value: 'contractor', label: 'Contractor' },
+            ]}
+          />
+          <FloatingField label="Monthly Salary" type="number" min="0" step="0.01" value={form.monthlySalary} onChange={(value) => setForm({ ...form, monthlySalary: value })} />
+          <div className="grid grid-cols-2 gap-2">
+            <FloatingField label="Basic" type="number" min="0" step="0.01" value={form.basicSalary} onChange={(value) => setForm({ ...form, basicSalary: value })} />
+            <FloatingField label="DA" type="number" min="0" step="0.01" value={form.dearnessAllowance} onChange={(value) => setForm({ ...form, dearnessAllowance: value })} />
+            <FloatingField label="HRA" type="number" min="0" step="0.01" value={form.hra} onChange={(value) => setForm({ ...form, hra: value })} />
+            <FloatingField label="Special Allowance" type="number" min="0" step="0.01" value={form.specialAllowance} onChange={(value) => setForm({ ...form, specialAllowance: value })} />
+          </div>
+          <FloatingField label="Conveyance Allowance" type="number" min="0" step="0.01" value={form.conveyanceAllowance} onChange={(value) => setForm({ ...form, conveyanceAllowance: value })} />
+          <FloatingField label="Daily Rate" type="number" min="0" step="0.01" value={form.dailyRate} onChange={(value) => setForm({ ...form, dailyRate: value })} />
+          <FloatingField label="Overtime Hourly Rate" type="number" min="0" step="0.01" value={form.overtimeHourlyRate} onChange={(value) => setForm({ ...form, overtimeHourlyRate: value })} />
 
+          <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.pfEnabled} onChange={(e) => setForm({ ...form, pfEnabled: e.target.checked })} />PF applicable</label>
+          <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.esiEnabled} onChange={(e) => setForm({ ...form, esiEnabled: e.target.checked })} />ESI applicable</label>
+          <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.professionalTaxEnabled} onChange={(e) => setForm({ ...form, professionalTaxEnabled: e.target.checked })} />Professional Tax applicable</label>
+          <FloatingField label="Monthly Professional Tax" type="number" min="0" step="0.01" value={form.professionalTax} onChange={(value) => setForm({ ...form, professionalTax: value })} />
+          <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.tdsEnabled} onChange={(e) => setForm({ ...form, tdsEnabled: e.target.checked })} />Salary TDS applicable</label>
+          <FloatingField label="Monthly TDS Override" type="number" min="0" step="0.01" value={form.monthlyTdsOverride} onChange={(value) => setForm({ ...form, monthlyTdsOverride: value })} />
           <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.paidLeave} onChange={(e) => setForm({ ...form, paidLeave: e.target.checked })} />Paid Leave</label>
           <label className="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />Active</label>
 

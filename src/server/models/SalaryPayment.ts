@@ -9,6 +9,23 @@ export interface ISalaryPayment extends Document {
   payDateKey?: string; // YYYY-MM-DD
   baseAmount?: number;
   bonusAmount?: number;
+  grossSalary?: number;
+  employeePf?: number;
+  employeeEsi?: number;
+  professionalTax?: number;
+  tdsAmount?: number;
+  statutoryDeductions?: number;
+  retirementContribution?: number;
+  insurancePremium?: number;
+  otherDeductions?: number;
+  voluntaryDeductions?: number;
+  totalDeductions?: number;
+  employerPf?: number;
+  employerEsi?: number;
+  employerPayrollTaxes?: number;
+  benefitsExpense?: number;
+  netPay?: number;
+  totalPayrollCost?: number;
   amount: number;
   paymentMethod: 'cash' | 'card' | 'upi' | 'bank' | 'cheque';
   payslipRecipient?: string;
@@ -33,6 +50,23 @@ const SalaryPaymentSchema = new Schema<ISalaryPayment>(
     payDateKey: { type: String, trim: true, index: true },
     baseAmount: { type: Number, min: 0, default: 0 },
     bonusAmount: { type: Number, min: 0, default: 0 },
+    grossSalary: { type: Number, min: 0, default: 0 },
+    employeePf: { type: Number, min: 0, default: 0 },
+    employeeEsi: { type: Number, min: 0, default: 0 },
+    professionalTax: { type: Number, min: 0, default: 0 },
+    tdsAmount: { type: Number, min: 0, default: 0 },
+    statutoryDeductions: { type: Number, min: 0, default: 0 },
+    retirementContribution: { type: Number, min: 0, default: 0 },
+    insurancePremium: { type: Number, min: 0, default: 0 },
+    otherDeductions: { type: Number, min: 0, default: 0 },
+    voluntaryDeductions: { type: Number, min: 0, default: 0 },
+    totalDeductions: { type: Number, min: 0, default: 0 },
+    employerPf: { type: Number, min: 0, default: 0 },
+    employerEsi: { type: Number, min: 0, default: 0 },
+    employerPayrollTaxes: { type: Number, min: 0, default: 0 },
+    benefitsExpense: { type: Number, min: 0, default: 0 },
+    netPay: { type: Number, min: 0, default: 0 },
+    totalPayrollCost: { type: Number, min: 0, default: 0 },
     amount: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,

@@ -5,7 +5,10 @@ export type JournalReferenceType =
   | 'invoice'
   | 'payment'
   | 'expense'
+  | 'purchase_bill'
+  | 'inventory_adjustment'
   | 'refund'
+  | 'tds'
   | 'booking'
   | 'event_booking'
   | 'depreciation'
@@ -39,11 +42,11 @@ export interface IJournalEntry extends Document {
 
 const JournalEntrySchema = new Schema<IJournalEntry>(
   {
-    entryNumber: { type: String, required: true, trim: true, index: true, unique: true },
+    entryNumber: { type: String, required: true, trim: true, index: true },
     entryDate: { type: Date, required: true, default: Date.now, index: true },
     referenceType: {
       type: String,
-      enum: ['manual', 'invoice', 'payment', 'expense', 'refund', 'booking', 'event_booking', 'depreciation', 'opening', 'reversal'],
+      enum: ['manual', 'invoice', 'payment', 'expense', 'purchase_bill', 'inventory_adjustment', 'refund', 'tds', 'booking', 'event_booking', 'depreciation', 'opening', 'reversal'],
       required: true,
       index: true,
     },

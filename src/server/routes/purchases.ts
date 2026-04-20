@@ -4,13 +4,51 @@ import { PurchaseOrder } from '../models/PurchaseOrder.js';
 import { Supplier } from '../models/Supplier.js';
 import { Product } from '../models/Product.js';
 import { Inventory } from '../models/Inventory.js';
+import { PurchaseBill } from '../models/PurchaseBill.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
+import { cancelJournalEntry, createJournalEntry } from '../services/accountingEngine.js';
+import { recordPurchaseReceiptBatch } from '../services/inventoryCosting.js';
 
 const router = Router();
 
 const toNumber = (value: any): number => Number(value || 0);
 const roundTo2 = (value: number): number => Number(value.toFixed(2));
+
+const buildReceivedBillLines = async (po: any) => {
+  const productIds = Array.from(new Set<string>(po.items.map((item: any) => String(item.productId))));
+  const products = await Product.find({ _id: { $in: productIds } });
+  const productById = new Map(products.map((product: any) => [String(product._id), product]));
+
+  const lines = po.items
+    .map((item: any) => {
+      const receivedQuantity = toNumber(item.receivedQuantity);
+      if (receivedQuantity <= 0) return null;
+
+      const product: any = productById.get(String(item.productId));
+      const unitCost = toNumber(item.unitCost);
+      const taxableValue = roundTo2(receivedQuantity * unitCost);
+      const taxRate = toNumber(product?.gstRate || 0);
+      const taxAmount = roundTo2((taxableValue * taxRate) / 100);
+      return {
+        productId: item.productId,
+        productName: item.productName,
+        sku: item.sku,
+        receivedQuantity,
+        unitCost,
+        taxableValue,
+        taxAmount,
+        totalAmount: roundTo2(taxableValue + taxAmount),
+        stockLedgerAccountId: product?.stockLedgerAccountId ? String(product.stockLedgerAccountId) : '',
+      };
+    })
+    .filter(Boolean) as Array<any>;
+
+  const subtotal = roundTo2(lines.reduce((sum, line) => sum + toNumber(line.taxableValue), 0));
+  const taxAmount = roundTo2(lines.reduce((sum, line) => sum + toNumber(line.taxAmount), 0));
+  const totalAmount = roundTo2(subtotal + taxAmount);
+  return { lines, subtotal, taxAmount, totalAmount };
+};
 
 const parseOptionalDate = (value: any): Date | undefined => {
   if (value === undefined || value === null || String(value).trim() === '') return undefined;
@@ -228,6 +266,19 @@ router.put('/:id/receive', authMiddleware, async (req: AuthenticatedRequest, res
       product.stock = nextStock;
       await product.save();
 
+      await recordPurchaseReceiptBatch({
+        productId: product._id.toString(),
+        quantity: receiveQty,
+        unitCost: toNumber(item.unitCost || product.cost || 0),
+        previousProductStock: currentStock,
+        batchNumber: row?.batchNumber || item.batchNumber || po.purchaseNumber,
+        expiryDate: row?.expiryDate !== undefined ? parseOptionalDate(row.expiryDate) : item.expiryDate,
+        warehouseLocation: row?.warehouseLocation,
+        sourceId: po._id.toString(),
+        referenceNo: po.purchaseNumber,
+        createdBy: req.userId,
+      });
+
       const inventory = await Inventory.findOneAndUpdate(
         { productId: product._id },
         {
@@ -358,6 +409,126 @@ router.put('/:id/return', authMiddleware, async (req: AuthenticatedRequest, res:
     res.json({ success: true, message: 'Purchase return processed successfully', data: updated });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to process purchase return' });
+  }
+});
+
+router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const po: any = await PurchaseOrder.findById(req.params.id).populate('supplierId', 'supplierCode name');
+    if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
+
+    const { lines, subtotal, taxAmount, totalAmount } = await buildReceivedBillLines(po);
+    if (!lines.length || totalAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Receive stock before creating a purchase bill',
+      });
+    }
+
+    const supplierName = typeof po.supplierId === 'string'
+      ? ''
+      : String(po.supplierId?.name || '');
+
+    const existing: any = await PurchaseBill.findOne({
+      purchaseOrderId: po._id,
+      status: { $in: ['posted', 'draft'] },
+    }).sort({ createdAt: -1 });
+
+    const before = existing?.toObject?.();
+    if (existing?.journalEntryId) {
+      await cancelJournalEntry({
+        journalEntryId: String(existing.journalEntryId),
+        reason: `Recreate purchase bill for ${po.purchaseNumber}`,
+        createdBy: req.userId,
+        metadata: {
+          purchaseOrderId: po._id.toString(),
+          purchaseNumber: po.purchaseNumber,
+        },
+      });
+    }
+
+    const journalLines = [
+      ...lines.map((line) => ({
+        ...(line.stockLedgerAccountId ? { accountId: line.stockLedgerAccountId } : { accountKey: 'stock_in_hand' }),
+        debit: toNumber(line.totalAmount),
+        credit: 0,
+        description: `Inventory received - ${line.sku}`,
+      })),
+      {
+        accountKey: 'accounts_payable',
+        debit: 0,
+        credit: totalAmount,
+        description: `Supplier payable - ${supplierName || po.purchaseNumber}`,
+      },
+    ];
+
+    const journal = await createJournalEntry({
+      entryDate: new Date(),
+      referenceType: 'purchase_bill',
+      referenceId: po._id.toString(),
+      referenceNo: po.purchaseNumber,
+      description: `Purchase bill from goods receipt ${po.purchaseNumber}`,
+      paymentMode: 'adjustment',
+      createdBy: req.userId,
+      metadata: {
+        purchaseOrderId: po._id.toString(),
+        purchaseNumber: po.purchaseNumber,
+        supplierId: String(po.supplierId?._id || po.supplierId || ''),
+        supplierName,
+        generatedFromReceipt: true,
+      },
+      lines: journalLines,
+    });
+
+    const billPayload = {
+      purchaseOrderId: po._id,
+      purchaseNumber: po.purchaseNumber,
+      supplierId: po.supplierId?._id || po.supplierId,
+      supplierName: supplierName || 'Supplier',
+      billDate: new Date(),
+      status: 'posted' as const,
+      lines: lines.map(({ stockLedgerAccountId, ...line }) => line),
+      subtotal,
+      taxAmount,
+      totalAmount,
+      journalEntryId: journal.entry._id,
+      revisionReason: existing ? 'Recreated from latest receipt quantities' : '',
+      createdBy: req.userId,
+    };
+
+    const bill = existing
+      ? await PurchaseBill.findByIdAndUpdate(existing._id, billPayload, { new: true, runValidators: true })
+      : await PurchaseBill.create({
+        billNumber: await generateNumber('purchase_bill', { prefix: 'PB-', datePart: true, padTo: 5 }),
+        ...billPayload,
+      });
+
+    await writeAuditLog({
+      module: 'inventory',
+      action: existing ? 'purchase_bill_recreated' : 'purchase_bill_created',
+      entityType: 'purchase_bill',
+      entityId: bill?._id?.toString?.(),
+      referenceNo: bill?.billNumber || po.purchaseNumber,
+      userId: req.userId,
+      metadata: {
+        purchaseOrderId: po._id.toString(),
+        purchaseNumber: po.purchaseNumber,
+        journalEntryNumber: journal.entry.entryNumber,
+        subtotal,
+        taxAmount,
+        totalAmount,
+      },
+      before,
+      after: bill ? (bill.toObject?.() || bill) : undefined,
+    });
+
+    res.status(existing ? 200 : 201).json({
+      success: true,
+      message: existing ? 'Purchase bill recreated from latest receipt' : 'Purchase bill created from goods receipt',
+      data: bill,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to create purchase bill' });
   }
 });
 

@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
+import { CodeScannerSettingsDialog } from '../components/CodeScannerSettingsDialog';
+import { FloatingField } from '../components/FloatingField';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { useCodeScannerCapture } from '../hooks/useCodeScannerCapture';
 import { formatCurrency } from '../config';
 import { IProduct } from '@shared/types';
 import {
@@ -10,10 +13,23 @@ import {
 } from '../utils/generalSettings';
 import { printInvoice, PrintableSale } from '../utils/invoicePrint';
 import { showAlertDialog } from '../utils/appDialogs';
+import {
+  getCodeScannerModeLabel,
+  getCodeScannerSettings,
+  getCodeScannerSubmitLabel,
+  isConfiguredScannerSubmitKey,
+  saveCodeScannerSettings,
+} from '../utils/codeScanner';
 
 interface CartItem extends IProduct {
   quantity: number;
   cartId: string;
+  selectedVariantSize?: string;
+  selectedVariantColor?: string;
+  serialNumbers?: string[];
+  serialNumbersText?: string;
+  batchNo?: string;
+  expiryDate?: string;
 }
 
 interface CompletedSale extends PrintableSale {
@@ -40,8 +56,24 @@ interface CustomerOption {
   name: string;
   phone?: string;
   email?: string;
+  address?: string;
   source?: 'customer' | 'member';
   memberStatus?: string;
+}
+
+interface CustomerCreditNote {
+  _id: string;
+  noteNumber: string;
+  balanceAmount: number;
+  totalAmount?: number;
+  reason?: string;
+  status?: string;
+}
+
+interface CustomerCreditBalance {
+  totalIssued: number;
+  balance: number;
+  notes: CustomerCreditNote[];
 }
 
 const normalizePhone = (value: string): string => String(value || '').replace(/\D+/g, '').slice(-10);
@@ -67,6 +99,58 @@ const toSimpleWarning = (message?: string): string => {
   return text;
 };
 
+const normalizeVariantValue = (value: unknown): string => String(value || '').trim();
+const getVariantOptions = (product: Pick<IProduct, 'variantMatrix'> | null | undefined) =>
+  Array.isArray(product?.variantMatrix)
+    ? product.variantMatrix.filter((row) =>
+      row?.isActive !== false && (
+        normalizeVariantValue(row?.size)
+        || normalizeVariantValue(row?.color)
+        || normalizeVariantValue(row?.skuSuffix)
+        || normalizeVariantValue(row?.barcode)
+        || Number(row?.price || 0) > 0
+      )
+    )
+    : [];
+const variantOptionValue = (size?: string, color?: string) => `${normalizeVariantValue(size)}|||${normalizeVariantValue(color)}`;
+const variantOptionLabel = (row: { size?: string; color?: string; skuSuffix?: string; price?: number }) => {
+  const parts = [normalizeVariantValue(row.size), normalizeVariantValue(row.color)].filter(Boolean);
+  const base = parts.join(' / ') || normalizeVariantValue(row.skuSuffix) || 'Variant';
+  const extraPrice = Number(row.price || 0) > 0 ? ` • ${formatCurrency(Number(row.price || 0))}` : '';
+  return `${base}${extraPrice}`;
+};
+const resolveVariantRow = (
+  product: Pick<IProduct, 'variantMatrix' | 'price'> | null | undefined,
+  size?: string,
+  color?: string
+) => {
+  const normalizedSize = normalizeVariantValue(size).toLowerCase();
+  const normalizedColor = normalizeVariantValue(color).toLowerCase();
+  return getVariantOptions(product).find((row) =>
+    normalizeVariantValue(row.size).toLowerCase() === normalizedSize
+    && normalizeVariantValue(row.color).toLowerCase() === normalizedColor
+  ) || null;
+};
+const variantUnitPrice = (product: Pick<IProduct, 'variantMatrix' | 'price'>, size?: string, color?: string): number => {
+  const row = resolveVariantRow(product, size, color);
+  const rowPrice = Number(row?.price || 0);
+  return rowPrice > 0 ? rowPrice : Number(product.price || 0);
+};
+const findVariantByCode = (product: IProduct, rawCode: string) => {
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (!code) return null;
+  return getVariantOptions(product).find((row) => String(row.barcode || '').trim().toUpperCase() === code) || null;
+};
+const normalizeSerialNumbers = (value: string): string[] =>
+  Array.from(
+    new Set(
+      String(value || '')
+        .split(/[\n,]+/)
+        .map((token) => token.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+
 export const Sales = () => {
   const [products, setProducts] = useState<IProduct[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -82,6 +166,8 @@ export const Sales = () => {
     return 'grid';
   });
   const [enableProductScanner, setEnableProductScanner] = useState(false);
+  const [showScannerSettings, setShowScannerSettings] = useState(false);
+  const [scannerSettings, setScannerSettings] = useState(() => getCodeScannerSettings());
   const [scanCode, setScanCode] = useState('');
   const [productPage, setProductPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -115,6 +201,7 @@ export const Sales = () => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerMatches, setCustomerMatches] = useState<CustomerOption[]>([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
@@ -123,6 +210,10 @@ export const Sales = () => {
   const [membershipRedeemPoints, setMembershipRedeemPoints] = useState('');
   const [membershipPreview, setMembershipPreview] = useState<MembershipPreview | null>(null);
   const [applyingMembership, setApplyingMembership] = useState(false);
+  const [customerCredit, setCustomerCredit] = useState<CustomerCreditBalance | null>(null);
+  const [loadingCustomerCredit, setLoadingCustomerCredit] = useState(false);
+  const [selectedCreditNoteId, setSelectedCreditNoteId] = useState('');
+  const [creditNoteAmount, setCreditNoteAmount] = useState('');
   const productFetchSeqRef = useRef(0);
   const activeProductTimerRef = useRef<number | null>(null);
   const activeProductAnimationFrameRef = useRef<number | null>(null);
@@ -131,6 +222,7 @@ export const Sales = () => {
   const quickSearchInputRef = useRef<HTMLInputElement | null>(null);
   const inlineSearchSeqRef = useRef(0);
   const inlineSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const scannerInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +255,15 @@ export const Sales = () => {
   useEffect(() => {
     localStorage.setItem(CATALOG_VISIBILITY_KEY, showCatalogPanel ? '1' : '0');
   }, [showCatalogPanel]);
+
+  useEffect(() => {
+    if (!enableProductScanner || !scannerSettings.autoFocusInput) return;
+    const timer = window.setTimeout(() => {
+      scannerInputRef.current?.focus();
+      scannerInputRef.current?.select();
+    }, 20);
+    return () => window.clearTimeout(timer);
+  }, [enableProductScanner, scannerSettings.autoFocusInput]);
 
   useEffect(() => {
     setProductPage(1);
@@ -448,11 +549,69 @@ export const Sales = () => {
     return () => clearTimeout(timer);
   }, [customerPhone]);
 
+  useEffect(() => {
+    const phone = normalizePhone(customerPhone);
+    if (phone.length !== 10) {
+      setCustomerCredit(null);
+      setSelectedCreditNoteId('');
+      setCreditNoteAmount('');
+      setLoadingCustomerCredit(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setLoadingCustomerCredit(true);
+          const token = localStorage.getItem('token');
+          const response = await fetch(`/api/credit-notes/customer/balance?customerPhone=${encodeURIComponent(phone)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await response.json();
+          if (cancelled) return;
+          if (!data?.success) {
+            setCustomerCredit(null);
+            setSelectedCreditNoteId('');
+            setCreditNoteAmount('');
+            return;
+          }
+          const nextCredit: CustomerCreditBalance = {
+            totalIssued: Number(data?.data?.totalIssued || 0),
+            balance: Number(data?.data?.balance || 0),
+            notes: Array.isArray(data?.data?.notes) ? data.data.notes : [],
+          };
+          setCustomerCredit(nextCredit);
+          setSelectedCreditNoteId((prev) => {
+            const stillExists = nextCredit.notes.some((row) => row._id === prev && Number(row.balanceAmount || 0) > 0);
+            return stillExists ? prev : '';
+          });
+          setCreditNoteAmount((prev) => prev);
+        } catch {
+          if (cancelled) return;
+          setCustomerCredit(null);
+          setSelectedCreditNoteId('');
+          setCreditNoteAmount('');
+        } finally {
+          if (!cancelled) setLoadingCustomerCredit(false);
+        }
+      })();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [customerPhone]);
+
   const selectCustomer = (customer: CustomerOption) => {
     setSelectedCustomerId(customer.source === 'customer' ? customer._id : '');
     setCustomerPhone(customer.phone || '');
     setCustomerName(customer.name || '');
     setCustomerEmail(customer.email || '');
+    setCustomerAddress(customer.address || '');
+    setSelectedCreditNoteId('');
+    setCreditNoteAmount('');
     setCustomerMatches([]);
     setCustomerActiveIndex(0);
   };
@@ -488,28 +647,60 @@ export const Sales = () => {
     setInlineActiveIndex(0);
   };
 
-  const addToCart = (product: IProduct) => {
+  const addToCart = (product: IProduct, preferredVariant?: { size?: string; color?: string } | null) => {
     if (requiresStockTracking(product) && product.stock <= 0) {
       void showAlertDialog('Out of stock!');
       return;
     }
 
+    const variantOptions = getVariantOptions(product);
+    const defaultVariant = preferredVariant
+      ? resolveVariantRow(product, preferredVariant.size, preferredVariant.color) || variantOptions[0]
+      : variantOptions[0];
+    const defaultVariantSize = normalizeVariantValue(preferredVariant?.size || defaultVariant?.size);
+    const defaultVariantColor = normalizeVariantValue(preferredVariant?.color || defaultVariant?.color);
+
     let added = false;
     let warningMessage = '';
     setCart((prev) => {
-      const existing = prev.find((item) => item._id === product._id);
+      const totalForProduct = prev
+        .filter((item) => item._id === product._id)
+        .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      const existing = prev.find((item) =>
+        item._id === product._id
+        && normalizeVariantValue(item.selectedVariantSize) === defaultVariantSize
+        && normalizeVariantValue(item.selectedVariantColor) === defaultVariantColor
+      );
       if (existing) {
-        if (requiresStockTracking(product) && existing.quantity >= product.stock) {
+        if (requiresStockTracking(product) && totalForProduct >= product.stock) {
           warningMessage = 'Cannot add more than available stock';
           return prev;
         }
         added = true;
         return prev.map((item) =>
-          item._id === product._id ? { ...item, quantity: item.quantity + 1 } : item
+          item.cartId === existing.cartId ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
+      if (requiresStockTracking(product) && totalForProduct >= product.stock) {
+        warningMessage = 'Cannot add more than available stock';
+        return prev;
+      }
       added = true;
-        return [...prev, { ...product, quantity: 1, cartId: Date.now().toString() }];
+      return [
+        ...prev,
+        {
+          ...product,
+          quantity: 1,
+          price: variantUnitPrice(product, defaultVariantSize, defaultVariantColor),
+          cartId: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          selectedVariantSize: defaultVariantSize,
+          selectedVariantColor: defaultVariantColor,
+          serialNumbers: [],
+          serialNumbersText: '',
+          batchNo: '',
+          expiryDate: '',
+        },
+      ];
     });
     if (warningMessage) {
       void showAlertDialog(warningMessage);
@@ -518,14 +709,17 @@ export const Sales = () => {
     if (added) triggerProductFeedback(product);
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
+  const updateQuantity = (cartId: string, delta: number) => {
     let warningMessage = '';
     setCart((prev) =>
       prev.map((item) => {
-        if (item._id === productId) {
+        if (item.cartId === cartId) {
           const newQty = item.quantity + delta;
           if (newQty < 1) return item;
-          if (requiresStockTracking(item) && newQty > item.stock) {
+          const siblingQty = prev
+            .filter((row) => row._id === item._id && row.cartId !== item.cartId)
+            .reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+          if (requiresStockTracking(item) && siblingQty + newQty > item.stock) {
             warningMessage = 'Stock limit reached';
             return item;
           }
@@ -539,8 +733,35 @@ export const Sales = () => {
     }
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item._id !== productId));
+  const removeFromCart = (cartId: string) => {
+    setCart((prev) => prev.filter((item) => item.cartId !== cartId));
+  };
+
+  const updateCartItemField = (cartId: string, field: keyof CartItem, value: any) => {
+    setCart((prev) => prev.map((item) => (item.cartId === cartId ? { ...item, [field]: value } : item)));
+  };
+
+  const updateCartVariant = (cartId: string, value: string) => {
+    const [size, color] = String(value || '').split('|||');
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.cartId !== cartId) return item;
+        return {
+          ...item,
+          selectedVariantSize: normalizeVariantValue(size),
+          selectedVariantColor: normalizeVariantValue(color),
+          price: variantUnitPrice(item, size, color),
+        };
+      })
+    );
+  };
+
+  const focusScannerInput = () => {
+    if (!scannerSettings.autoFocusInput) return;
+    window.setTimeout(() => {
+      scannerInputRef.current?.focus();
+      scannerInputRef.current?.select();
+    }, 20);
   };
 
   const findProductByCode = (rawCode: string): IProduct | null => {
@@ -550,14 +771,20 @@ export const Sales = () => {
     const exact = products.find((product) => {
       const sku = String(product.sku || '').trim().toUpperCase();
       const barcode = String(product.barcode || '').trim().toUpperCase();
-      return sku === code || barcode === code;
+      const variantBarcodeMatch = getVariantOptions(product).some(
+        (row) => String(row.barcode || '').trim().toUpperCase() === code
+      );
+      return sku === code || barcode === code || variantBarcodeMatch;
     });
     if (exact) return exact;
 
     const startsWith = products.find((product) => {
       const sku = String(product.sku || '').trim().toUpperCase();
       const barcode = String(product.barcode || '').trim().toUpperCase();
-      return sku.startsWith(code) || barcode.startsWith(code);
+      const variantBarcodeMatch = getVariantOptions(product).some(
+        (row) => String(row.barcode || '').trim().toUpperCase().startsWith(code)
+      );
+      return sku.startsWith(code) || barcode.startsWith(code) || variantBarcodeMatch;
     });
     return startsWith || null;
   };
@@ -595,8 +822,8 @@ export const Sales = () => {
     }
   };
 
-  const handleProductCodeScan = async () => {
-    const code = String(scanCode || '').trim();
+  const handleProductCodeScan = async (rawCode?: string) => {
+    const code = String(rawCode ?? scanCode ?? '').trim();
     if (!code) {
       await showAlertDialog('Please scan or enter a product code.');
       return;
@@ -608,9 +835,19 @@ export const Sales = () => {
       return;
     }
 
-    addToCart(matched);
+    addToCart(matched, findVariantByCode(matched, code));
     setScanCode('');
+    focusScannerInput();
   };
+
+  useCodeScannerCapture({
+    enabled: enableProductScanner,
+    settings: scannerSettings,
+    onScan: (value) => {
+      setScanCode(value);
+      void handleProductCodeScan(value);
+    },
+  });
 
   const calculateTotals = () => {
     const subtotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
@@ -659,8 +896,8 @@ export const Sales = () => {
   };
 
   const applyMembershipBenefits = async () => {
-    if (!customerPhone.trim()) {
-      await showAlertDialog('Enter customer phone to apply membership');
+    if (normalizePhone(customerPhone).length !== 10) {
+      await showAlertDialog('Enter a valid 10-digit customer phone to apply membership');
       return;
     }
     if (cart.length === 0) {
@@ -708,12 +945,42 @@ export const Sales = () => {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
+    const normalizedCustomerPhone = normalizePhone(customerPhone);
+    if (normalizedCustomerPhone.length !== 10) {
+      await showAlertDialog('Customer phone number is mandatory and must be 10 digits.');
+      return;
+    }
+
+    for (const item of cart) {
+      if (item.expiryRequired && !String(item.expiryDate || '').trim()) {
+        await showAlertDialog(`Enter the expiry date for ${item.name}.`);
+        return;
+      }
+      if (item.serialNumberTracking) {
+        const serialCount = normalizeSerialNumbers(item.serialNumbersText || '').length;
+        if (serialCount !== Number(item.quantity || 0)) {
+          await showAlertDialog(`Enter exactly ${item.quantity} serial number(s) for ${item.name}.`);
+          return;
+        }
+      }
+    }
+
     setProcessing(true);
     setCheckoutMessage('');
 
     try {
       const token = localStorage.getItem('token');
       const totals = calculateTotals();
+      const selectedCreditNote = (customerCredit?.notes || []).find((row) => row._id === selectedCreditNoteId) || null;
+      const requestedCreditAmount = Math.max(0, Number(creditNoteAmount || selectedCreditNote?.balanceAmount || 0));
+      const appliedCreditAmount = selectedCreditNote
+        ? Math.min(requestedCreditAmount, Number(selectedCreditNote.balanceAmount || 0), Number(totals.total || 0))
+        : 0;
+      const computedPaidAmount = paidAmount
+        ? Number(paidAmount)
+        : invoiceType === 'credit'
+          ? undefined
+          : Math.max(0, Number(totals.total || 0) - appliedCreditAmount);
 
       const saleData = {
         items: cart.map((item) => ({
@@ -721,6 +988,11 @@ export const Sales = () => {
           quantity: item.quantity,
           unitPrice: item.price,
           gstRate: item.gstRate,
+          batchNo: item.batchNo || undefined,
+          expiryDate: item.expiryDate || undefined,
+          serialNumbers: item.serialNumberTracking ? normalizeSerialNumbers(item.serialNumbersText || '') : undefined,
+          variantSize: item.selectedVariantSize || undefined,
+          variantColor: item.selectedVariantColor || undefined,
         })),
         paymentMethod,
         invoiceType,
@@ -729,17 +1001,20 @@ export const Sales = () => {
         invoiceNumber: invoiceNumberMode === 'manual' ? manualInvoiceNumber.trim() : undefined,
         autoInvoiceNumber: invoiceNumberMode === 'auto',
         applyRoundOff,
-        paidAmount: paidAmount ? Number(paidAmount) : undefined,
+        paidAmount: computedPaidAmount,
         customerId: selectedCustomerId || undefined,
         customerName: customerName.trim() || undefined,
-        customerPhone: normalizePhone(customerPhone) || customerPhone,
+        customerPhone: normalizedCustomerPhone,
         customerEmail: customerEmail.trim() || undefined,
+        customerAddress: customerAddress.trim() || undefined,
         notes: saleNotes,
         subtotal: totals.subtotal,
         totalGst: totals.gst,
         discountAmount: totals.discountAmount,
         discountPercentage: totals.discountPercentage,
         totalAmount: totals.total,
+        creditNoteId: selectedCreditNote?._id || undefined,
+        creditNoteAmount: appliedCreditAmount > 0 ? appliedCreditAmount : undefined,
       };
 
       const response = await fetch('/api/sales', {
@@ -760,7 +1035,7 @@ export const Sales = () => {
       const completed: CompletedSale = {
         ...data.data,
         customerName: data?.data?.customerName || customerName,
-        customerPhone: data?.data?.customerPhone || normalizePhone(customerPhone),
+        customerPhone: data?.data?.customerPhone || normalizedCustomerPhone,
         customerEmail: data?.data?.customerEmail || customerEmail,
         notes: saleNotes,
         invoiceNumber: data.data.invoiceNumber || data.data.saleNumber,
@@ -777,7 +1052,7 @@ export const Sales = () => {
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({
-              mobile: normalizePhone(customerPhone),
+              mobile: normalizedCustomerPhone,
               cartTotal: totals.grossTotal,
               redeemPoints: Number(membershipRedeemPoints || 0),
               commit: true,
@@ -793,6 +1068,7 @@ export const Sales = () => {
       setCustomerName('');
       setCustomerPhone('');
       setCustomerEmail('');
+      setCustomerAddress('');
       setSelectedCustomerId('');
       setCustomerMatches([]);
       setSaleNotes('');
@@ -806,6 +1082,9 @@ export const Sales = () => {
       setDiscountValue('');
       setMembershipRedeemPoints('');
       setMembershipPreview(null);
+      setCustomerCredit(null);
+      setSelectedCreditNoteId('');
+      setCreditNoteAmount('');
       void fetchProducts(true);
 
       if (invoiceStatus === 'draft') {
@@ -864,7 +1143,21 @@ export const Sales = () => {
   }, [filteredProducts, productPage]);
 
   const { subtotal, gst, grossTotal, discountAmount, netTotal, roundOffAmount, total } = calculateTotals();
-  const outstandingAmount = Math.max(0, total - Number(paidAmount || 0));
+  const selectedCreditNote = (customerCredit?.notes || []).find((row) => row._id === selectedCreditNoteId) || null;
+  const requestedCreditAmount = Math.max(0, Number(creditNoteAmount || selectedCreditNote?.balanceAmount || 0));
+  const appliedStoreCredit = selectedCreditNote
+    ? Math.min(requestedCreditAmount, Number(selectedCreditNote.balanceAmount || 0), Number(total || 0))
+    : 0;
+  const effectivePaidAmount = paidAmount
+    ? Number(paidAmount || 0)
+    : invoiceType === 'credit'
+      ? 0
+      : Math.max(0, Number(total || 0) - appliedStoreCredit);
+  const outstandingAmount = Math.max(0, total - effectivePaidAmount - appliedStoreCredit);
+  const normalizedCustomerPhone = normalizePhone(customerPhone);
+  const hasValidCustomerPhone = normalizedCustomerPhone.length === 10;
+  const willCreateNewCustomer =
+    !searchingCustomers && hasValidCustomerPhone && customerMatches.length === 0 && !selectedCustomerId;
   const isMinimalMode = !showCatalogPanel;
   const handleProductListScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (!hasMoreProducts || loading || loadingMoreProducts) return;
@@ -898,53 +1191,15 @@ export const Sales = () => {
               listClassName="flex flex-wrap gap-2 border-b-0 px-0 pt-0"
             />
             <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setEnableProductScanner((prev) => !prev)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                enableProductScanner ? 'bg-emerald-500 text-white' : 'bg-white/10 text-gray-300'
-              }`}
-            >
-              {enableProductScanner ? 'Scanner On' : 'Scanner Off'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowQuickAddModal(true)}
-              className="rounded-md bg-cyan-500/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-400"
-            >
-              Quick Add
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowQuickAddModal(true)}
+                className="rounded-md bg-cyan-500/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-400"
+              >
+                Quick Add
+              </button>
             </div>
           </div>
-
-          {enableProductScanner && (
-            <div className="mb-4 rounded-md border border-emerald-400/20 bg-emerald-500/10 p-3">
-              <label className="mb-1 block text-xs font-medium text-emerald-200">Scan Product Code (SKU/Barcode)</label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="text"
-                  value={scanCode}
-                  onChange={(e) => setScanCode(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleProductCodeScan();
-                    }
-                  }}
-                  placeholder="Scan or type code, then press Enter"
-                  className="w-full rounded-md border border-white/15 bg-black/20 px-3 py-2 text-sm text-white placeholder-gray-400"
-                />
-                <button
-                  type="button"
-                  onClick={handleProductCodeScan}
-                  className="rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-400"
-                >
-                  Add by Code
-                </button>
-              </div>
-              <p className="mt-1 text-[11px] text-emerald-200/90">This is optional. You can continue selecting products from the list.</p>
-            </div>
-          )}
 
           {loading && (
             <p className="rounded-md border border-white/10 bg-black/20 px-3 py-3 text-sm text-gray-300">
@@ -1140,6 +1395,74 @@ export const Sales = () => {
             </button>
           </div>
 
+          <div className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Product Code Scanner</p>
+                <p className="mt-1 text-[11px] text-emerald-100/75">
+                  Mode: {getCodeScannerModeLabel(scannerSettings.captureMode)} • Submit: {getCodeScannerSubmitLabel(scannerSettings.submitKey)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScannerSettings(true)}
+                  className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10"
+                  title="Code Scanner settings"
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true" className="h-3.5 w-3.5 fill-current">
+                    <path d="M11.983 1.722a1 1 0 0 0-1.966 0l-.143.86a7.329 7.329 0 0 0-1.62.669l-.708-.507a1 1 0 0 0-1.37.12L4.6 4.44a1 1 0 0 0 .12 1.37l.507.708a7.329 7.329 0 0 0-.669 1.62l-.86.143a1 1 0 0 0 0 1.966l.86.143c.13.564.354 1.105.669 1.62l-.507.708a1 1 0 0 0-.12 1.37l1.576 1.576a1 1 0 0 0 1.37.12l.708-.507c.515.315 1.056.539 1.62.669l.143.86a1 1 0 0 0 1.966 0l.143-.86a7.33 7.33 0 0 0 1.62-.669l.708.507a1 1 0 0 0 1.37-.12l1.576-1.576a1 1 0 0 0-.12-1.37l-.507-.708a7.33 7.33 0 0 0 .669-1.62l.86-.143a1 1 0 0 0 0-1.966l-.86-.143a7.33 7.33 0 0 0-.669-1.62l.507-.708a1 1 0 0 0 .12-1.37L13.824 2.864a1 1 0 0 0-1.37-.12l-.708.507a7.329 7.329 0 0 0-1.62-.669l-.143-.86ZM10 12.75A2.75 2.75 0 1 1 10 7.25a2.75 2.75 0 0 1 0 5.5Z" />
+                  </svg>
+                  Code Scanner
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEnableProductScanner((prev) => !prev)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                    enableProductScanner ? 'bg-emerald-500 text-white' : 'bg-white/10 text-gray-200'
+                  }`}
+                >
+                  {enableProductScanner ? 'Scanner On' : 'Scanner Off'}
+                </button>
+              </div>
+            </div>
+
+            {enableProductScanner ? (
+              <div className="space-y-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    ref={scannerInputRef}
+                    type="text"
+                    value={scanCode}
+                    onChange={(e) => setScanCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (isConfiguredScannerSubmitKey(e.key, scannerSettings.submitKey)) {
+                        e.preventDefault();
+                        void handleProductCodeScan();
+                      }
+                    }}
+                    placeholder={`Scan SKU / barcode and press ${getCodeScannerSubmitLabel(scannerSettings.submitKey)}`}
+                    className="w-full rounded-md border border-white/15 bg-black/20 px-3 py-2 text-sm text-white placeholder-gray-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleProductCodeScan()}
+                    className="rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-400"
+                  >
+                    Add by Code
+                  </button>
+                </div>
+                <p className="text-[11px] text-emerald-100/80">
+                  Works with SKU, barcode, and variant barcode. Use global capture from Code Scanner settings if the cursor will not stay inside this box.
+                </p>
+              </div>
+            ) : (
+              <p className="text-[11px] text-emerald-100/80">
+                Turn this on when you want to add items directly from a scanner.
+              </p>
+            )}
+          </div>
+
           <div className={isMinimalMode ? 'grid h-[calc(100%-3rem)] grid-cols-1 gap-3 overflow-hidden lg:grid-cols-2' : ''}>
 
           <div className={`${isMinimalMode ? 'mb-0' : 'mb-4'} rounded-md border border-white/10 bg-black/20 p-3`}>
@@ -1212,37 +1535,104 @@ export const Sales = () => {
                       <p className="text-xs text-gray-400">
                         {formatCurrency(item.price)} x {item.quantity}
                       </p>
+                      {(item.selectedVariantSize || item.selectedVariantColor) && (
+                        <p className="text-[11px] text-cyan-200">
+                          Variant: {[item.selectedVariantSize, item.selectedVariantColor].filter(Boolean).join(' / ')}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         className="rounded border border-white/20 px-2 py-1 text-sm"
-                        onClick={() => updateQuantity(item._id!, -1)}
+                        onClick={() => updateQuantity(item.cartId, -1)}
                       >
                         -
                       </button>
                       <span className="min-w-6 text-center text-sm">{item.quantity}</span>
                       <button
                         className="rounded border border-white/20 px-2 py-1 text-sm"
-                        onClick={() => updateQuantity(item._id!, 1)}
+                        onClick={() => updateQuantity(item.cartId, 1)}
                       >
                         +
                       </button>
-                      <button className="text-red-400" onClick={() => removeFromCart(item._id!)}>
+                      <button className="text-red-400" onClick={() => removeFromCart(item.cartId)}>
                         x
                       </button>
                     </div>
                   </div>
+                  {getVariantOptions(item).length > 0 && (
+                    <div className="mt-3">
+                      <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400">Variant</label>
+                      <select
+                        value={variantOptionValue(item.selectedVariantSize, item.selectedVariantColor)}
+                        onChange={(e) => updateCartVariant(item.cartId, e.target.value)}
+                        className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white"
+                      >
+                        {getVariantOptions(item).map((row, index) => (
+                          <option
+                            key={`${item._id}-${index}-${variantOptionValue(row.size, row.color)}`}
+                            value={variantOptionValue(row.size, row.color)}
+                            className="bg-gray-900"
+                          >
+                            {variantOptionLabel(row)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {(item.batchTracking || item.expiryRequired || item.serialNumberTracking) && (
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {item.batchTracking && (
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400">Batch No</label>
+                          <input
+                            value={item.batchNo || ''}
+                            onChange={(e) => updateCartItemField(item.cartId, 'batchNo', e.target.value)}
+                            placeholder="Batch / lot number"
+                            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white"
+                          />
+                        </div>
+                      )}
+                      {item.expiryRequired && (
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400">Expiry Date</label>
+                          <input
+                            type="date"
+                            value={item.expiryDate || ''}
+                            onChange={(e) => updateCartItemField(item.cartId, 'expiryDate', e.target.value)}
+                            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white"
+                          />
+                        </div>
+                      )}
+                      {item.serialNumberTracking && (
+                        <div className="md:col-span-2">
+                          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                            Serial Numbers ({item.quantity} required)
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={item.serialNumbersText || ''}
+                            onChange={(e) => updateCartItemField(item.cartId, 'serialNumbersText', e.target.value)}
+                            placeholder="Enter one serial per line or comma separated"
+                            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white"
+                          />
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Captured: {normalizeSerialNumbers(item.serialNumbersText || '').length} / {item.quantity}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}
           </div>
 
-          <div className={`${isMinimalMode ? 'mt-0 space-y-1 border border-white/10 rounded-md p-3' : 'mt-4 space-y-2 border-t border-white/10 pt-4'}`}>
-            <p className="text-[11px] text-gray-400">Customer details are optional. Leave blank for walk-in invoice.</p>
-            <label className="block text-xs text-gray-400">Customer Phone (search first)</label>
-            <input
-              type="text"
-              placeholder="Customer Phone"
+          <div className={`${isMinimalMode ? 'mt-0 space-y-2 border border-white/10 rounded-md p-3' : 'mt-4 space-y-2 border-t border-white/10 pt-4'}`}>
+            <p className="text-[11px] text-gray-400">Customer phone is mandatory. If the number is not found, a new customer profile will be created automatically.</p>
+            <FloatingField
+              label="Customer Phone"
+              required
               value={customerPhone}
               name="lookup_customer"
               autoComplete="new-password"
@@ -1250,10 +1640,9 @@ export const Sales = () => {
               autoCapitalize="off"
               spellCheck={false}
               inputMode="numeric"
-              data-lpignore="true"
-              onChange={(e) => {
-                const next = e.target.value;
-                setCustomerPhone(next);
+              dataLpignore="true"
+              onChange={(value) => {
+                setCustomerPhone(value);
                 setSelectedCustomerId('');
               }}
               onKeyDown={(e) => {
@@ -1276,7 +1665,6 @@ export const Sales = () => {
                   if (selected) selectCustomer(selected);
                 }
               }}
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
             />
             {searchingCustomers && <p className="text-[11px] text-gray-400">Searching customers...</p>}
             {!searchingCustomers && customerMatches.length > 0 && (
@@ -1298,34 +1686,15 @@ export const Sales = () => {
                 ))}
               </div>
             )}
-            {!searchingCustomers && normalizePhone(customerPhone).length >= 10 && customerMatches.length === 0 && !selectedCustomerId && (
-              <p className="text-[11px] text-amber-300">No customer found in database. You can continue with this typed phone number.</p>
+            {willCreateNewCustomer && (
+              <p className="text-[11px] text-amber-300">No existing customer found. A new customer will be created from this phone number at invoice save.</p>
             )}
             {!!selectedCustomerId && <p className="text-[11px] text-emerald-300">Existing customer selected from database</p>}
 
-            <label className="block text-xs text-gray-400">Customer Name</label>
-            <input
-              type="text"
-              placeholder="Customer Name (optional)"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
-            <label className="block text-xs text-gray-400">Customer Email</label>
-            <input
-              type="email"
-              placeholder="Customer Email (optional)"
-              value={customerEmail}
-              onChange={(e) => setCustomerEmail(e.target.value)}
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
-            <textarea
-              placeholder="Invoice Notes (optional)"
-              value={saleNotes}
-              onChange={(e) => setSaleNotes(e.target.value)}
-              rows={2}
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
+            <FloatingField label="Customer Name" value={customerName} onChange={setCustomerName} />
+            <FloatingField label="Email ID (optional)" type="email" value={customerEmail} onChange={setCustomerEmail} />
+            <FloatingField label="Address (optional)" rows={2} value={customerAddress} onChange={setCustomerAddress} />
+            <FloatingField label="Invoice Notes (optional)" rows={2} value={saleNotes} onChange={setSaleNotes} />
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -1343,13 +1712,7 @@ export const Sales = () => {
               </button>
             </div>
             {invoiceNumberMode === 'manual' && (
-              <input
-                type="text"
-                placeholder="Manual Invoice Number"
-                value={manualInvoiceNumber}
-                onChange={(e) => setManualInvoiceNumber(e.target.value)}
-                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
-              />
+              <FloatingField label="Manual Invoice Number" value={manualInvoiceNumber} onChange={setManualInvoiceNumber} />
             )}
           </div>
 
@@ -1368,39 +1731,41 @@ export const Sales = () => {
             </div>
             <div className="mb-2 grid grid-cols-[1fr_120px_120px] items-center gap-2">
               <span className="text-sm text-gray-300">Discount</span>
-              <select
+              <FloatingField
+                label="Mode"
                 value={discountType}
-                onChange={(e) => setDiscountType(e.target.value as 'amount' | 'percentage')}
-                className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white"
-              >
-                <option value="amount">Amount</option>
-                <option value="percentage">%</option>
-              </select>
-              <input
+                onChange={(value) => setDiscountType(value as 'amount' | 'percentage')}
+                options={[
+                  { value: 'amount', label: 'Amount' },
+                  { value: 'percentage', label: '%' },
+                ]}
+                inputClassName="px-2 pb-1.5 pt-3 text-xs"
+              />
+              <FloatingField
+                label={discountType === 'percentage' ? 'Discount %' : 'Discount'}
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder="0"
                 value={discountValue}
-                onChange={(e) => setDiscountValue(e.target.value)}
-                className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white placeholder-gray-500"
+                onChange={setDiscountValue}
+                inputClassName="px-2 pb-1.5 pt-3 text-xs"
               />
             </div>
             <div className="mb-2 grid grid-cols-[1fr_120px_120px] items-center gap-2">
               <span className="text-sm text-gray-300">Membership</span>
-              <input
+              <FloatingField
+                label="Redeem Pts"
                 type="number"
                 min="0"
                 step="1"
-                placeholder="Redeem pts"
                 value={membershipRedeemPoints}
-                onChange={(e) => setMembershipRedeemPoints(e.target.value)}
-                className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white placeholder-gray-500"
+                onChange={setMembershipRedeemPoints}
+                inputClassName="px-2 pb-1.5 pt-3 text-xs"
               />
               <button
                 type="button"
                 onClick={applyMembershipBenefits}
-                disabled={applyingMembership || !customerPhone.trim()}
+                disabled={applyingMembership || !hasValidCustomerPhone}
                 className="rounded-md bg-indigo-500/80 px-2 py-1.5 text-xs font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {applyingMembership ? 'Applying...' : 'Apply'}
@@ -1413,9 +1778,55 @@ export const Sales = () => {
                 <div>Points after bill: {Number(membershipPreview.rewardPointsBalance || 0)}</div>
               </div>
             )}
+            <div className="mb-2 rounded border border-white/10 bg-black/10 p-2">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-sm text-gray-300">Store Credit</span>
+                <span className="text-xs text-gray-400">
+                  {loadingCustomerCredit
+                    ? 'Checking...'
+                    : customerCredit?.balance
+                      ? `Available ${formatCurrency(Number(customerCredit.balance || 0))}`
+                      : 'No credit balance'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[1.4fr_0.8fr]">
+                <select
+                  value={selectedCreditNoteId}
+                  onChange={(e) => {
+                    const noteId = e.target.value;
+                    setSelectedCreditNoteId(noteId);
+                    const note = (customerCredit?.notes || []).find((row) => row._id === noteId);
+                    setCreditNoteAmount(note ? String(Number(note.balanceAmount || 0)) : '');
+                  }}
+                  className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white"
+                >
+                  <option value="" className="bg-gray-900">Select store credit / credit note</option>
+                  {(customerCredit?.notes || [])
+                    .filter((row) => Number(row.balanceAmount || 0) > 0)
+                    .map((row) => (
+                      <option key={row._id} value={row._id} className="bg-gray-900">
+                        {row.noteNumber} • {formatCurrency(Number(row.balanceAmount || 0))} • {row.reason || 'Credit'}
+                      </option>
+                    ))}
+                </select>
+                <FloatingField
+                  label="Apply Amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={creditNoteAmount}
+                  onChange={setCreditNoteAmount}
+                  inputClassName="px-2 pb-1.5 pt-3 text-xs"
+                />
+              </div>
+            </div>
             <div className="mb-2 flex items-center justify-between text-sm text-gray-300">
               <span>Discount Applied</span>
               <span>- {formatCurrency(discountAmount)}</span>
+            </div>
+            <div className="mb-2 flex items-center justify-between text-sm text-gray-300">
+              <span>Store Credit Applied</span>
+              <span>- {formatCurrency(appliedStoreCredit)}</span>
             </div>
             <div className="mb-2 flex items-center justify-between text-sm text-gray-300">
               <span>Net Total</span>
@@ -1428,6 +1839,10 @@ export const Sales = () => {
             <div className="mb-4 flex items-center justify-between text-lg font-semibold text-white">
               <span>Total</span>
               <span>{formatCurrency(total)}</span>
+            </div>
+            <div className="mb-4 flex items-center justify-between text-sm text-gray-300">
+              <span>{invoiceType === 'credit' ? 'Expected Outstanding' : 'Collect Now'}</span>
+              <span>{formatCurrency(invoiceType === 'credit' ? outstandingAmount : Math.max(0, total - appliedStoreCredit))}</span>
             </div>
 
             <div className="mb-4 flex gap-2">
@@ -1448,7 +1863,10 @@ export const Sales = () => {
               <button
                 type="button"
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold uppercase ${invoiceType === 'cash' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-gray-300'}`}
-                onClick={() => setInvoiceType('cash')}
+                onClick={() => {
+                  setInvoiceType('cash');
+                  setPaidAmount('');
+                }}
               >
                 Cash Invoice
               </button>
@@ -1492,14 +1910,14 @@ export const Sales = () => {
             </div>
             {invoiceType === 'credit' && (
               <>
-                <input
+                <FloatingField
+                  className="mb-3"
+                  label="Paid Amount (optional)"
                   type="number"
                   min="0"
                   step="0.01"
-                  placeholder="Paid Amount (optional)"
                   value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
-                  className="mb-3 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500"
+                  onChange={setPaidAmount}
                 />
                 <div className="mb-3 rounded border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
                   Outstanding: <span className="font-semibold">{formatCurrency(outstandingAmount)}</span>
@@ -1659,6 +2077,17 @@ export const Sales = () => {
           </div>
         </div>
       )}
+      <CodeScannerSettingsDialog
+        open={showScannerSettings}
+        settings={scannerSettings}
+        onClose={() => setShowScannerSettings(false)}
+        onSave={(nextSettings) => {
+          const saved = saveCodeScannerSettings(nextSettings);
+          setScannerSettings(saved);
+          setShowScannerSettings(false);
+          if (enableProductScanner) focusScannerInput();
+        }}
+      />
     </>
   );
 };

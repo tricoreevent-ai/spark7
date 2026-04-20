@@ -40,6 +40,7 @@ export interface ICustomer extends Document {
   phone?: string;
   email?: string;
   profilePhotoUrl?: string;
+  profilePhotoStoragePath?: string;
   customerCategory: CustomerCategory;
   gstin?: string;
   address?: string;
@@ -123,6 +124,7 @@ const CustomerSchema = new Schema<ICustomer>(
     phone: { type: String, trim: true, index: true },
     email: { type: String, trim: true, lowercase: true, index: true },
     profilePhotoUrl: { type: String, trim: true, default: '' },
+    profilePhotoStoragePath: { type: String, trim: true, default: '' },
     customerCategory: {
       type: String,
       enum: ['individual', 'group_team', 'corporate', 'regular_member', 'walk_in'],

@@ -7,7 +7,14 @@ import { Facility } from '../models/Facility.js';
 import { User } from '../models/User.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { writeAuditLog } from '../services/audit.js';
+import {
+  persistManagedImageValue,
+  removeManagedStoredFile,
+  resolveManagedStoragePath,
+} from '../services/assetStorage.js';
 import { generateNumber } from '../services/numbering.js';
+import { loadTenantGeneralSettings } from '../services/generalSettings.js';
+import { sendConfiguredMail } from '../services/mail.js';
 
 const router = Router();
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -15,6 +22,13 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 const parseBoolean = (value: any, fallback = false): boolean => {
   if (value === undefined || value === null) return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -116,6 +130,42 @@ const durationFromCycle = (cycle: string, customDays?: number): number => {
   return Math.max(1, Number(customDays || 30));
 };
 
+const addDateDuration = (start: Date, value: number, unit: string): Date => {
+  const amount = Math.max(1, Math.floor(Number(value || 0)));
+  const normalizedUnit = String(unit || 'days').toLowerCase();
+  const end = new Date(start);
+
+  if (normalizedUnit === 'months') {
+    const originalDay = end.getDate();
+    end.setMonth(end.getMonth() + amount);
+    if (end.getDate() !== originalDay) {
+      end.setDate(0);
+    }
+    return end;
+  }
+
+  if (normalizedUnit === 'years') {
+    const originalMonth = end.getMonth();
+    end.setFullYear(end.getFullYear() + amount);
+    if (end.getMonth() !== originalMonth) {
+      end.setDate(0);
+    }
+    return end;
+  }
+
+  end.setDate(end.getDate() + amount);
+  return end;
+};
+
+const normalizeDurationOverride = (raw: any): { value: number; unit: 'days' | 'months' | 'years'; label: string } | null => {
+  const value = Math.floor(Number(raw?.durationValue || raw?.membershipDurationValue || 0));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const unitInput = String(raw?.durationUnit || raw?.membershipDurationUnit || 'days').toLowerCase();
+  const unit = unitInput === 'years' ? 'years' : unitInput === 'months' ? 'months' : 'days';
+  const label = `${value} ${value === 1 ? unit.slice(0, -1) || unit : unit}`;
+  return { value, unit, label };
+};
+
 const withPlanDefaults = (raw: any) => {
   const billingCycle = String(raw?.billingCycle || 'monthly').toLowerCase();
   const durationDays = durationFromCycle(billingCycle, Number(raw?.durationDays || 0));
@@ -198,6 +248,87 @@ const buildReminderMessage = (args: {
   return `Hi ${memberName}, your ${planName} membership is in grace period after ${endLabel}. Renew immediately to avoid full expiry.`;
 };
 
+const buildReminderSubject = (args: { reminderType: ReminderType; planName: string }): string => {
+  const labelMap: Record<ReminderType, string> = {
+    d7: 'expires in 7 days',
+    d3: 'expires in 3 days',
+    expiry: 'expires today',
+    grace: 'is in grace period',
+  };
+  return `Membership reminder: ${args.planName} ${labelMap[args.reminderType]}`;
+};
+
+const buildReminderMailContent = (args: {
+  subscription: any;
+  planName: string;
+  reminderType: ReminderType;
+  now: Date;
+}) => {
+  const message = buildReminderMessage(args);
+  const endDate = new Date(args.subscription?.endDate || args.now);
+  const endLabel = endDate.toLocaleDateString('en-IN');
+  const memberName = String(args.subscription?.fullName || args.subscription?.memberName || 'Member');
+  const memberCode = String(args.subscription?.memberCode || '-');
+  const subject = buildReminderSubject({ reminderType: args.reminderType, planName: args.planName });
+
+  return {
+    subject,
+    text: [
+      message,
+      '',
+      `Member: ${memberName}`,
+      `Member Code: ${memberCode}`,
+      `Plan: ${args.planName}`,
+      `Valid Until: ${endLabel}`,
+    ].join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.55;color:#111827">
+        <h2 style="margin:0 0 10px 0;color:#0f5132">Membership Renewal Reminder</h2>
+        <p style="margin:0 0 14px 0">${escapeHtml(message)}</p>
+        <table style="border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:4px 14px 4px 0;color:#6b7280">Member</td><td style="padding:4px 0"><strong>${escapeHtml(memberName)}</strong></td></tr>
+          <tr><td style="padding:4px 14px 4px 0;color:#6b7280">Member Code</td><td style="padding:4px 0">${escapeHtml(memberCode)}</td></tr>
+          <tr><td style="padding:4px 14px 4px 0;color:#6b7280">Plan</td><td style="padding:4px 0">${escapeHtml(args.planName)}</td></tr>
+          <tr><td style="padding:4px 14px 4px 0;color:#6b7280">Valid Until</td><td style="padding:4px 0">${escapeHtml(endLabel)}</td></tr>
+        </table>
+      </div>
+    `,
+  };
+};
+
+const buildReminderPreview = (args: {
+  subscription: any;
+  channels: ReminderChannel[];
+  reminderType: ReminderType;
+  now: Date;
+}) => {
+  const planName = String((args.subscription?.planId as any)?.name || 'Membership Plan');
+  const mailContent = buildReminderMailContent({
+    subscription: args.subscription,
+    planName,
+    reminderType: args.reminderType,
+    now: args.now,
+  });
+
+  return {
+    memberId: args.subscription?._id?.toString?.() || '',
+    memberName: String(args.subscription?.memberName || ''),
+    memberCode: String(args.subscription?.memberCode || ''),
+    planName,
+    reminderType: args.reminderType,
+    channels: args.channels,
+    phone: normalizePhone(args.subscription?.phone),
+    email: normalizeEmail(args.subscription?.email),
+    subject: mailContent.subject,
+    message: buildReminderMessage({
+      subscription: args.subscription,
+      planName,
+      reminderType: args.reminderType,
+      now: args.now,
+    }),
+  };
+};
+
 const postWebhook = async (url: string, payload: Record<string, any>): Promise<void> => {
   const trimmed = String(url || '').trim();
   if (!trimmed) return;
@@ -217,6 +348,7 @@ const dispatchReminder = async (args: {
   reminderType: ReminderType;
   planName: string;
   now: Date;
+  settingsOverride?: any;
 }): Promise<{ status: 'sent' | 'failed' | 'skipped'; error?: string }> => {
   const message = buildReminderMessage({
     subscription: args.subscription,
@@ -245,13 +377,18 @@ const dispatchReminder = async (args: {
 
     if (args.channel === 'email') {
       if (!email) return { status: 'failed', error: 'Member email is missing' };
-      await postWebhook(String(process.env.MEMBERSHIP_EMAIL_WEBHOOK_URL || ''), {
-        channel: 'email',
-        to: email,
-        subject: `Membership Renewal Reminder (${args.reminderType.toUpperCase()})`,
-        message,
-        memberCode,
-        memberName,
+      const mailContent = buildReminderMailContent({
+        subscription: args.subscription,
+        planName: args.planName,
+        reminderType: args.reminderType,
+        now: args.now,
+      });
+      await sendConfiguredMail({
+        settingsOverride: args.settingsOverride,
+        recipients: [email],
+        subject: mailContent.subject,
+        text: mailContent.text,
+        html: mailContent.html,
       });
       return { status: 'sent' };
     }
@@ -292,6 +429,7 @@ const sendReminderForSubscription = async (args: {
   const planName = String((sub?.planId as any)?.name || 'Membership Plan');
   const selectedChannels = args.channels.filter((channel) => reminderChannels.includes(channel));
   const results: Array<{ channel: ReminderChannel; status: string; error?: string }> = [];
+  const settings = selectedChannels.includes('email') ? await loadTenantGeneralSettings(args.req.tenantId) : null;
 
   sub.reminderHistory = Array.isArray(sub.reminderHistory) ? sub.reminderHistory : [];
 
@@ -302,6 +440,7 @@ const sendReminderForSubscription = async (args: {
       reminderType: args.reminderType,
       planName,
       now,
+      settingsOverride: settings,
     });
     results.push({
       channel,
@@ -560,7 +699,7 @@ router.get('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, r
       .populate({
         path: 'planId',
         select:
-          'name facilityType facilityIds planType status billingCycle durationDays price sessionsLimit bookingDiscountPercentage flatDiscountAmount rewardPointsMultiplier freezeAllowed pauseMembershipAllowed pointsPerCurrency pointsRedemptionValue minimumRedeemPoints',
+          'name tierName facilityType facilityIds planType status billingCycle durationDays price sessionsLimit bookingDiscountPercentage flatDiscountAmount rewardPointsMultiplier freezeAllowed pauseMembershipAllowed pointsPerCurrency pointsRedemptionValue minimumRedeemPoints',
         populate: { path: 'facilityIds', select: 'name location active' },
       })
       .sort({ createdAt: -1 });
@@ -576,7 +715,7 @@ router.get('/subscriptions/:id/profile-details', authMiddleware, async (req: Aut
     const sub = await MemberSubscription.findById(req.params.id).populate({
       path: 'planId',
       select:
-        'name facilityType facilityIds planType status billingCycle durationDays price oneTimeFeeEnabled oneTimeFeeAmount gracePeriodDays trialPeriodDays bookingDiscountPercentage flatDiscountAmount rewardPointsMultiplier freeServiceItems accessRestrictions sessionsLimit memberVisitLimit pointsPerCurrency pointsRedemptionValue minimumRedeemPoints pointsExpiryDays',
+        'name tierName facilityType facilityIds planType status billingCycle durationDays price oneTimeFeeEnabled oneTimeFeeAmount gracePeriodDays trialPeriodDays bookingDiscountPercentage flatDiscountAmount rewardPointsMultiplier freeServiceItems accessRestrictions sessionsLimit memberVisitLimit pointsPerCurrency pointsRedemptionValue minimumRedeemPoints pointsExpiryDays',
       populate: { path: 'facilityIds', select: 'name location active' },
     });
     if (!sub) return res.status(404).json({ success: false, error: 'Subscription not found' });
@@ -633,6 +772,8 @@ router.get('/subscriptions/:id/profile-details', authMiddleware, async (req: Aut
           ? {
               planId: plan._id,
               name: plan.name,
+              tierName: String(plan.tierName || '').trim(),
+              levelLabel: String(plan.tierName || '').trim() || String(plan.name || '').trim() || 'Member',
               planType: plan.planType,
               billingCycle: plan.billingCycle,
               durationDays: Number(plan.durationDays || 0),
@@ -641,6 +782,9 @@ router.get('/subscriptions/:id/profile-details', authMiddleware, async (req: Aut
               flatDiscountAmount: Number(plan.flatDiscountAmount || 0),
               freeServiceItems: Array.isArray(plan.freeServiceItems) ? plan.freeServiceItems : [],
               accessRestrictions: Array.isArray(plan.accessRestrictions) ? plan.accessRestrictions : [],
+              facilityNames: Array.isArray(plan.facilityIds)
+                ? plan.facilityIds.map((facility: any) => String(facility?.name || '').trim()).filter(Boolean)
+                : [],
               sessionsLimit: sessionsLimit,
               sessionsUsed: sessionsUsed,
               sessionsRemaining: sessionsLimit > 0 ? Math.max(0, sessionsLimit - sessionsUsed) : null,
@@ -682,6 +826,7 @@ router.get('/subscriptions/:id/profile-details', authMiddleware, async (req: Aut
 });
 
 router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenPhotoStoragePath = '';
   try {
     const {
       memberName,
@@ -697,11 +842,12 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
       themePreference,
       planId,
       startDate,
+      durationValue,
+      durationUnit,
       amountPaid,
       bookingDiscountPercentage,
       validityReminderDays,
       notes,
-      autoRenewEnabled,
     } = req.body;
     if (!memberName || !planId) {
       return res.status(400).json({ success: false, error: 'memberName and planId are required' });
@@ -726,9 +872,17 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
 
     const start = startDate ? new Date(startDate) : new Date();
     start.setHours(0, 0, 0, 0);
-    const totalDays = Number(plan.durationDays || 0) + Number(plan.trialPeriodDays || 0);
+    const durationOverride = normalizeDurationOverride({ durationValue, durationUnit });
     const end = new Date(start);
-    end.setDate(end.getDate() + Math.max(1, totalDays));
+    if (durationOverride) {
+      const customEnd = addDateDuration(start, durationOverride.value, durationOverride.unit);
+      end.setTime(customEnd.getTime());
+    } else {
+      end.setDate(end.getDate() + Math.max(1, Number(plan.durationDays || 0)));
+    }
+    if (Number(plan.trialPeriodDays || 0) > 0) {
+      end.setDate(end.getDate() + Number(plan.trialPeriodDays || 0));
+    }
     const totalPrice = Number(plan.price || 0) + (plan.oneTimeFeeEnabled ? Number(plan.oneTimeFeeAmount || 0) : 0);
     const paid = amountPaid !== undefined ? Number(amountPaid) : totalPrice;
     const due = round2(Math.max(0, totalPrice - paid));
@@ -741,6 +895,13 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
       Number(plan.gracePeriodDays || 0) > 0
         ? new Date(end.getTime() + Number(plan.gracePeriodDays || 0) * dayMs)
         : undefined;
+    const persistedPhoto = await persistManagedImageValue({
+      imageValue: String(profilePhotoUrl || '').trim(),
+      tenantId: req.tenantId,
+      directorySegments: ['memberships', 'profile-photos'],
+      fileBaseName: String(fullName || memberName || 'member-photo'),
+    });
+    writtenPhotoStoragePath = persistedPhoto.wroteNewFile ? String(persistedPhoto.storagePath || '') : '';
 
     const subscription = await MemberSubscription.create({
       memberCode,
@@ -752,14 +913,15 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
       emergencyContact,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
       gender,
-      profilePhotoUrl,
+      profilePhotoUrl: persistedPhoto.url,
+      profilePhotoStoragePath: persistedPhoto.storagePath || '',
       languagePreference: String(languagePreference || 'en').trim() || 'en',
       themePreference: String(themePreference || 'dark') === 'light' ? 'light' : 'dark',
       planId,
       startDate: start,
       endDate: end,
       renewalDate,
-      autoRenewEnabled: autoRenewEnabled !== undefined ? Boolean(autoRenewEnabled) : Boolean(plan.autoRenew),
+      autoRenewEnabled: false,
       gracePeriodUntil,
       amountPaid: paid,
       amountDue: due,
@@ -783,11 +945,12 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
           endDate: end,
           changedAt: new Date(),
           changedBy: req.userId,
-          notes: 'Initial assignment',
+          notes: durationOverride ? `Initial assignment (${durationOverride.label})` : 'Initial assignment',
         },
       ],
       createdBy: req.userId,
     });
+    writtenPhotoStoragePath = '';
 
     await syncCustomerProfileFromSubscription(subscription, req.userId);
     await pushAudit(req, 'subscription_create', 'member_subscription', subscription._id.toString(), undefined, subscription.toObject(), {
@@ -797,17 +960,22 @@ router.post('/subscriptions', authMiddleware, async (req: AuthenticatedRequest, 
 
     res.status(201).json({ success: true, data: subscription, message: 'Subscription created' });
   } catch (error: any) {
+    if (writtenPhotoStoragePath) {
+      await removeManagedStoredFile(writtenPhotoStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to create subscription' });
   }
 });
 
 router.put('/subscriptions/:id/profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenPhotoStoragePath = '';
   try {
     const subscriptionId = String(req.params.id || '');
     const before = await MemberSubscription.findById(subscriptionId);
     if (!before) return res.status(404).json({ success: false, error: 'Subscription not found' });
 
     const updates = { ...req.body } as any;
+    const previousStoragePath = resolveManagedStoragePath(before.profilePhotoUrl, before.profilePhotoStoragePath);
     if (updates.phone !== undefined) {
       updates.phone = normalizePhone(updates.phone);
       if (!updates.phone) {
@@ -840,21 +1008,52 @@ router.put('/subscriptions/:id/profile', authMiddleware, async (req: Authenticat
     if (updates.languagePreference !== undefined) {
       updates.languagePreference = String(updates.languagePreference || 'en').trim() || 'en';
     }
+    if (updates.profilePhotoUrl !== undefined) {
+      const incomingPhotoValue = String(updates.profilePhotoUrl || '').trim();
+      if (!incomingPhotoValue) {
+        updates.profilePhotoUrl = '';
+        updates.profilePhotoStoragePath = '';
+      } else {
+        const persistedPhoto = await persistManagedImageValue({
+          imageValue: incomingPhotoValue,
+          tenantId: req.tenantId,
+          directorySegments: ['memberships', 'profile-photos'],
+          fileBaseName: String(
+            updates.fullName
+            || updates.memberName
+            || before.fullName
+            || before.memberName
+            || 'member-photo'
+          ),
+        });
+        writtenPhotoStoragePath = persistedPhoto.wroteNewFile ? String(persistedPhoto.storagePath || '') : '';
+        updates.profilePhotoUrl = persistedPhoto.url;
+        updates.profilePhotoStoragePath = persistedPhoto.storagePath || '';
+      }
+    }
 
     const sub = await MemberSubscription.findByIdAndUpdate(subscriptionId, updates, {
       new: true,
       runValidators: true,
     }).populate({
       path: 'planId',
-      select: 'name facilityType facilityIds billingCycle durationDays price sessionsLimit bookingDiscountPercentage',
+      select: 'name tierName facilityType facilityIds billingCycle durationDays price sessionsLimit bookingDiscountPercentage',
       populate: { path: 'facilityIds', select: 'name location active' },
     });
 
     if (!sub) return res.status(404).json({ success: false, error: 'Subscription not found' });
+    const nextStoragePath = resolveManagedStoragePath(sub.profilePhotoUrl, sub.profilePhotoStoragePath);
+    if (previousStoragePath && previousStoragePath !== nextStoragePath) {
+      await removeManagedStoredFile(previousStoragePath);
+    }
+    writtenPhotoStoragePath = '';
     await syncCustomerProfileFromSubscription(sub, req.userId);
     await pushAudit(req, 'subscription_profile_update', 'member_subscription', sub._id.toString(), before.toObject(), sub.toObject());
     res.json({ success: true, data: sub, message: 'Member profile updated' });
   } catch (error: any) {
+    if (writtenPhotoStoragePath) {
+      await removeManagedStoredFile(writtenPhotoStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to update member profile' });
   }
 });
@@ -1180,6 +1379,33 @@ router.post('/subscriptions/:id/reminders/send', authMiddleware, async (req: Aut
     const inputType = String(req.body?.reminderType || '').toLowerCase();
     const computed = computeReminderType(sub, now);
     const reminderType: ReminderType = (['d7', 'd3', 'expiry', 'grace'].includes(inputType) ? inputType : computed || 'd3') as ReminderType;
+    const dryRun = parseBoolean(req.body?.dryRun, false);
+    const confirmSend = parseBoolean(req.body?.confirmSend, false);
+    const preview = buildReminderPreview({
+      subscription: sub,
+      channels,
+      reminderType,
+      now,
+    });
+
+    if (dryRun) {
+      return res.json({
+        success: true,
+        data: {
+          preview,
+          requiresConfirmation: channels.includes('email'),
+        },
+        message: 'Reminder preview prepared',
+      });
+    }
+
+    if (channels.includes('email') && !confirmSend) {
+      return res.status(400).json({
+        success: false,
+        error: 'Preview and confirm email reminder before sending.',
+        data: { preview, requiresConfirmation: true },
+      });
+    }
 
     const result = await sendReminderForSubscription({
       req,
@@ -1263,12 +1489,19 @@ router.post('/reminders/process-renewals', authMiddleware, async (req: Authentic
 
     const days = Math.max(1, Math.min(90, Number(req.body?.days ?? req.query.days ?? 15)));
     const dryRun = parseBoolean(req.body?.dryRun ?? req.query.dryRun, false);
+    const confirmSend = parseBoolean(req.body?.confirmSend ?? req.query.confirmSend, false);
     const channelsInput = Array.isArray(req.body?.channels) ? req.body.channels : ['sms', 'email'];
     const channels = channelsInput
       .map((channel: any) => String(channel || '').toLowerCase())
       .filter((channel: string) => reminderChannels.includes(channel as ReminderChannel)) as ReminderChannel[];
     if (!channels.length) {
       return res.status(400).json({ success: false, error: 'At least one valid channel is required' });
+    }
+    if (channels.includes('email') && !dryRun && !confirmSend) {
+      return res.status(400).json({
+        success: false,
+        error: 'Preview and confirm email reminder batch before sending.',
+      });
     }
 
     const now = new Date();
@@ -1316,12 +1549,22 @@ router.post('/reminders/process-renewals', authMiddleware, async (req: Authentic
       }
 
       if (dryRun) {
+        const preview = buildReminderPreview({
+          subscription: sub,
+          channels,
+          reminderType,
+          now,
+        });
         sent.push({
           memberId: sub._id.toString(),
           memberName: sub.memberName,
           reminderType,
           channels,
           status: 'dry_run',
+          email: preview.email,
+          phone: preview.phone,
+          subject: preview.subject,
+          message: preview.message,
         });
         continue;
       }
@@ -1523,11 +1766,43 @@ router.get('/dashboard/reminders', authMiddleware, async (req: AuthenticatedRequ
       });
     });
 
+    const warningRows = expiring7.map((row: any) => {
+      const reminderType = computeReminderType(row, now);
+      const rows = Array.isArray(row.reminderHistory) ? row.reminderHistory : [];
+      const emailSentToday = rows.some((history: any) => {
+        if (String(history?.channel || '') !== 'email') return false;
+        const sentAt = history?.sentAt ? new Date(history.sentAt) : null;
+        if (!sentAt) return false;
+        return (
+          sentAt.getFullYear() === now.getFullYear()
+          && sentAt.getMonth() === now.getMonth()
+          && sentAt.getDate() === now.getDate()
+        );
+      });
+      return {
+        memberId: row._id.toString(),
+        memberName: row.memberName,
+        memberCode: row.memberCode || '',
+        email: normalizeEmail(row.email),
+        phone: normalizePhone(row.phone),
+        endDate: row.endDate,
+        planName: String((row.planId as any)?.name || ''),
+        reminderType,
+        emailReady: Boolean(normalizeEmail(row.email)),
+        emailSentToday,
+      };
+    });
+    const emailWarningDue = warningRows.filter((row) => row.emailReady && !row.emailSentToday).length;
+    const missingEmailWarningCount = warningRows.filter((row) => !row.emailReady).length;
+
     res.json({
       success: true,
       data: {
         membersExpiringIn7Days: expiring7,
+        warningRows,
         expiringCount: expiring7.length,
+        emailWarningDue,
+        missingEmailWarningCount,
         expiredCount,
         renewedThisMonth,
         renewalRevenue: round2(renewalRevenue),

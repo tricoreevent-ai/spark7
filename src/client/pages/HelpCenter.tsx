@@ -46,6 +46,7 @@ type MenuSection = {
 };
 
 type ReportTopic = {
+  id?: string;
   name: string;
   explanation: string;
 };
@@ -190,8 +191,8 @@ const moduleSummaries: ModuleSummary[] = [
     navigation: 'Top menu > Sales',
     purpose: 'The Sales module manages all customer-related transactions and revenue activity in a structured way.',
     description:
-      'It handles the full sales cycle from quotations and customer handling to orders, returns, and performance review. It ensures that all commercial transactions are recorded and easy to trace later.',
-    keyUses: ['Manage customer orders', 'Provide quotations', 'Track sales', 'Handle returns', 'View sales reports'],
+      'It handles the full sales cycle from dashboard monitoring, quotations, and CRM handling to orders, returns, campaigns, and performance review. It ensures that all commercial transactions are recorded and easy to trace later.',
+    keyUses: ['Open sales dashboard actions', 'Manage customer orders', 'Provide quotations', 'Handle CRM follow-up and campaigns', 'View sales reports'],
     links: [
       { label: 'Sales Dashboard', to: '/sales-dashboard' },
       { label: 'Sales Orders', to: '/orders' },
@@ -263,7 +264,28 @@ const moduleSummaries: ModuleSummary[] = [
     links: [
       { label: 'Accounting', to: '/accounting' },
       { label: 'Settlements', to: '/accounting/settlements' },
+      { label: 'Validation Dashboard', to: '/accounting/validation' },
       { label: 'Reports', to: '/reports' },
+    ],
+  },
+  {
+    id: 'module-validation',
+    title: 'Validation',
+    route: '/accounting/validation',
+    navigation: 'Top menu > Validation > Validation Dashboard',
+    purpose: 'The Validation module checks accounting health before management review, audit, and statutory work.',
+    description:
+      'It runs read-only accounting checks such as trial balance equality, balance sheet equation, TDS reconciliation, missing number sequences, closed-period postings, orphan references, and suspense balances. It also gives a Validation Command Center log, run history, drill-down review, and assistant guidance while keeping accounting data unchanged.',
+    keyUses: [
+      'Run accounting validation checks',
+      'Review critical and warning findings',
+      'Drill down into failed checks',
+      'Export validation reports for audit follow-up',
+      'Configure scheduled validation alerts',
+    ],
+    links: [
+      { label: 'Open Validation Dashboard', to: '/accounting/validation' },
+      { label: 'Open Accounting Reports', to: '/accounting?tab=reports' },
     ],
   },
   {
@@ -273,12 +295,13 @@ const moduleSummaries: ModuleSummary[] = [
     navigation: 'Top menu > Admin',
     purpose: 'The Admin module controls system configuration and access.',
     description:
-      'It allows administrators to manage users, permissions, business settings, company setup, mail and print preferences, and other shared system behavior across the organization.',
-    keyUses: ['Manage users', 'Control access', 'Configure system'],
+      'It allows administrators to manage users, permissions, business settings, company setup, mail and print preferences, admin reporting, and other shared system behavior across the organization.',
+    keyUses: ['Manage users', 'Control access', 'Configure system', 'Review admin activity reports'],
     links: [
       { label: 'Settings', to: '/settings' },
       { label: 'Users', to: '/user-management' },
       { label: 'Company Create', to: '/admin/company-create' },
+      { label: 'Admin Reports', to: '/admin/reports' },
     ],
   },
 ];
@@ -480,10 +503,25 @@ const menuSections: MenuSection[] = [
     accent: 'from-emerald-500/20 via-teal-500/10 to-transparent',
     pages: [
       {
+        id: 'sales-dashboard',
+        title: 'Sales Dashboard',
+        route: '/sales-dashboard',
+        navigation: 'Top menu > Sales > Sales Dashboard',
+        purpose: 'Gives the sales team a quick action and monitoring workspace.',
+        description:
+          'This dashboard brings together sales shortcuts, seven-day sales trend visibility, and product stock alerts so the front desk or sales team can move quickly between billing, returns, analytics, and stock-sensitive selling decisions.',
+        keyUses: ['Open POS quickly', 'Review recent sales trend', 'Track stock alerts before selling', 'Jump to orders, returns, and reports'],
+        links: [
+          { label: 'Open Sales Dashboard', to: '/sales-dashboard' },
+          { label: 'Open Sales Orders', to: '/orders' },
+          { label: 'Open Reports', to: '/reports' },
+        ],
+      },
+      {
         id: 'sales-orders',
         title: 'Sales Orders',
         route: '/orders',
-        navigation: 'Top menu > Sales > Orders',
+        navigation: 'Top menu > Sales > Sales Orders',
         purpose: 'Records confirmed sales.',
         description:
           'This page tracks completed transactions and allows users to review the history of confirmed sales. It is the main operational record for finalized customer orders.',
@@ -531,8 +569,8 @@ const menuSections: MenuSection[] = [
         navigation: 'Top menu > Sales > Reports',
         purpose: 'Provides sales insights.',
         description:
-          'This page analyzes business performance by showing operational and revenue information through filters, tabs, exports, and summaries. It helps users understand what is happening in the business over time.',
-        keyUses: ['Analyze performance', 'Review business data', 'Support decision-making'],
+          'This page is the tabbed Sales & POS reporting workspace. It combines store-level finance views, sales analysis, GST verification datasets, operational attendance, receivable follow-up, inventory movement, membership sales, and export tools in one place.',
+        keyUses: ['Switch report tabs by business question', 'Filter reports by date range', 'Export the active report to Excel or PDF', 'Review GST handoff and reconciliation datasets'],
         links: [
           { label: 'Open Reports', to: '/reports' },
           { label: 'Open Sales Orders', to: '/orders' },
@@ -541,17 +579,64 @@ const menuSections: MenuSection[] = [
       },
       {
         id: 'customers',
-        title: 'Customers and CRM',
+        title: 'Customer Profiles',
         route: '/customers/profiles',
-        navigation: 'Sales > Customers > Profiles / Enquiries / Campaigns / Reports',
-        purpose: 'Runs the customer CRM desk.',
+        navigation: 'Top menu > Sales > Customer Profiles',
+        purpose: 'Maintains customer master and preference details.',
         description:
-          'This page combines customer profiles, enquiry follow-up, campaigns, visit and payment history, repeat-customer review, and customer collection watchlists in one place. It helps the team convert leads faster and serve repeat customers with better context.',
-        keyUses: ['Maintain customer profiles', 'Track enquiries and follow-up', 'Run campaigns', 'Review CRM reports'],
+          'This route opens the CRM desk on the Profiles tab. Users create and maintain the main customer record here, including contact details, optional email and address, preferences, notes, contact roles, and readiness for booking or sales use.',
+        keyUses: ['Create customer profiles', 'Maintain customer preferences', 'Store contact roles and notes', 'Prepare reusable customer master data'],
         links: [
           { label: 'Open Customer Profiles', to: '/customers/profiles' },
           { label: 'Open Customer Enquiries', to: '/customers/enquiries' },
+          { label: 'Open CRM Campaigns', to: '/customers/campaigns' },
           { label: 'Open Customer Reports', to: '/customers/reports' },
+        ],
+      },
+      {
+        id: 'customer-enquiries',
+        title: 'CRM Enquiries',
+        route: '/customers/enquiries',
+        navigation: 'Top menu > Sales > CRM Enquiries',
+        purpose: 'Tracks leads, follow-up, and conversion progress.',
+        description:
+          'This route opens the CRM desk on the Enquiries tab. Teams capture walk-in, phone, and website leads here, assign owners, track next actions, link an enquiry to an existing or new customer, and convert the enquiry into a quotation or booking flow.',
+        keyUses: ['Capture new leads', 'Assign follow-up ownership', 'Track enquiry status', 'Convert leads into sales activity'],
+        links: [
+          { label: 'Open Customer Enquiries', to: '/customers/enquiries' },
+          { label: 'Open Customer Profiles', to: '/customers/profiles' },
+          { label: 'Open Quotations', to: '/sales/quotes' },
+          { label: 'Open Facility Booking', to: '/facilities' },
+        ],
+      },
+      {
+        id: 'customer-campaigns',
+        title: 'CRM Campaigns',
+        route: '/customers/campaigns',
+        navigation: 'Top menu > Sales > CRM Campaigns',
+        purpose: 'Runs brochure campaigns and saved follow-up drafts.',
+        description:
+          'This route opens the CRM desk on the Campaigns tab. Users can draft promotional communication, segment recipients, save campaign drafts, send brochure-style outreach, and keep campaign activity inside the CRM instead of separate spreadsheets or mail tools.',
+        keyUses: ['Create campaign drafts', 'Send brochure campaigns', 'Keep campaign history', 'Reuse customer CRM data for outreach'],
+        links: [
+          { label: 'Open CRM Campaigns', to: '/customers/campaigns' },
+          { label: 'Open Customer Profiles', to: '/customers/profiles' },
+          { label: 'Open CRM Reports', to: '/customers/reports' },
+        ],
+      },
+      {
+        id: 'customer-reports',
+        title: 'CRM Reports',
+        route: '/customers/reports',
+        navigation: 'Top menu > Sales > CRM Reports',
+        purpose: 'Shows CRM conversion, retention, and collection trends.',
+        description:
+          'This route opens the CRM desk on the Reports tab. It summarizes customer counts, enquiry conversion rate, repeat-customer trends, preferred facilities and time slots, pending follow-up cases, and collection watchlist signals for sales and front desk review.',
+        keyUses: ['Review CRM performance', 'Track conversion rate', 'Monitor repeat-customer behaviour', 'Watch collection follow-up cases'],
+        links: [
+          { label: 'Open CRM Reports', to: '/customers/reports' },
+          { label: 'Open Customer Profiles', to: '/customers/profiles' },
+          { label: 'Open Customer Enquiries', to: '/customers/enquiries' },
           { label: 'Open Quotations', to: '/sales/quotes' },
         ],
       },
@@ -718,6 +803,36 @@ const menuSections: MenuSection[] = [
     ],
   },
   {
+    id: 'validation-menu',
+    title: 'Validation Menu',
+    summary:
+      'The Validation menu is a separate accountant-friendly workspace for checking whether reports and ledgers are reliable before decision making.',
+    accent: 'from-emerald-500/20 via-cyan-500/10 to-transparent',
+    pages: [
+      {
+        id: 'validation-dashboard-page',
+        title: 'Validation Dashboard',
+        route: '/accounting/validation',
+        navigation: 'Top menu > Validation > Validation Dashboard',
+        purpose: 'Runs read-only accounting validation and shows exceptions with drill-down evidence.',
+        description:
+          'This dashboard calls the validation APIs to run checks without modifying accounting collections. The page includes a live Validation Command Center log panel, run controls and schedule settings, summary cards, health gauge, run timeline, saved report list, detailed failures, drill-down records, export options, repair support for selected findings, and an assistant panel for common accounting questions.',
+        keyUses: [
+          'Run Full Validation Now',
+          'Watch activity logs in the Validation Command Center',
+          'Review critical, warning, info, and passed checks',
+          'Open failed checks and read likely causes',
+          'Drill down into source records behind a failure',
+          'Export validation results to PDF or Excel',
+        ],
+        links: [
+          { label: 'Open Validation Dashboard', to: '/accounting/validation' },
+          { label: 'Open Accounting Reports', to: '/accounting?tab=reports' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'admin-menu',
     title: 'Admin Menu',
     summary:
@@ -769,6 +884,21 @@ const menuSections: MenuSection[] = [
           { label: 'Open Users', to: '/user-management' },
         ],
       },
+      {
+        id: 'admin-reports',
+        title: 'Admin Reports',
+        route: '/admin/reports',
+        navigation: 'Top menu > Admin > Reports',
+        purpose: 'Reviews system activity, audit trails, and login events.',
+        description:
+          'This page is the admin-facing reporting workspace for system controls. It provides an overview of audit volume and warning thresholds, then splits into Audit Logs, Login Activity, and Transaction Logs so administrators can search system actions, export review data, and manage retention housekeeping.',
+        keyUses: ['Review overview metrics', 'Search audit logs', 'Track login activity', 'Inspect transaction log history', 'Export admin report data'],
+        links: [
+          { label: 'Open Admin Reports', to: '/admin/reports' },
+          { label: 'Open Settings', to: '/settings' },
+          { label: 'Open Users', to: '/user-management' },
+        ],
+      },
     ],
   },
 ];
@@ -799,6 +929,7 @@ const navigationFlowSteps: string[] = [
   'Sales team manages customers, quotations, orders, returns, and commercial follow-up.',
   'People module maintains employees, attendance, shifts, and payroll processing.',
   'Accounts tracks financial transactions, reconciliation, settlements, and reporting for management review.',
+  'Validation checks the accounting data health separately before audit, filing, or fresh test cycles.',
 ];
 
 const finalSummaryPoints: string[] = [
@@ -840,8 +971,29 @@ const reportLogicSections: ReportLogicSection[] = [
     id: 'report-logic-sales',
     title: 'Sales And Customer Reports',
     description:
-      'These reports summarize invoices, item lines, customers, returns, tax, user performance, and pending collections.',
+      'These reports summarize store-level finance, sales activity, GST datasets, customer balances, inventory movement, membership billing, and operational sales performance.',
     topics: [
+      {
+        id: 'sales-reports-tabs',
+        name: 'Sales Reports Menu Tabs',
+        explanation:
+          'The Sales & POS Reports page is a tabbed workspace. Use the top date filter first, then open the required tab from the Reports Menu. The available tabs cover store-level Profit & Loss, Balance Sheet, shift summaries, day-wise sales, item and customer analysis, returns, gross profit, GST classification and note registers, sales registers, payment reconciliation, Z-report, POS inventory movement, membership sales, GST handoff datasets, receivables, attendance, cash vs credit, user-wise sales, and tax summary. The active tab can be exported to Excel or PDF.',
+      },
+      {
+        name: 'Profit & Loss (Store-level)',
+        explanation:
+          'This tab shows income minus expense for the selected period from the sales-side reporting workspace. It is useful for a fast store-level profitability review without opening the full accounting console.',
+      },
+      {
+        name: 'Balance Sheet (Store-level)',
+        explanation:
+          'This tab shows a store-level position view for assets, liabilities, and net balance as of the selected period end. It helps management compare operating position against the sales-side activity period.',
+      },
+      {
+        name: 'Sales Summary (Daily / Shift)',
+        explanation:
+          'This tab groups sales by business day and shift so the team can compare counters, timings, and day-close performance. It is useful for front desk and cash-control review.',
+      },
       {
         name: 'Daily Sales Summary',
         explanation:
@@ -868,14 +1020,74 @@ const reportLogicSections: ReportLogicSection[] = [
           'Compares what was sold against the saved item cost. Revenue is sales value, cost of goods is item cost, and gross profit is the difference between them.',
       },
       {
+        name: 'HSN-wise Sales',
+        explanation:
+          'Groups posted sales by HSN or SAC classification so the business can review taxable value, tax amount, and product classification volume for GST-facing work.',
+      },
+      {
+        name: 'Taxable / Exempt / Nil / Non-GST',
+        explanation:
+          'Separates billed values into GST treatment buckets. It helps users understand how much revenue was taxable and how much was exempt, nil-rated, or outside GST.',
+      },
+      {
+        name: 'B2B vs B2C Invoice Report',
+        explanation:
+          'Splits invoices into registered-party and consumer billing groups. This is useful for GST review, invoice scrutiny, and return-preparation cross-checking.',
+      },
+      {
+        name: 'Credit / Debit Note Register (GST)',
+        explanation:
+          'Shows GST-impacting note activity linked to sales corrections. It helps users review why taxable value or tax changed after the original billing cycle.',
+      },
+      {
+        name: 'Sales Register (Detailed)',
+        explanation:
+          'Lists invoice-level rows with customer, document, tax, value, and status details. It acts as the most detailed sales register for audit review and export.',
+      },
+      {
+        name: 'Payment Reconciliation Report',
+        explanation:
+          'Compares invoice-side values with recorded payment-side values so the team can identify what is settled, partially settled, or still mismatched.',
+      },
+      {
+        name: 'Z-Report (End of Day)',
+        explanation:
+          'Summarizes the end-of-day sales closure view for counter operations. It helps verify daily billing totals, payment mix, and shift-close confidence before handoff.',
+      },
+      {
+        name: 'Inventory Movement (POS only)',
+        explanation:
+          'Shows stock movement caused by POS selling activity only. It helps the team review how billing reduced item quantities without mixing procurement-side stock changes.',
+      },
+      {
+        name: 'Membership Sales Report',
+        explanation:
+          'Separately summarizes plan and membership-related billing captured through sales flows. It helps users review subscription-linked revenue without opening the memberships module.',
+      },
+      {
+        name: 'GST Handoff Datasets',
+        explanation:
+          'Prepares GST-facing export or verification datasets from sales-side transactions. It is used as handoff data for deeper GST workspace review and filing preparation.',
+      },
+      {
         name: 'Outstanding Receivables',
         explanation:
           'Lists posted credit invoices that still have balance left to collect. Total outstanding is the sum of all remaining unpaid amounts.',
       },
       {
-        name: 'Cash vs Credit And User-wise Sales',
+        name: 'Attendance Report',
         explanation:
-          'Cash vs Credit separates invoices by invoice type, while User-wise Sales groups invoices by the staff user who handled them and shows totals by payment mode.',
+          'This report surfaces attendance-linked operational counts inside the sales reporting workspace for quick management comparison with business activity in the same period.',
+      },
+      {
+        name: 'Cash vs Credit Sales',
+        explanation:
+          'Separates invoices by invoice type so the team can compare immediate collections against receivable-based billing. Each side shows invoice count and value.',
+      },
+      {
+        name: 'User-wise Sales',
+        explanation:
+          'Groups invoices by the staff user who handled them and shows count, total billed value, and payment-mode mix such as cash, card, and UPI.',
       },
       {
         name: 'Tax Summary',
@@ -942,34 +1154,93 @@ const reportLogicSections: ReportLogicSection[] = [
       'These reports explain how income, expense, balances, vouchers, books, and day-end collections are derived.',
     topics: [
       {
-        name: 'Income And Expense Reports',
+        id: 'accounting-dashboard-logic',
+        name: 'Accounting Dashboard',
         explanation:
-          'Income combines posted sales and manual income entries. Expense combines manual expenses, salary payments, contract payments, and approved refund-related outflows.',
+          'The dashboard uses the selected period and current accounting data to show selected revenue, month-to-date revenue, expense, profit, GST payable, recent activity, and compliance snapshots. Selected Revenue is income posted between the chosen start and end dates. Month-to-date Revenue is income from the first day of the selected end-date month through the selected end date. Expense includes posted expense ledger movement inside the selected range, with payroll, contract cost, and legacy fallback expenses used only where a ledger posting is not already available.',
       },
       {
+        id: 'accounting-report-logic',
+        name: 'Accounting Reports Overview',
+        explanation:
+          'The overview tab combines the selected date range into Total Income, Total Expense, Net Profit/Loss, Balance Sheet position, TDS snapshot, recent accounting activity, and recent journal entries. Total Income is income ledger credits minus income ledger debits, with legacy sales or manual income fallback rows included only where required. Total Expense is expense ledger debits minus expense ledger credits, with payroll, contract, and manual expense fallback rows included only where required.',
+      },
+      {
+        id: 'accounting-trial-balance-logic',
         name: 'Trial Balance',
         explanation:
-          'Starts with the opening balance of each account, adds period debits, subtracts period credits, and shows the closing balance for that account.',
+          'Trial Balance starts with each ledger opening balance, adds all debit movement inside the selected period, subtracts all credit movement inside the selected period, and calculates closing balance. Debit balance and credit balance are derived from that closing balance. The total debit balance should equal total credit balance when the books are balanced.',
       },
       {
+        id: 'accounting-profit-loss-logic',
         name: 'Profit And Loss',
         explanation:
-          'Compares total income against total expense for the selected period. Net profit is simply income minus expense.',
+          'Profit & Loss compares period income against period expenses. Income is income-ledger credits minus debits, excluding opening entries. Expense is expense-ledger debits minus credits, excluding opening entries. Net Profit/Loss is Total Income minus Total Expense. Legacy sales, day book, salary, and contract rows are used only as fallback when source documents do not already have ledger postings.',
       },
       {
+        id: 'accounting-balance-sheet-logic',
         name: 'Balance Sheet',
         explanation:
-          'Shows the business position as on a date by listing asset balances on one side and liability or earnings balances on the other side.',
+          'Balance Sheet is calculated as on the selected end date. Assets use debit-positive closing balances of asset accounts. Liabilities use credit-positive closing balances of liability accounts. Equity includes capital, opening balance accounts, and retained earnings. Retained earnings is profit or loss accumulated up to the selected date. Difference is Assets minus Liabilities plus Equity, and should become zero after diagnostics are resolved.',
       },
       {
-        name: 'Cash Book And Bank Book',
+        id: 'accounting-tds-report-logic',
+        name: 'TDS Report Suite',
         explanation:
-          'Show all entries that affected cash or bank during the period, including receipts, payments, expenses, transfers, and collections.',
+          'TDS reports follow the complete deduction lifecycle. TDS Deducted is the sum of TDS transaction amounts. Deposited is the non-cancelled challan payment recorded against TDS. Outstanding is deducted amount minus deposited or allocated amount. The suite also includes computation, payables, outstanding, quarterly returns, certificates, 26AS/AIS reconciliation, mismatch checks, challan status, payment register, correction returns, audit trail, and Tax Audit Clause 34(a).',
+      },
+      {
+        id: 'accounting-master-report-logic',
+        name: 'Master Reports',
+        explanation:
+          'Vendor, asset, and financial-period reports come from master setup. Vendor balances use vendor opening balance and linked supplier ledger movement where available. Fixed asset book value is cost minus accumulated depreciation posted through asset workflows. Financial period status tells the system whether a date range is open or locked.',
+      },
+      {
+        id: 'accounting-transaction-report-logic',
+        name: 'Invoice, Payment, And Voucher Reports',
+        explanation:
+          'Invoice balance is invoice total minus paid amount. Payment reports show posted customer and vendor payment amounts by party and mode. Voucher reports show receipt, payment, journal, and transfer vouchers. Balanced vouchers must have equal debit and credit ledger lines.',
+      },
+      {
+        id: 'accounting-payroll-report-logic',
+        name: 'Salary And Contract Reports',
+        explanation:
+          'Salary reports show gross salary, statutory deductions, voluntary deductions, net pay, employer payroll taxes, benefits expense, and total payroll cost. Net Pay is Gross Salary minus deductions. Total Payroll Cost is Gross Salary plus employer payroll taxes plus benefits expense. Contract reports show contractor payments and TDS status where applicable.',
+      },
+      {
+        id: 'accounting-book-report-logic',
+        name: 'Day Book, Cash Book, And Bank Book',
+        explanation:
+          'Day Book is the chronological register of manual income, manual expense, and operational accounting movement. Cash Book includes only entries that affect cash-in-hand accounts, and closing cash is opening cash plus cash inflows minus cash outflows. Bank Book includes only entries that affect bank accounts, and closing bank is opening bank balance plus bank inflows minus bank outflows.',
       },
       {
         name: 'MIS Summary, Collections, And Day-End',
         explanation:
           'The MIS summary combines major income and expense totals. Daily collection compares cash sales, cash receipts, and cash expenses. Day-end starts with opening cash, applies the day’s cash movement, and compares system cash with physical cash counted.',
+      },
+    ],
+  },
+  {
+    id: 'report-logic-validation',
+    title: 'Validation Dashboard And Accounting Health',
+    description:
+      'These checks are separate from normal reports. They help accountants confirm whether report totals can be trusted.',
+    topics: [
+      {
+        id: 'validation-dashboard-logic',
+        name: 'Validation Dashboard',
+        explanation:
+          'The Validation Dashboard calls the read-only validation API. It runs checks such as double-entry integrity, trial balance, balance sheet equation, TDS/GST reconciliation, missing sequences, closed-period postings, orphan references, suspense balances, depreciation checks, and round-off differences. Results are stored in validation report collections and do not modify existing accounting transactions.',
+      },
+      {
+        name: 'Validation Health Score',
+        explanation:
+          'The health score is a management indicator based on how many checks passed and how many critical or warning failures exist. Critical issues reduce confidence most, warnings reduce it moderately, and passed checks improve the score.',
+      },
+      {
+        name: 'Drill Down And False Positive Feedback',
+        explanation:
+          'When a check fails, the user can open drill-down data to see the source records behind the issue. If an auditor confirms the issue is acceptable, the feedback is saved separately without changing accounting data.',
       },
     ],
   },
@@ -1217,7 +1488,14 @@ const sampleEntrySections: SampleEntryGroup[] = [
         sample:
           'Against the purchase order, receive Shuttle quantity 40, Warehouse Main Store, Batch SH-APR-26-A, Expiry Date 2027-04-01.',
         result:
-          'Stock on hand increases and inventory movement shows a stock-in entry.',
+          'Stock on hand increases and inventory movement shows a stock-in entry. After receipt, use Create Bill to post inventory value debit and supplier payable credit to accounting.',
+      },
+      {
+        title: 'Create Purchase Bill From Receipt',
+        sample:
+          'After receiving goods for PO-20260412-00001, click Create Bill in Procurement.',
+        result:
+          'The system creates or recreates the linked purchase bill, posts a journal entry to Stock in Hand and Accounts Payable, and writes audit history.',
       },
       {
         title: 'Purchase Return',
@@ -1413,11 +1691,11 @@ const transactionGuideSections: TransactionGuideSection[] = [
         whatItDoes:
           'Use this screen to generate payroll for a selected month after attendance has been recorded.',
         businessLogic:
-          'The system reads the month, checks attendance and pay setup, and then calculates payable days, overtime, base pay, overtime pay, and total payout for each employee.',
+          'The system reads the month, checks attendance and pay setup, calculates payable days, overtime, gross pay, PF, ESI, professional tax, salary TDS, employer PF/ESI contribution, total deductions, and net payout for each employee.',
         practicalExample:
-          'Choose Month 2026-04 and click Generate. Review the table for employee count, total payout, payable days, overtime hours, and total salary.',
+          'Choose Month 2026-04 and click Generate. Review the table for employee count, net payout, employer contribution, payable days, gross salary, deductions, and net salary.',
         reportFlow:
-          'Payroll output helps HR and finance review salary liability for the month and supports salary payment planning.',
+          'Payroll output helps HR and finance review salary liability, statutory deductions, employer contribution, and salary payment planning for the month.',
         note:
           'The help button on this screen opens this manual section directly.',
       },
@@ -1821,7 +2099,12 @@ const topicIndexGroups: TopicIndexGroup[] = [
     title: 'Reports And Examples',
     links: [
       { id: 'report-logic', label: 'Report Logic In Simple Terms' },
-      ...reportLogicSections.map((section) => ({ id: section.id, label: section.title })),
+      ...reportLogicSections.flatMap((section) => [
+        { id: section.id, label: section.title },
+        ...section.topics
+          .filter((topic) => Boolean(topic.id))
+          .map((topic) => ({ id: String(topic.id), label: `${section.title}: ${topic.name}` })),
+      ]),
       { id: 'sample-entries', label: 'Sample Data Entry Examples' },
       ...sampleEntrySections.map((section) => ({ id: section.id, label: section.title })),
       { id: 'report-data-flow', label: 'How Data Moves From Entry Screen To Report' },
@@ -2333,7 +2616,11 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                 <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
                 <div className="mt-5 grid items-start gap-3 xl:grid-cols-2">
                   {section.topics.map((topic) => (
-                    <div key={`${section.id}-${topic.name}`} className="rounded-2xl border border-white/10 bg-gray-950/30 p-4">
+                    <div
+                      key={`${section.id}-${topic.name}`}
+                      id={topic.id}
+                      className="scroll-mt-28 rounded-2xl border border-white/10 bg-gray-950/30 p-4"
+                    >
                       <p className="text-sm font-semibold text-cyan-200">{topic.name}</p>
                       <p className="mt-2 text-sm leading-6 text-gray-300">{topic.explanation}</p>
                     </div>

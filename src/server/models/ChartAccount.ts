@@ -9,6 +9,11 @@ export interface IChartAccount extends Document {
   accountName: string;
   accountType: AccountType;
   subType: AccountSubType;
+  groupId?: mongoose.Types.ObjectId;
+  groupName?: string;
+  towerBlockFlat?: string;
+  gstNumber?: string;
+  panNumber?: string;
   parentAccountId?: mongoose.Types.ObjectId;
   systemKey?: string;
   openingBalance: number;
@@ -36,6 +41,15 @@ const ChartAccountSchema = new Schema<IChartAccount>(
       default: 'general',
       index: true,
     },
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AccountGroup',
+      index: true,
+    },
+    groupName: { type: String, trim: true, index: true },
+    towerBlockFlat: { type: String, trim: true },
+    gstNumber: { type: String, trim: true, uppercase: true },
+    panNumber: { type: String, trim: true, uppercase: true },
     parentAccountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ChartAccount',

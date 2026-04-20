@@ -36,7 +36,7 @@ export interface IAccountingInvoice extends Document {
 
 const AccountingInvoiceSchema = new Schema<IAccountingInvoice>(
   {
-    invoiceNumber: { type: String, required: true, trim: true, index: true, unique: true },
+    invoiceNumber: { type: String, required: true, trim: true, index: true },
     invoiceDate: { type: Date, required: true, default: Date.now, index: true },
     dueDate: { type: Date, index: true },
     customerId: { type: String, trim: true, index: true },

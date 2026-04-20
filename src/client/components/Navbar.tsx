@@ -23,12 +23,14 @@ interface NavbarProps {
   showCompanyCreationMenu?: boolean;
 }
 
-type MenuCategory = 'Home' | 'Sales' | 'Catalog' | 'People' | 'Operations' | 'Accounts' | 'Admin';
+type MenuCategory = 'Home' | 'Sales' | 'Catalog' | 'People' | 'Operations' | 'Accounts' | 'Validation' | 'Admin';
 type SearchableMenuItem = {
   path: string;
   name: string;
   icon: string;
   categories: MenuCategory[];
+  breadcrumb?: string;
+  keywords?: string[];
 };
 
 const menuItems = [
@@ -38,7 +40,8 @@ const menuItems = [
   { key: 'sales' as PageKey, name: 'Quotations', path: '/sales/quotes', category: 'Sales' as MenuCategory, icon: '🧾' },
   { key: 'returns' as PageKey, name: 'Returns', path: '/returns', category: 'Sales' as MenuCategory, icon: '↩️' },
   { key: 'reports' as PageKey, name: 'Reports', path: '/reports', category: 'Sales' as MenuCategory, icon: '📈' },
-  { key: 'customers' as PageKey, name: 'Customer Profiles', path: '/customers/profiles', category: 'Sales' as MenuCategory, icon: '🧑' },
+  { key: 'customers' as PageKey, name: 'Customer Directory', path: '/customers/directory', category: 'Sales' as MenuCategory, icon: '🧑' },
+  { key: 'customers' as PageKey, name: 'Customer Profiles', path: '/customers/profiles', category: 'Sales' as MenuCategory, icon: '🪪' },
   { key: 'customers' as PageKey, name: 'CRM Enquiries', path: '/customers/enquiries', category: 'Sales' as MenuCategory, icon: '📞' },
   { key: 'customers' as PageKey, name: 'CRM Campaigns', path: '/customers/campaigns', category: 'Sales' as MenuCategory, icon: '📣' },
   { key: 'customers' as PageKey, name: 'CRM Reports', path: '/customers/reports', category: 'Sales' as MenuCategory, icon: '📊' },
@@ -55,6 +58,7 @@ const menuItems = [
   { key: 'shifts' as PageKey, name: 'Shifts', path: '/shifts', category: 'People' as MenuCategory, icon: '🗓️' },
   { key: 'payroll' as PageKey, name: 'Payroll', path: '/payroll', category: 'People' as MenuCategory, icon: '🧾' },
   { key: 'facilities' as PageKey, name: 'Facility Setup', path: '/facilities/setup', category: 'Operations' as MenuCategory, icon: '🛠️' },
+  { key: 'facilities' as PageKey, name: 'Service Desk', path: '/services', category: 'Operations' as MenuCategory, icon: '🧰' },
   { key: 'facilities' as PageKey, name: 'Facility Booking', path: '/facilities', category: 'Operations' as MenuCategory, icon: '🏟️' },
   { key: 'facilities' as PageKey, name: 'Event Booking', path: '/events', category: 'Operations' as MenuCategory, icon: '📅' },
   { key: 'event-quotations' as PageKey, name: 'Event Quotations', path: '/events/quotations', category: 'Operations' as MenuCategory, icon: '📑' },
@@ -64,12 +68,57 @@ const menuItems = [
   { key: 'memberships' as PageKey, name: 'Membership Reports', path: '/membership-reports', category: 'Operations' as MenuCategory, icon: '📊' },
   { key: 'accounting' as PageKey, name: 'Accounting', path: '/accounting', category: 'Accounts' as MenuCategory, icon: '📚' },
   { key: 'accounting' as PageKey, name: 'Settlements', path: '/accounting/settlements', category: 'Accounts' as MenuCategory, icon: '💳' },
+  { key: 'accounting' as PageKey, name: 'Validation Dashboard', path: '/accounting/validation', category: 'Validation' as MenuCategory, icon: '✅' },
   { key: 'settings' as PageKey, name: 'Settings', path: '/settings', category: 'Admin' as MenuCategory, icon: '⚙️' },
   { key: 'user-management' as PageKey, name: 'Users', path: '/user-management', category: 'Admin' as MenuCategory, icon: '🛡️' },
   { key: 'admin-reports' as PageKey, name: 'Reports', path: '/admin/reports', category: 'Admin' as MenuCategory, icon: '🗂️' },
 ];
 
-const categoryOrder: MenuCategory[] = ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Accounts', 'Admin'];
+const accountingSearchShortcuts: SearchableMenuItem[] = [
+  { name: 'MIS Dashboard', path: '/accounting?tab=dashboard', categories: ['Accounts'], icon: '📊', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'Invoices & Payments', path: '/accounting?tab=invoices', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'Vendors / Assets / Periods', path: '/accounting?tab=masters', categories: ['Accounts'], icon: '🏷️', breadcrumb: 'Accounts / Accounting Console', keywords: ['vendor master', 'fixed assets', 'financial periods'] },
+  { name: 'Salary & Contract', path: '/accounting?tab=payments', categories: ['Accounts'], icon: '💼', breadcrumb: 'Accounts / Accounting Console', keywords: ['salary entry', 'contract entry'] },
+  { name: 'Opening Balances', path: '/accounting?tab=opening', categories: ['Accounts'], icon: '⚖️', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'Expenses & Income', path: '/accounting?tab=expenses', categories: ['Accounts'], icon: '💸', breadcrumb: 'Accounts / Accounting Console', keywords: ['day book entry'] },
+  { name: 'Vouchers', path: '/accounting?tab=vouchers', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Accounting Console', keywords: ['receipt voucher', 'payment voucher', 'journal voucher', 'transfer voucher'] },
+  { name: 'Cash & Bank Book', path: '/accounting?tab=books', categories: ['Accounts'], icon: '🏦', breadcrumb: 'Accounts / Accounting Console', keywords: ['cash book', 'bank book', 'bank reconciliation'] },
+  { name: 'Treasury & Banks', path: '/accounting?tab=treasury', categories: ['Accounts'], icon: '🏛️', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'Chart & Ledger', path: '/accounting?tab=ledger', categories: ['Accounts'], icon: '📒', breadcrumb: 'Accounts / Accounting Console', keywords: ['ledger view', 'chart accounts'] },
+  { name: 'GST & Filing', path: '/accounting?tab=gst', categories: ['Accounts'], icon: '🧮', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'TDS Compliance', path: '/accounting?tab=tds', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Accounting Console' },
+  { name: 'Accounting Reports', path: '/accounting?tab=reports', categories: ['Accounts'], icon: '📈', breadcrumb: 'Accounts / Accounting Console', keywords: ['reports menu'] },
+  { name: 'Accounting Validation Dashboard', path: '/accounting/validation', categories: ['Validation'], icon: '✅', breadcrumb: 'Validation / Accounting Health', keywords: ['audit validation', 'trial balance validation', 'ca validation', 'accounting health'] },
+  { name: 'Report: Vendors', path: '/accounting?tab=reports&report=vendors', categories: ['Accounts'], icon: '🏷️', breadcrumb: 'Accounts / Reports', keywords: ['vendor report'] },
+  { name: 'Report: Assets', path: '/accounting?tab=reports&report=assets', categories: ['Accounts'], icon: '🧱', breadcrumb: 'Accounts / Reports', keywords: ['fixed asset report'] },
+  { name: 'Report: Periods', path: '/accounting?tab=reports&report=periods', categories: ['Accounts'], icon: '🗓️', breadcrumb: 'Accounts / Reports', keywords: ['financial period report'] },
+  { name: 'Report: Invoices', path: '/accounting?tab=reports&report=invoices', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Reports', keywords: ['invoice report'] },
+  { name: 'Report: Payments', path: '/accounting?tab=reports&report=payments', categories: ['Accounts'], icon: '💳', breadcrumb: 'Accounts / Reports', keywords: ['payment report'] },
+  { name: 'Report: Vouchers', path: '/accounting?tab=reports&report=vouchers', categories: ['Accounts'], icon: '📄', breadcrumb: 'Accounts / Reports', keywords: ['voucher report'] },
+  { name: 'Report: Salary', path: '/accounting?tab=reports&report=salary', categories: ['Accounts'], icon: '💼', breadcrumb: 'Accounts / Reports', keywords: ['salary report'] },
+  { name: 'Report: Contracts', path: '/accounting?tab=reports&report=contracts', categories: ['Accounts'], icon: '🤝', breadcrumb: 'Accounts / Reports', keywords: ['contract report'] },
+  { name: 'Report: Day Book', path: '/accounting?tab=reports&report=daybook', categories: ['Accounts'], icon: '📘', breadcrumb: 'Accounts / Reports', keywords: ['day book report', 'daybook'] },
+  { name: 'Report: Cash Entries', path: '/accounting?tab=reports&report=cash_entries', categories: ['Accounts'], icon: '💵', breadcrumb: 'Accounts / Reports', keywords: ['cash entry report', 'cash book report'] },
+  { name: 'Report: Bank Entries', path: '/accounting?tab=reports&report=bank_entries', categories: ['Accounts'], icon: '🏦', breadcrumb: 'Accounts / Reports', keywords: ['bank entry report', 'bank book report'] },
+  { name: 'Report: Trial Balance', path: '/accounting?tab=reports&report=trial_balance', categories: ['Accounts'], icon: '⚖️', breadcrumb: 'Accounts / Reports' },
+  { name: 'Report: Profit & Loss', path: '/accounting?tab=reports&report=profit_loss', categories: ['Accounts'], icon: '📉', breadcrumb: 'Accounts / Reports', keywords: ['p&l', 'pl report'] },
+  { name: 'Report: Balance Sheet', path: '/accounting?tab=reports&report=balance_sheet', categories: ['Accounts'], icon: '📋', breadcrumb: 'Accounts / Reports' },
+  { name: 'TDS Report', path: '/accounting?tab=reports&report=tds', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Reports', keywords: ['tds reports'] },
+  { name: 'TDS Computation Report', path: '/accounting?tab=reports&report=tds&tdsReport=computation', categories: ['Accounts'], icon: '🧮', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds computation', 'tds computation and payable reports'] },
+  { name: 'TDS Payables Report', path: '/accounting?tab=reports&report=tds&tdsReport=payables', categories: ['Accounts'], icon: '💳', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds payable', 'tds payables', 'tds liability'] },
+  { name: 'TDS Outstanding Report', path: '/accounting?tab=reports&report=tds&tdsReport=outstanding', categories: ['Accounts'], icon: '⏳', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds outstanding', 'pending tds'] },
+  { name: 'Quarterly TDS Returns', path: '/accounting?tab=reports&report=tds&tdsReport=returns', categories: ['Accounts'], icon: '📤', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['24q', '26q', '27q', '27eq', 'tds return'] },
+  { name: 'TDS Certificates', path: '/accounting?tab=reports&report=tds&tdsReport=certificates', categories: ['Accounts'], icon: '📜', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['form 16', 'form 16a', 'form 27d'] },
+  { name: 'TDS 26AS / AIS Reconciliation', path: '/accounting?tab=reports&report=tds&tdsReport=reconciliation', categories: ['Accounts'], icon: '🔎', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['form 26as', 'ais reconciliation', 'traces'] },
+  { name: 'TDS Mismatch Report', path: '/accounting?tab=reports&report=tds&tdsReport=mismatches', categories: ['Accounts'], icon: '⚠️', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds mismatch', 'reconciliation mismatch'] },
+  { name: 'TDS Challan Status Report', path: '/accounting?tab=reports&report=tds&tdsReport=challans', categories: ['Accounts'], icon: '🏛️', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['challan report', 'challan status', 'tds challan'] },
+  { name: 'TDS Payment Register', path: '/accounting?tab=reports&report=tds&tdsReport=payment_register', categories: ['Accounts'], icon: '🧾', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds payment report', 'payment register', 'challan payment'] },
+  { name: 'TDS Correction Returns', path: '/accounting?tab=reports&report=tds&tdsReport=corrections', categories: ['Accounts'], icon: '🛠️', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['correction return report'] },
+  { name: 'TDS Audit Trail', path: '/accounting?tab=reports&report=tds&tdsReport=audit_trail', categories: ['Accounts'], icon: '📚', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tds audit trail'] },
+  { name: 'TDS Tax Audit Clause 34(a)', path: '/accounting?tab=reports&report=tds&tdsReport=tax_audit_34a', categories: ['Accounts'], icon: '⚖️', breadcrumb: 'Accounts / Reports / TDS Report', keywords: ['tax audit', 'clause 34a', 'clause 34(a)'] },
+];
+
+const categoryOrder: MenuCategory[] = ['Home', 'Sales', 'Catalog', 'People', 'Operations', 'Accounts', 'Validation', 'Admin'];
 
 const categoryIcons: Record<MenuCategory, string> = {
   Home: '🏠',
@@ -78,6 +127,7 @@ const categoryIcons: Record<MenuCategory, string> = {
   People: '👥',
   Operations: '🏟️',
   Accounts: '📚',
+  Validation: '✅',
   Admin: '⚙️',
 };
 
@@ -88,6 +138,7 @@ const categoryLandingPaths: Partial<Record<MenuCategory, string>> = {
   People: '/employees',
   Operations: '/facilities',
   Accounts: '/accounting',
+  Validation: '/accounting/validation',
   Admin: '/settings',
 };
 
@@ -104,7 +155,7 @@ const getBestMatchingMenuItem = <T extends { path: string },>(items: T[], curren
   }, undefined);
 
 const menuSearchTooltip =
-  'Search pages or tabs by typing part of the name, like Sales, Reports, Payroll, Voucher, Attendance, or Settings. Press Enter to open the first result.';
+  'Search pages or inner tabs by typing part of the name, like Sales, Reports, Day Book, Cash Entries, TDS Payables, Payroll, Voucher, or Settings. Press Enter to open the first result.';
 
 const mobileHeaderIconButtonClass =
   'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white';
@@ -194,6 +245,13 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
       });
     });
 
+    const canOpenAccounting = allowedMenuItems.some((item) => item.path === '/accounting');
+    if (canOpenAccounting) {
+      accountingSearchShortcuts.forEach((item) => {
+        itemsByPath.set(item.path, item);
+      });
+    }
+
     return Array.from(itemsByPath.values());
   }, [allowedMenuItems]);
 
@@ -203,10 +261,16 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
 
     return searchableMenuItems
       .filter((item) => {
-        const haystack = [item.name, item.path, item.categories.join(' ')].join(' ').toLowerCase();
+        const haystack = [
+          item.name,
+          item.path,
+          item.breadcrumb,
+          item.categories.join(' '),
+          ...(item.keywords || []),
+        ].join(' ').toLowerCase();
         return haystack.includes(query);
       })
-      .slice(0, 8);
+      .slice(0, 12);
   }, [menuSearchQuery, searchableMenuItems]);
 
   const workspaceLabel = activeItem?.name || activeCategory || 'Workspace';
@@ -426,7 +490,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-semibold text-white">{item.name}</span>
-                    <span className="mt-0.5 block text-[11px] text-slate-400">{item.categories.join(' / ')}</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-400">{item.breadcrumb || item.categories.join(' / ')}</span>
                   </span>
                 </button>
               ))}

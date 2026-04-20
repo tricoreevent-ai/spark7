@@ -129,7 +129,7 @@ export const PAGE_META: Record<PageKey, { title: string; path: string }> = {
   'sales-dashboard': { title: 'Sales Dashboard', path: '/sales-dashboard' },
   inventory: { title: 'Inventory', path: '/inventory' },
   sales: { title: 'Sales', path: '/sales' },
-  customers: { title: 'Customer CRM', path: '/customers/profiles' },
+  customers: { title: 'Customer CRM', path: '/customers/directory' },
   orders: { title: 'Orders', path: '/orders' },
   products: { title: 'Product Center', path: '/products' },
   returns: { title: 'Returns', path: '/returns' },

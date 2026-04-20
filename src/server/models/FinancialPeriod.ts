@@ -16,7 +16,7 @@ export interface IFinancialPeriod extends Document {
 
 const FinancialPeriodSchema = new Schema<IFinancialPeriod>(
   {
-    periodKey: { type: String, required: true, trim: true, index: true, unique: true },
+    periodKey: { type: String, required: true, trim: true, index: true },
     month: { type: Number, required: true, min: 1, max: 12, index: true },
     year: { type: Number, required: true, min: 2000, max: 9999, index: true },
     startDate: { type: Date, required: true, index: true },

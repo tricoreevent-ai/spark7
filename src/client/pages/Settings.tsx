@@ -35,6 +35,17 @@ interface BackupRestoreHistoryItem {
   metadata?: Record<string, any>;
 }
 
+interface DatabaseCollectionUsage {
+  name: string;
+  documents: number;
+  avgObjSize: number;
+  dataSize: number;
+  storageSize: number;
+  indexSize: number;
+  totalSize: number;
+  percentageOfDatabase: number;
+}
+
 interface DatabaseStats {
   dbName: string;
   collections: number;
@@ -47,12 +58,60 @@ interface DatabaseStats {
   fsUsedSize: number;
   fsTotalSize: number;
   collectionNames: string[];
+  collectionUsage?: DatabaseCollectionUsage[];
   checkedAt?: string;
   connectionState?: number;
 }
 
+interface CloudStorageConfigView {
+  enabled: boolean;
+  provider: 'cloudflare_r2';
+  accountId: string;
+  bucketName: string;
+  s3Endpoint: string;
+  publicBaseUrl: string;
+  catalogUri: string;
+  hasCredentials: boolean;
+  accessKeyIdMasked: string;
+  secretAccessKeyMasked: string;
+  updatedAt?: string | null;
+}
+
+type CloudStorageFormState = CloudStorageConfigView & {
+  apiToken: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+interface CloudStorageTestResult {
+  provider?: string;
+  bucketName?: string;
+  objectKey?: string;
+  publicUrl?: string;
+  publicFetchStatus?: number | null;
+  checkedAt?: string;
+}
+
+interface ImageMigrationEntitySummary {
+  inlineMigrated: number;
+  localToCloudMigrated: number;
+  metadataNormalized: number;
+  failed: number;
+}
+
+interface ImageMigrationSummary {
+  provider: 'cloudflare_r2' | 'local';
+  cloudStorageEnabled: boolean;
+  facilities: ImageMigrationEntitySummary;
+  customers: ImageMigrationEntitySummary;
+  settings: {
+    logos: ImageMigrationEntitySummary;
+    homeBackgrounds: ImageMigrationEntitySummary;
+  };
+}
+
 type SettingsSectionKey = 'appearance' | 'business' | 'mail' | 'invoice' | 'printing' | 'security' | 'backup';
-type BackupSectionKey = 'utility' | 'take_restore' | 'history';
+type BackupSectionKey = 'utility' | 'take_restore' | 'history' | 'cloud_storage';
 
 const settingsTabs: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: 'business', label: 'Business Details' },
@@ -64,11 +123,33 @@ const settingsTabs: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: 'appearance', label: 'Appearance' },
 ];
 
-const backupTabs: Array<{ key: BackupSectionKey; label: string }> = [
+const backupTabs: Array<{ key: Exclude<BackupSectionKey, 'cloud_storage'>; label: string }> = [
   { key: 'utility', label: 'Database Utility' },
   { key: 'take_restore', label: 'Take / Restore Backup' },
   { key: 'history', label: 'Backup History' },
 ];
+
+const cloudStorageTab: { key: BackupSectionKey; label: string } = {
+  key: 'cloud_storage',
+  label: 'Cloud Storage',
+};
+
+const DEFAULT_CLOUD_STORAGE_FORM: CloudStorageFormState = {
+  enabled: false,
+  provider: 'cloudflare_r2',
+  accountId: '',
+  bucketName: '',
+  s3Endpoint: '',
+  publicBaseUrl: '',
+  catalogUri: '',
+  hasCredentials: false,
+  accessKeyIdMasked: '',
+  secretAccessKeyMasked: '',
+  updatedAt: null,
+  apiToken: '',
+  accessKeyId: '',
+  secretAccessKey: '',
+};
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<GeneralSettings>(() => getGeneralSettings());
@@ -94,6 +175,15 @@ export const Settings: React.FC = () => {
   const [databaseStats, setDatabaseStats] = useState<DatabaseStats | null>(null);
   const [databaseStatsLoading, setDatabaseStatsLoading] = useState(false);
   const [databaseStatsError, setDatabaseStatsError] = useState('');
+  const [cloudStorageForm, setCloudStorageForm] = useState<CloudStorageFormState>(DEFAULT_CLOUD_STORAGE_FORM);
+  const [cloudStorageLoading, setCloudStorageLoading] = useState(false);
+  const [cloudStorageSaving, setCloudStorageSaving] = useState(false);
+  const [cloudStorageTesting, setCloudStorageTesting] = useState(false);
+  const [cloudStorageMigrating, setCloudStorageMigrating] = useState(false);
+  const [cloudStorageMessage, setCloudStorageMessage] = useState('');
+  const [cloudStorageError, setCloudStorageError] = useState('');
+  const [cloudStorageTestResult, setCloudStorageTestResult] = useState<CloudStorageTestResult | null>(null);
+  const [imageMigrationSummary, setImageMigrationSummary] = useState<ImageMigrationSummary | null>(null);
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sectionCard = 'rounded-xl border border-white/10 bg-white/5 p-5';
@@ -412,6 +502,13 @@ export const Settings: React.FC = () => {
   };
 
   const isSuperAdmin = currentUserRole === 'super_admin';
+  const backupTabItems = isSuperAdmin ? [...backupTabs, cloudStorageTab] : backupTabs;
+
+  useEffect(() => {
+    if (!isSuperAdmin && backupSection === 'cloud_storage') {
+      setBackupSection('utility');
+    }
+  }, [backupSection, isSuperAdmin]);
 
   const formatBytes = (value?: number) => {
     const amount = Number(value || 0);
@@ -424,6 +521,12 @@ export const Settings: React.FC = () => {
       unitIndex += 1;
     }
     return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const formatPercentage = (value?: number) => {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return '0%';
+    return `${amount.toFixed(amount >= 10 ? 0 : 1)}%`;
   };
 
   const loadDatabaseStats = async () => {
@@ -485,12 +588,192 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const loadCloudStorageSettings = async () => {
+    if (!isSuperAdmin) {
+      setCloudStorageForm(DEFAULT_CLOUD_STORAGE_FORM);
+      setCloudStorageError('');
+      setCloudStorageTestResult(null);
+      setImageMigrationSummary(null);
+      return;
+    }
+
+    try {
+      setCloudStorageLoading(true);
+      setCloudStorageError('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setCloudStorageForm(DEFAULT_CLOUD_STORAGE_FORM);
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/settings/cloud-storage'), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const config = (response?.data?.config || {}) as Partial<CloudStorageConfigView>;
+      setCloudStorageForm({
+        ...DEFAULT_CLOUD_STORAGE_FORM,
+        ...config,
+        provider: 'cloudflare_r2',
+        apiToken: '',
+      });
+    } catch (error: any) {
+      setCloudStorageError(error?.message || 'Failed to load cloud storage settings');
+    } finally {
+      setCloudStorageLoading(false);
+    }
+  };
+
+  const saveCloudStorageSettings = async () => {
+    try {
+      setCloudStorageSaving(true);
+      setCloudStorageError('');
+      setCloudStorageMessage('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setCloudStorageError('Login required to save cloud storage settings.');
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/settings/cloud-storage'), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          config: {
+            enabled: cloudStorageForm.enabled,
+            provider: 'cloudflare_r2',
+            accountId: cloudStorageForm.accountId.trim(),
+            bucketName: cloudStorageForm.bucketName.trim(),
+            s3Endpoint: cloudStorageForm.s3Endpoint.trim(),
+            publicBaseUrl: cloudStorageForm.publicBaseUrl.trim(),
+            catalogUri: cloudStorageForm.catalogUri.trim(),
+            apiToken: cloudStorageForm.apiToken.trim(),
+            accessKeyId: cloudStorageForm.accessKeyId.trim(),
+            secretAccessKey: cloudStorageForm.secretAccessKey.trim(),
+          },
+        }),
+      });
+
+      const config = (response?.data?.config || {}) as Partial<CloudStorageConfigView>;
+      setCloudStorageForm({
+        ...DEFAULT_CLOUD_STORAGE_FORM,
+        ...config,
+        provider: 'cloudflare_r2',
+        apiToken: '',
+      });
+      setCloudStorageTestResult((response?.data?.testResult as CloudStorageTestResult | undefined) || null);
+      setCloudStorageMessage(String(response?.message || 'Cloud storage settings saved.'));
+    } catch (error: any) {
+      setCloudStorageError(error?.message || 'Failed to save cloud storage settings');
+    } finally {
+      setCloudStorageSaving(false);
+    }
+  };
+
+  const testCloudStorageSettings = async () => {
+    try {
+      setCloudStorageTesting(true);
+      setCloudStorageError('');
+      setCloudStorageMessage('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setCloudStorageError('Login required to test cloud storage.');
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/settings/cloud-storage/test'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          config: {
+            enabled: true,
+            provider: 'cloudflare_r2',
+            accountId: cloudStorageForm.accountId.trim(),
+            bucketName: cloudStorageForm.bucketName.trim(),
+            s3Endpoint: cloudStorageForm.s3Endpoint.trim(),
+            publicBaseUrl: cloudStorageForm.publicBaseUrl.trim(),
+            catalogUri: cloudStorageForm.catalogUri.trim(),
+            apiToken: cloudStorageForm.apiToken.trim(),
+            accessKeyId: cloudStorageForm.accessKeyId.trim(),
+            secretAccessKey: cloudStorageForm.secretAccessKey.trim(),
+          },
+        }),
+      });
+
+      const config = (response?.data?.config || {}) as Partial<CloudStorageConfigView>;
+      setCloudStorageForm((previous) => ({
+        ...previous,
+        ...config,
+        provider: 'cloudflare_r2',
+        apiToken: '',
+      }));
+      setCloudStorageTestResult((response?.data?.testResult as CloudStorageTestResult | undefined) || null);
+      setCloudStorageMessage(String(response?.message || 'Cloud storage connection test passed.'));
+    } catch (error: any) {
+      setCloudStorageError(error?.message || 'Failed to test cloud storage');
+    } finally {
+      setCloudStorageTesting(false);
+    }
+  };
+
+  const migrateExistingImages = async () => {
+    const confirmed = await showConfirmDialog(
+      cloudStorageForm.enabled
+        ? 'Move existing inline and local managed images into the current storage provider now? Existing image URLs will keep working after migration.'
+        : 'Cloud storage is currently disabled. Run migration anyway and move existing inline images into managed local storage?',
+      {
+        title: 'Migrate Existing Images',
+        confirmText: 'Run Migration',
+        cancelText: 'Cancel',
+        severity: 'warning',
+      }
+    );
+    if (!confirmed) return;
+
+    try {
+      setCloudStorageMigrating(true);
+      setCloudStorageError('');
+      setCloudStorageMessage('');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setCloudStorageError('Login required to migrate existing images.');
+        return;
+      }
+
+      const response = await fetchApiJson(apiUrl('/api/settings/cloud-storage/migrate-images'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      setImageMigrationSummary((response?.data as ImageMigrationSummary) || null);
+      setCloudStorageMessage(String(response?.message || 'Existing images migrated successfully.'));
+      await loadCloudStorageSettings();
+    } catch (error: any) {
+      setCloudStorageError(error?.message || 'Failed to migrate existing images');
+    } finally {
+      setCloudStorageMigrating(false);
+    }
+  };
+
   useEffect(() => {
     void loadBackupRestoreHistory();
   }, [isSuperAdmin]);
 
   useEffect(() => {
     void loadDatabaseStats();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    void loadCloudStorageSettings();
   }, [isSuperAdmin]);
 
   const downloadDatabaseBackup = async () => {
@@ -699,6 +982,9 @@ export const Settings: React.FC = () => {
     return date.toLocaleString();
   };
 
+  const collectionUsage = databaseStats?.collectionUsage || [];
+  const largestCollection = collectionUsage[0] || null;
+
   const inputClass =
     'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-400';
 
@@ -812,7 +1098,7 @@ export const Settings: React.FC = () => {
             <div>
               <h3 className="text-base font-semibold text-white">Home Page Background Slideshow</h3>
               <p className="mt-1 max-w-2xl text-sm text-gray-400">
-                Upload one or more images for the dashboard home page. Files are stored on the server, and the database keeps each saved image location for reuse across sessions.
+                Upload one or more images for the dashboard home page. Files are stored in managed storage, and the database keeps only each saved image location for reuse across sessions.
               </p>
             </div>
             <label className="inline-flex cursor-pointer items-center justify-center rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400">
@@ -1234,7 +1520,7 @@ export const Settings: React.FC = () => {
 
         <CardTabs
           ariaLabel="Backup settings tabs"
-          items={backupTabs}
+          items={backupTabItems}
           activeKey={backupSection}
           onChange={setBackupSection}
           className="mt-4 w-fit max-w-full"
@@ -1265,7 +1551,7 @@ export const Settings: React.FC = () => {
           )}
 
           {databaseStats && (
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-lg border border-white/10 bg-white/5 p-3">
                 <p className="text-xs text-gray-400">Database</p>
                 <p className="mt-1 text-sm font-semibold text-white">{databaseStats.dbName || '-'}</p>
@@ -1286,8 +1572,70 @@ export const Settings: React.FC = () => {
                 <p className="mt-1 text-sm font-semibold text-cyan-200">{formatBytes(databaseStats.fsUsedSize)}</p>
                 <p className="mt-1 text-[11px] text-gray-500">Capacity {formatBytes(databaseStats.fsTotalSize)}</p>
               </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-gray-400">Largest Collection</p>
+                <p className="mt-1 text-sm font-semibold text-amber-200">
+                  {largestCollection?.name || '-'}
+                </p>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {largestCollection
+                    ? `${formatBytes(largestCollection.totalSize)} footprint • ${largestCollection.documents.toLocaleString()} records`
+                    : 'Run check to load collection space usage'}
+                </p>
+              </div>
             </div>
           )}
+
+          {collectionUsage.length ? (
+            <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-400">Collection Space Usage</p>
+                  <p className="mt-1 text-xs text-gray-400">Sorted by total footprint so you can quickly find the biggest MongoDB collections.</p>
+                </div>
+                <p className="text-xs text-gray-500">{collectionUsage.length} collections checked</p>
+              </div>
+              <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-white/10 bg-black/20">
+                <table className="min-w-full divide-y divide-white/10 text-left text-sm text-gray-200">
+                  <thead className="sticky top-0 bg-slate-900/95 text-[11px] uppercase tracking-[0.14em] text-gray-400 backdrop-blur">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Collection</th>
+                      <th className="px-3 py-2 font-medium">Footprint</th>
+                      <th className="px-3 py-2 font-medium">Records</th>
+                      <th className="px-3 py-2 font-medium">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {collectionUsage.map((collection) => (
+                      <tr key={collection.name} className="align-top">
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-white">{collection.name}</p>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Data {formatBytes(collection.dataSize)} • Index {formatBytes(collection.indexSize)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-amber-200">{formatBytes(collection.totalSize)}</p>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Avg object {formatBytes(collection.avgObjSize)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-white">{collection.documents.toLocaleString()}</p>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Storage {formatBytes(collection.storageSize || collection.dataSize)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2 font-medium text-cyan-200">
+                          {formatPercentage(collection.percentageOfDatabase)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {databaseStats?.collectionNames?.length ? (
             <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3">
@@ -1402,6 +1750,267 @@ export const Settings: React.FC = () => {
             onPageChange={backupHistoryPagination.setCurrentPage}
             onPageSizeChange={backupHistoryPagination.setPageSize}
           />
+        </div>
+        )}
+
+        {backupSection === 'cloud_storage' && isSuperAdmin && (
+        <div className="mt-4 space-y-4 rounded-lg border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Cloudflare R2 Image Storage</h3>
+              <p className="mt-1 max-w-3xl text-xs text-gray-400">
+                Configure Cloudflare R2 once, then new managed images will prefer cloud storage while the app keeps using normal image URLs.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={loadCloudStorageSettings}
+                disabled={cloudStorageLoading || cloudStorageSaving || cloudStorageTesting || cloudStorageMigrating}
+                className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold text-gray-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudStorageLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={testCloudStorageSettings}
+                disabled={cloudStorageLoading || cloudStorageSaving || cloudStorageTesting || cloudStorageMigrating}
+                className="rounded-md border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudStorageTesting ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button
+                type="button"
+                onClick={saveCloudStorageSettings}
+                disabled={cloudStorageLoading || cloudStorageSaving || cloudStorageTesting || cloudStorageMigrating}
+                className="rounded-md bg-indigo-500 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudStorageSaving ? 'Saving...' : 'Save Cloud Storage'}
+              </button>
+            </div>
+          </div>
+
+          {cloudStorageMessage && (
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+              {cloudStorageMessage}
+            </div>
+          )}
+
+          {cloudStorageError && (
+            <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+              {cloudStorageError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
+              <input
+                type="checkbox"
+                checked={cloudStorageForm.enabled}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, enabled: e.target.checked }))}
+              />
+              Enable Cloud Storage
+            </label>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+              <p className="text-xs text-gray-400">Provider</p>
+              <p className="mt-1 text-sm font-semibold text-white">Cloudflare R2</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+              <p className="text-xs text-gray-400">Saved Credentials</p>
+              <p className="mt-1 text-sm font-semibold text-white">{cloudStorageForm.hasCredentials ? 'Configured' : 'Not saved'}</p>
+              <p className="mt-1 text-[11px] text-gray-500">{cloudStorageForm.accessKeyIdMasked || 'Access key not derived yet'}</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+              <p className="text-xs text-gray-400">Last Updated</p>
+              <p className="mt-1 text-sm font-semibold text-white">{formatHistoryTime(cloudStorageForm.updatedAt || undefined)}</p>
+              <p className="mt-1 text-[11px] text-gray-500">{cloudStorageForm.secretAccessKeyMasked || 'Secret key hidden until saved'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Account ID</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.accountId}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, accountId: e.target.value }))}
+                placeholder="Cloudflare account ID"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Bucket Name</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.bucketName}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, bucketName: e.target.value }))}
+                placeholder="sarva"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">S3 API Endpoint</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.s3Endpoint}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, s3Endpoint: e.target.value }))}
+                placeholder="https://ACCOUNT_ID.r2.cloudflarestorage.com"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Public Base URL</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.publicBaseUrl}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, publicBaseUrl: e.target.value }))}
+                placeholder="https://pub-xxxx.r2.dev"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Catalog URI</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.catalogUri}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, catalogUri: e.target.value }))}
+                placeholder="https://catalog.cloudflarestorage.com/ACCOUNT_ID/BUCKET"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">API Token</label>
+              <input
+                className={inputClass}
+                type="password"
+                value={cloudStorageForm.apiToken}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, apiToken: e.target.value }))}
+                placeholder={cloudStorageForm.hasCredentials ? 'Enter only when replacing the saved token' : 'Paste Cloudflare API token'}
+              />
+              <p className="mt-2 text-xs text-gray-500">
+                Use this only if you created an R2-compatible API token. Saved credentials stay masked in this screen.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Access Key ID</label>
+              <input
+                className={inputClass}
+                value={cloudStorageForm.accessKeyId}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, accessKeyId: e.target.value }))}
+                placeholder="Paste direct R2 Access Key ID if available"
+              />
+              <p className="mt-2 text-xs text-gray-500">
+                Recommended when the API token is a generic Cloudflare account token instead of an R2 S3 credential.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">Secret Access Key</label>
+              <input
+                className={inputClass}
+                type="password"
+                value={cloudStorageForm.secretAccessKey}
+                onChange={(e) => setCloudStorageForm((prev) => ({ ...prev, secretAccessKey: e.target.value }))}
+                placeholder="Paste direct R2 Secret Access Key if available"
+              />
+              <p className="mt-2 text-xs text-gray-500">
+                Enter both direct keys together, or leave both blank and use a compatible API token instead.
+              </p>
+            </div>
+          </div>
+
+          {cloudStorageTestResult && (
+            <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/10 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-cyan-100">Latest Connection Test</h4>
+                  <p className="mt-1 text-xs text-cyan-50/80">
+                    Test object uploaded and removed successfully.
+                  </p>
+                </div>
+                <p className="text-xs text-cyan-50/80">{formatHistoryTime(cloudStorageTestResult.checkedAt)}</p>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-white/10 bg-black/10 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-50/60">Bucket</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{cloudStorageTestResult.bucketName || cloudStorageForm.bucketName || '-'}</p>
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/10 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-50/60">Object Key</p>
+                  <p className="mt-1 break-all text-sm font-semibold text-white">{cloudStorageTestResult.objectKey || '-'}</p>
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/10 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-50/60">Public Fetch</p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {cloudStorageTestResult.publicFetchStatus ? `HTTP ${cloudStorageTestResult.publicFetchStatus}` : 'Not checked'}
+                  </p>
+                </div>
+              </div>
+              {cloudStorageTestResult.publicUrl && (
+                <p className="mt-3 break-all text-xs text-cyan-50/80">{cloudStorageTestResult.publicUrl}</p>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-white">Existing Image Migration</h4>
+                <p className="mt-1 max-w-3xl text-xs text-gray-400">
+                  Moves existing inline MongoDB image payloads and local managed uploads into the currently preferred storage provider. External image URLs are left untouched.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={migrateExistingImages}
+                disabled={cloudStorageLoading || cloudStorageSaving || cloudStorageTesting || cloudStorageMigrating}
+                className="rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudStorageMigrating ? 'Migrating...' : 'Migrate Existing Images'}
+              </button>
+            </div>
+
+            {imageMigrationSummary && (
+              <div className="mt-4 space-y-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                    <p className="text-xs text-gray-400">Preferred Provider</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{imageMigrationSummary.provider === 'cloudflare_r2' ? 'Cloudflare R2' : 'Local uploads'}</p>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                    <p className="text-xs text-gray-400">Facility Inline Migrated</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-200">{imageMigrationSummary.facilities.inlineMigrated}</p>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                    <p className="text-xs text-gray-400">Customer Inline Migrated</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-200">{imageMigrationSummary.customers.inlineMigrated}</p>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                    <p className="text-xs text-gray-400">Settings Assets Migrated</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-200">
+                      {imageMigrationSummary.settings.logos.inlineMigrated + imageMigrationSummary.settings.homeBackgrounds.inlineMigrated}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+                  {[
+                    ['Facility Images', imageMigrationSummary.facilities],
+                    ['Customer Photos', imageMigrationSummary.customers],
+                    ['Business Logos', imageMigrationSummary.settings.logos],
+                    ['Home Backgrounds', imageMigrationSummary.settings.homeBackgrounds],
+                  ].map(([label, summary]) => {
+                    const row = summary as ImageMigrationEntitySummary;
+                    return (
+                      <div key={label} className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                        <p className="text-sm font-semibold text-white">{label}</p>
+                        <div className="mt-3 space-y-1 text-xs text-gray-300">
+                          <p>Inline to managed: <span className="text-white">{row.inlineMigrated}</span></p>
+                          <p>Local to cloud: <span className="text-white">{row.localToCloudMigrated}</span></p>
+                          <p>Metadata normalized: <span className="text-white">{row.metadataNormalized}</span></p>
+                          <p>Failed rows: <span className="text-white">{row.failed}</span></p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         )}
       </section>

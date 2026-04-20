@@ -9,6 +9,7 @@ import { AccountingPayment, type IAccountingPayment } from '../models/Accounting
 import { FinancialPeriod, type IFinancialPeriod } from '../models/FinancialPeriod.js';
 import { FixedAsset, type IFixedAsset } from '../models/FixedAsset.js';
 import { Vendor, type IVendor } from '../models/Vendor.js';
+import { AccountGroup } from '../models/AccountGroup.js';
 import { generateNumber } from './numbering.js';
 import { writeAuditLog } from './audit.js';
 import { writeRecordVersion } from './recordVersion.js';
@@ -33,6 +34,7 @@ type SystemAccountKey =
   | 'cash_in_hand'
   | 'bank_account'
   | 'accounts_receivable'
+  | 'stock_in_hand'
   | 'fixed_assets'
   | 'accumulated_depreciation'
   | 'liabilities'
@@ -41,12 +43,16 @@ type SystemAccountKey =
   | 'cgst_payable'
   | 'sgst_payable'
   | 'igst_payable'
+  | 'tds_payable'
   | 'income'
   | 'booking_revenue'
   | 'event_revenue'
   | 'sales_revenue'
   | 'other_income'
+  | 'stock_gain'
   | 'expenses'
+  | 'cost_of_goods_sold'
+  | 'stock_loss'
   | 'general_expense'
   | 'salary_expense'
   | 'contract_expense'
@@ -115,11 +121,20 @@ interface RecordPaymentInput {
 
 interface CreateVendorInput {
   name: string;
+  groupId?: string;
   contact?: string;
   email?: string;
   phone?: string;
+  alternatePhone?: string;
   gstin?: string;
+  pan?: string;
   address?: string;
+  isTdsApplicable?: boolean;
+  deducteeType?: string;
+  tdsSectionCode?: string;
+  tdsRate?: number;
+  openingBalance?: number;
+  openingSide?: 'debit' | 'credit';
   createdBy?: string;
   metadata?: Record<string, any>;
 }
@@ -174,6 +189,7 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
   { key: 'cash_in_hand', code: '1010', name: 'Cash In Hand', type: 'asset', subType: 'cash', parentKey: 'assets' },
   { key: 'bank_account', code: '1020', name: 'Bank Account', type: 'asset', subType: 'bank', parentKey: 'assets' },
   { key: 'accounts_receivable', code: '1100', name: 'Accounts Receivable', type: 'asset', subType: 'customer', parentKey: 'assets' },
+  { key: 'stock_in_hand', code: '1150', name: 'Stock In Hand', type: 'asset', subType: 'stock', parentKey: 'assets' },
   { key: 'fixed_assets', code: '1200', name: 'Fixed Assets', type: 'asset', parentKey: 'assets' },
   { key: 'accumulated_depreciation', code: '1210', name: 'Accumulated Depreciation', type: 'asset', parentKey: 'assets' },
   { key: 'liabilities', code: '2000', name: 'Liabilities', type: 'liability' },
@@ -182,12 +198,16 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
   { key: 'cgst_payable', code: '2210', name: 'CGST Payable', type: 'liability', parentKey: 'gst_payable' },
   { key: 'sgst_payable', code: '2220', name: 'SGST Payable', type: 'liability', parentKey: 'gst_payable' },
   { key: 'igst_payable', code: '2230', name: 'IGST Payable', type: 'liability', parentKey: 'gst_payable' },
+  { key: 'tds_payable', code: '2240', name: 'TDS Payable', type: 'liability', parentKey: 'liabilities' },
   { key: 'income', code: '3000', name: 'Income', type: 'income' },
   { key: 'booking_revenue', code: '3100', name: 'Booking Revenue', type: 'income', parentKey: 'income' },
   { key: 'event_revenue', code: '3110', name: 'Event Revenue', type: 'income', parentKey: 'income' },
   { key: 'sales_revenue', code: '3120', name: 'Sales Revenue', type: 'income', parentKey: 'income' },
   { key: 'other_income', code: '3190', name: 'Other Income', type: 'income', parentKey: 'income' },
+  { key: 'stock_gain', code: '3195', name: 'Stock Gain', type: 'income', parentKey: 'income' },
   { key: 'expenses', code: '4000', name: 'Expenses', type: 'expense' },
+  { key: 'cost_of_goods_sold', code: '4050', name: 'Cost of Goods Sold', type: 'expense', parentKey: 'expenses' },
+  { key: 'stock_loss', code: '4060', name: 'Stock Loss', type: 'expense', parentKey: 'expenses' },
   { key: 'general_expense', code: '4100', name: 'General Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'salary_expense', code: '4110', name: 'Salary Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'contract_expense', code: '4120', name: 'Contract Expense', type: 'expense', parentKey: 'expenses' },
@@ -809,6 +829,16 @@ export const createVendor = async (input: CreateVendorInput): Promise<IVendor> =
       throw new Error(gstValidation.message);
     }
   }
+  const normalizedPan = String(input.pan || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+  if (normalizedPan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(normalizedPan)) {
+    throw new Error('PAN format should be ABCDE1234F.');
+  }
+  const group = input.groupId && mongoose.isValidObjectId(input.groupId)
+    ? await AccountGroup.findById(input.groupId)
+    : null;
+  if (input.groupId && !group) {
+    throw new Error('Selected vendor group was not found');
+  }
 
   const ledgerAccount = await resolveAccount({
     fallbackName: `Vendor - ${input.name}`,
@@ -817,14 +847,32 @@ export const createVendor = async (input: CreateVendorInput): Promise<IVendor> =
     parentSystemKey: 'accounts_payable',
     createdBy: input.createdBy,
   });
+  if (group && !ledgerAccount.isSystem) {
+    ledgerAccount.groupId = group._id as mongoose.Types.ObjectId;
+    ledgerAccount.groupName = group.groupName;
+    ledgerAccount.accountType = group.under as AccountType;
+  }
+  ledgerAccount.openingBalance = round2(Number(input.openingBalance || 0));
+  ledgerAccount.openingSide = input.openingSide === 'debit' ? 'debit' : 'credit';
+  await ledgerAccount.save();
 
   const vendor = await Vendor.create({
     name: input.name,
+    groupId: group?._id,
+    groupName: group?.groupName,
     contact: input.contact,
     email: input.email,
     phone: input.phone,
+    alternatePhone: input.alternatePhone,
     gstin: normalizedGstin || undefined,
+    pan: normalizedPan || undefined,
     address: input.address,
+    isTdsApplicable: Boolean(input.isTdsApplicable),
+    deducteeType: String(input.deducteeType || '').trim().toLowerCase() || undefined,
+    tdsSectionCode: String(input.tdsSectionCode || '').trim().toUpperCase() || undefined,
+    tdsRate: round2(Number(input.tdsRate || 0)),
+    openingBalance: round2(Number(input.openingBalance || 0)),
+    openingSide: input.openingSide === 'debit' ? 'debit' : 'credit',
     ledgerAccountId: ledgerAccount._id,
     isActive: true,
     createdBy: input.createdBy,
@@ -1601,17 +1649,33 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
         { $match: { accountId: ledgerAccount?._id, isDeleted: { $ne: true } } },
         { $group: { _id: null, total: { $sum: '$debit' } } },
       ]);
+      const openingBalance = round2(Number(vendor.openingBalance || 0));
+      const openingSide = vendor.openingSide === 'debit' ? 'debit' : 'credit';
+      const totalPayable = round2(Number(totalCredits[0]?.total || 0) + (openingSide === 'credit' ? openingBalance : 0));
+      const paid = round2(Number(totalDebits[0]?.total || 0) + (openingSide === 'debit' ? openingBalance : 0));
+      const signedOpening = openingSide === 'credit' ? -openingBalance : openingBalance;
       return {
         _id: vendor._id,
         name: vendor.name,
+        groupId: vendor.groupId,
+        groupName: vendor.groupName,
         contact: vendor.contact,
         phone: vendor.phone,
+        alternatePhone: vendor.alternatePhone,
         email: vendor.email,
         gstin: vendor.gstin,
+        pan: vendor.pan,
+        isTdsApplicable: vendor.isTdsApplicable,
+        deducteeType: vendor.deducteeType,
+        tdsSectionCode: vendor.tdsSectionCode,
+        tdsRate: vendor.tdsRate,
+        openingBalance,
+        openingSide,
+        address: vendor.address,
         ledgerAccountId: vendor.ledgerAccountId,
-        totalPayable: round2(Number(totalCredits[0]?.total || 0)),
-        paid: round2(Number(totalDebits[0]?.total || 0)),
-        balance: round2(Math.abs(closing)),
+        totalPayable,
+        paid,
+        balance: round2(Math.abs(closing + signedOpening)),
       };
     })
   );
@@ -1656,37 +1720,46 @@ export const toCsv = (rows: Array<Record<string, any>>): string => {
   ].join('\n');
 };
 
-export const buildDashboardSummary = async (today = new Date()) => {
-  const startOfToday = new Date(today);
-  startOfToday.setHours(0, 0, 0, 0);
-  const endOfToday = new Date(today);
-  endOfToday.setHours(23, 59, 59, 999);
+export const buildDashboardSummary = async (options: { startDate?: Date; endDate?: Date } = {}) => {
+  const endDate = options.endDate instanceof Date && !Number.isNaN(options.endDate.getTime())
+    ? new Date(options.endDate)
+    : new Date();
+  endDate.setHours(23, 59, 59, 999);
 
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const startDate = options.startDate instanceof Date && !Number.isNaN(options.startDate.getTime())
+    ? new Date(options.startDate)
+    : new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  startDate.setHours(0, 0, 0, 0);
 
-  const [todayIncome, monthIncome, monthExpense, gstPayableAgg] = await Promise.all([
+  const normalizedStart = startDate <= endDate
+    ? startDate
+    : new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 0, 0, 0, 0);
+  const startOfMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+  const [selectedIncome, monthIncome, selectedExpense, gstPayableAgg] = await Promise.all([
     JournalLine.aggregate([
-      { $match: { entryDate: { $gte: startOfToday, $lte: endOfToday } } },
+      { $match: { entryDate: { $gte: normalizedStart, $lte: endDate } } },
       { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
       { $unwind: '$account' },
       { $match: { 'account.accountType': 'income' } },
       { $group: { _id: null, total: { $sum: '$creditAmount' } } },
     ]),
     JournalLine.aggregate([
-      { $match: { entryDate: { $gte: startOfMonth, $lte: endOfToday } } },
+      { $match: { entryDate: { $gte: startOfMonth, $lte: endDate } } },
       { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
       { $unwind: '$account' },
       { $match: { 'account.accountType': 'income' } },
       { $group: { _id: null, total: { $sum: '$creditAmount' } } },
     ]),
     JournalLine.aggregate([
-      { $match: { entryDate: { $gte: startOfMonth, $lte: endOfToday } } },
+      { $match: { entryDate: { $gte: normalizedStart, $lte: endDate } } },
       { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
       { $unwind: '$account' },
       { $match: { 'account.accountType': 'expense' } },
       { $group: { _id: null, total: { $sum: '$debitAmount' } } },
     ]),
     JournalLine.aggregate([
+      { $match: { entryDate: { $lte: endDate } } },
       { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
       { $unwind: '$account' },
       { $match: { 'account.systemKey': { $in: ['cgst_payable', 'sgst_payable', 'igst_payable'] } } },
@@ -1694,17 +1767,22 @@ export const buildDashboardSummary = async (today = new Date()) => {
     ]),
   ]);
 
-  const todayRevenue = round2(Number(todayIncome[0]?.total || 0));
-  const monthlyRevenue = round2(Number(monthIncome[0]?.total || 0));
-  const expenses = round2(Number(monthExpense[0]?.total || 0));
+  const selectedRevenue = round2(Number(selectedIncome[0]?.total || 0));
+  const monthToDateRevenue = round2(Number(monthIncome[0]?.total || 0));
+  const expenses = round2(Number(selectedExpense[0]?.total || 0));
   const gstPayable = round2(Number(gstPayableAgg[0]?.credit || 0) - Number(gstPayableAgg[0]?.debit || 0));
 
   return {
-    todayRevenue,
-    monthlyRevenue,
+    todayRevenue: selectedRevenue,
+    monthlyRevenue: monthToDateRevenue,
+    selectedRevenue,
+    monthToDateRevenue,
     expenses,
-    profit: round2(monthlyRevenue - expenses),
+    profit: round2(selectedRevenue - expenses),
     gstPayable,
-    periodKey: toPeriodKey(today),
+    periodKey: toPeriodKey(endDate),
+    selectedStartDate: normalizedStart.toISOString(),
+    selectedEndDate: endDate.toISOString(),
+    monthStartDate: startOfMonth.toISOString(),
   };
 };

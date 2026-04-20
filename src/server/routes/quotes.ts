@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import type { SortOrder } from 'mongoose';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { Quote } from '../models/Quote.js';
 import { Product } from '../models/Product.js';
@@ -73,6 +74,33 @@ const normalizeQuoteStatus = (value: any): 'draft' | 'sent' | 'approved' | 'reje
   if (normalized === 'expired') return 'expired';
   if (normalized === 'converted') return 'converted';
   return 'draft';
+};
+
+const buildQuoteSort = (sortBy: any, sortDir: any): Record<string, SortOrder> => {
+  const field = String(sortBy || 'updatedAt').trim();
+  const direction: SortOrder = String(sortDir || 'desc').trim().toLowerCase() === 'asc' ? 1 : -1;
+
+  const safeField = (() => {
+    switch (field) {
+      case 'createdAt':
+      case 'updatedAt':
+      case 'validUntil':
+      case 'totalAmount':
+      case 'customerName':
+      case 'quoteNumber':
+      case 'quoteStatus':
+        return field;
+      default:
+        return 'updatedAt';
+    }
+  })();
+
+  return {
+    [safeField]: direction,
+    updatedAt: safeField === 'updatedAt' ? direction : -1,
+    createdAt: safeField === 'createdAt' ? direction : -1,
+    _id: -1,
+  };
 };
 
 const buildQuoteItems = async (args: {
@@ -169,7 +197,7 @@ const buildQuoteItems = async (args: {
 
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { q, status, customerId, skip = 0, limit = 50 } = req.query;
+    const { q, status, customerId, skip = 0, limit = 50, sortBy = 'updatedAt', sortDir = 'desc' } = req.query;
     const filter: any = {};
 
     if (status) filter.quoteStatus = normalizeQuoteStatus(status);
@@ -187,7 +215,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
     }
 
     const rows = await Quote.find(filter)
-      .sort({ updatedAt: -1, createdAt: -1 })
+      .sort(buildQuoteSort(sortBy, sortDir))
       .skip(Math.max(0, Number(skip) || 0))
       .limit(Math.max(1, Number(limit) || 50));
     const total = await Quote.countDocuments(filter);
@@ -199,6 +227,8 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
         total,
         skip: Math.max(0, Number(skip) || 0),
         limit: Math.max(1, Number(limit) || 50),
+        sortBy: String(sortBy || 'updatedAt'),
+        sortDir: String(sortDir || 'desc').trim().toLowerCase() === 'asc' ? 'asc' : 'desc',
       },
     });
   } catch (error: any) {

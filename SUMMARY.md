@@ -69,6 +69,13 @@
 - Invoice number generation
 - Reverse charge applicability
 
+### Accounting And Reporting Updates
+- Accounting report console with recent accounting activity, trial balance, profit and loss, balance sheet, and the full TDS report suite
+- Sales report console with GST tax summary alongside daily, item-wise, customer-wise, return, profit, receivable, attendance, cash/credit, and user-wise reports
+- TDS compliance workspace for PAN/TAN setup, section/rate configuration, deductions, challans, returns, certificates, and reconciliation tracking
+- TDS reporting covers computation, payables, outstanding, quarterly returns, certificates, reconciliation/mismatch, challans, correction returns, audit trail, and tax audit Clause 34(a)
+- TDS use-case presets for sports facility rent, room rent, contract labour, professional services, and event prize money
+
 ### Payment Integration
 - Razorpay SDK integration ready
 - Multiple payment methods supported (Cash, Card, UPI, Check, Bank Transfer)

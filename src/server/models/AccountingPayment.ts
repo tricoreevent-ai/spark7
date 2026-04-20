@@ -26,7 +26,7 @@ export interface IAccountingPayment extends Document {
 
 const AccountingPaymentSchema = new Schema<IAccountingPayment>(
   {
-    paymentNumber: { type: String, required: true, trim: true, index: true, unique: true },
+    paymentNumber: { type: String, required: true, trim: true, index: true },
     paymentDate: { type: Date, required: true, default: Date.now, index: true },
     amount: { type: Number, required: true, min: 0 },
     mode: {

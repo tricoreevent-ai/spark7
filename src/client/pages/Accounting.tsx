@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { CardTabs } from '../components/CardTabs';
+import { FloatingField } from '../components/FloatingField';
 import { AccountingGstWorkspace } from '../components/AccountingGstWorkspace';
 import { AccountingTreasuryWorkspace } from '../components/AccountingTreasuryWorkspace';
+import { AccountingTdsWorkspace } from '../components/AccountingTdsWorkspace';
 import { ReportDataTable } from '../components/ReportDataTable';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
@@ -11,7 +14,7 @@ import { apiUrl } from '../utils/api';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
 import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
 
-type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'treasury' | 'ledger' | 'gst' | 'reports';
+type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'treasury' | 'ledger' | 'gst' | 'tds' | 'reports';
 type MastersTabKey = 'vendors' | 'assets' | 'periods';
 type InvoicesTabKey = 'invoice_entry' | 'expense_entry' | 'invoice_list';
 type PaymentsTabKey = 'salary_entry' | 'contract_entry' | 'history';
@@ -19,7 +22,7 @@ type OpeningTabKey = 'balances' | 'party_openings';
 type ExpensesTabKey = 'entry' | 'entries';
 type VouchersTabKey = 'receipt' | 'payment' | 'journal' | 'transfer' | 'list';
 type BooksTabKey = 'summary' | 'cash_entries' | 'bank_entries' | 'reconciliation' | 'csv_compare';
-type LedgerTabKey = 'create_account' | 'ledger_view';
+type LedgerTabKey = 'groups' | 'ledgers' | 'create_account' | 'ledger_view';
 type ReportsTabKey =
   | 'overview'
   | 'vendors'
@@ -33,7 +36,39 @@ type ReportsTabKey =
   | 'daybook'
   | 'cash_entries'
   | 'bank_entries'
-  | 'trial_balance';
+  | 'trial_balance'
+  | 'profit_loss'
+  | 'balance_sheet'
+  | 'tds';
+type TdsReportTabKey =
+  | 'computation'
+  | 'payables'
+  | 'outstanding'
+  | 'returns'
+  | 'certificates'
+  | 'reconciliation'
+  | 'mismatches'
+  | 'challans'
+  | 'payment_register'
+  | 'corrections'
+  | 'audit_trail'
+  | 'tax_audit_34a';
+type TdsReportFieldKind = 'text' | 'money' | 'number' | 'date' | 'upper' | 'period';
+interface TdsReportField {
+  key: string;
+  header: string;
+  kind?: TdsReportFieldKind;
+  empty?: string;
+}
+interface TdsReportDefinition {
+  title: string;
+  itemLabel: string;
+  searchPlaceholder: string;
+  exportSlug: string;
+  dataPath: string[];
+  filters?: Array<{ key: string; label: string; kind?: TdsReportFieldKind }>;
+  fields: TdsReportField[];
+}
 
 interface SalaryPayment {
   _id: string;
@@ -44,6 +79,23 @@ interface SalaryPayment {
   payDate: string;
   baseAmount?: number;
   bonusAmount?: number;
+  grossSalary?: number;
+  employeePf?: number;
+  employeeEsi?: number;
+  professionalTax?: number;
+  tdsAmount?: number;
+  statutoryDeductions?: number;
+  retirementContribution?: number;
+  insurancePremium?: number;
+  otherDeductions?: number;
+  voluntaryDeductions?: number;
+  totalDeductions?: number;
+  employerPf?: number;
+  employerEsi?: number;
+  employerPayrollTaxes?: number;
+  benefitsExpense?: number;
+  netPay?: number;
+  totalPayrollCost?: number;
   amount: number;
   paymentMethod: string;
   notes?: string;
@@ -97,12 +149,33 @@ interface VoucherRow {
   lines?: Array<{ accountId?: string; accountCode?: string; accountName: string; debit: number; credit: number; narration?: string }>;
 }
 
-interface ChartAccount {
+interface ChartAccount extends Record<string, any> {
   _id: string;
   accountCode: string;
+  folioNo?: string;
   accountName: string;
   accountType: string;
   subType: string;
+  groupId?: string;
+  groupName?: string;
+  underLabel?: string;
+  towerBlockFlat?: string;
+  gstNumber?: string;
+  panNumber?: string;
+  openingBalance?: number;
+  openingSide?: 'debit' | 'credit';
+  isSystem?: boolean;
+  isActive: boolean;
+}
+
+interface AccountGroup extends Record<string, any> {
+  _id: string;
+  groupName: string;
+  groupCode: string;
+  under: 'asset' | 'liability' | 'income' | 'expense';
+  parentGroupId?: string;
+  parentGroupName?: string;
+  isSystem?: boolean;
   isActive: boolean;
 }
 
@@ -113,20 +186,73 @@ interface EmployeeMasterRow {
   designation?: string;
 }
 
-const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: 'dashboard', label: 'MIS Dashboard' },
-  { key: 'invoices', label: 'Invoices & Payments' },
-  { key: 'masters', label: 'Vendors / Assets / Periods' },
-  { key: 'payments', label: 'Salary & Contract' },
-  { key: 'opening', label: 'Opening Balances' },
-  { key: 'expenses', label: 'Expenses & Income' },
-  { key: 'vouchers', label: 'Vouchers' },
-  { key: 'books', label: 'Cash & Bank Book' },
-  { key: 'treasury', label: 'Treasury & Banks' },
-  { key: 'ledger', label: 'Chart & Ledger' },
-  { key: 'gst', label: 'GST & Filing' },
-  { key: 'reports', label: 'Reports' },
+interface AccountingMenuItem {
+  key: TabKey;
+  label: string;
+  description: string;
+}
+
+interface AccountingMenuGroup {
+  title: string;
+  helper: string;
+  items: AccountingMenuItem[];
+}
+
+const accountingMenuGroups: AccountingMenuGroup[] = [
+  {
+    title: 'Overview',
+    helper: 'Quick health and recent activity',
+    items: [
+      { key: 'dashboard', label: 'MIS Dashboard', description: 'Revenue, expenses, profit, GST, and recent work' },
+    ],
+  },
+  {
+    title: 'Masters',
+    helper: 'Setup data used by entries',
+    items: [
+      { key: 'ledger', label: 'Chart & Ledger', description: 'Groups, ledgers, accounts, and ledger view' },
+      { key: 'masters', label: 'Vendors / Assets / Periods', description: 'Vendor master, fixed assets, financial periods' },
+      { key: 'opening', label: 'Opening Balances', description: 'Core and party opening balances' },
+      { key: 'treasury', label: 'Treasury & Banks', description: 'Bank setup, treasury accounts, and cash controls' },
+    ],
+  },
+  {
+    title: 'Entries',
+    helper: 'Day-to-day accounting input',
+    items: [
+      { key: 'invoices', label: 'Invoices & Bills', description: 'Customer invoices, expense bills, and invoice list' },
+      { key: 'expenses', label: 'Income & Expense Entry', description: 'Manual day-book income and expense entries' },
+      { key: 'payments', label: 'Salary & Contract Entry', description: 'Salary payments, contractor payments, edit history' },
+      { key: 'vouchers', label: 'Vouchers', description: 'Receipt, payment, journal, and transfer vouchers' },
+    ],
+  },
+  {
+    title: 'Books',
+    helper: 'Cash, bank, and reconciliation',
+    items: [
+      { key: 'books', label: 'Cash & Bank Book', description: 'Cash entries, bank entries, reconciliation, CSV compare' },
+    ],
+  },
+  {
+    title: 'Compliance',
+    helper: 'GST and TDS statutory work',
+    items: [
+      { key: 'gst', label: 'GST & Filing', description: 'GST setup, filing support, and GST reports' },
+      { key: 'tds', label: 'TDS Compliance', description: 'Sections, deductees, challans, returns, certificates' },
+    ],
+  },
+  {
+    title: 'Reports',
+    helper: 'Review, export, and audit',
+    items: [
+      { key: 'reports', label: 'Accounting Reports', description: 'Trial balance, P&L, balance sheet, TDS, ledgers' },
+    ],
+  },
 ];
+
+const tabs: Array<{ key: TabKey; label: string }> = accountingMenuGroups.flatMap((group) =>
+  group.items.map(({ key, label }) => ({ key, label }))
+);
 const masterTabs: Array<{ key: MastersTabKey; label: string }> = [
   { key: 'vendors', label: 'Vendor Master' },
   { key: 'assets', label: 'Fixed Assets' },
@@ -165,11 +291,17 @@ const booksTabs: Array<{ key: BooksTabKey; label: string }> = [
   { key: 'csv_compare', label: 'CSV Compare' },
 ];
 const ledgerTabs: Array<{ key: LedgerTabKey; label: string }> = [
+  { key: 'groups', label: 'Manage Groups' },
+  { key: 'ledgers', label: 'Manage Ledgers' },
   { key: 'create_account', label: 'Create Account' },
   { key: 'ledger_view', label: 'Ledger View' },
 ];
 const reportsTabs: Array<{ key: ReportsTabKey; label: string }> = [
   { key: 'overview', label: 'Overview' },
+  { key: 'trial_balance', label: 'Trial Balance' },
+  { key: 'profit_loss', label: 'Profit & Loss' },
+  { key: 'balance_sheet', label: 'Balance Sheet' },
+  { key: 'tds', label: 'TDS Report' },
   { key: 'vendors', label: 'Vendors' },
   { key: 'assets', label: 'Assets' },
   { key: 'periods', label: 'Periods' },
@@ -181,11 +313,633 @@ const reportsTabs: Array<{ key: ReportsTabKey; label: string }> = [
   { key: 'daybook', label: 'Day Book' },
   { key: 'cash_entries', label: 'Cash Entries' },
   { key: 'bank_entries', label: 'Bank Entries' },
-  { key: 'trial_balance', label: 'Trial Balance' },
 ];
+const tdsReportTabs: Array<{ key: TdsReportTabKey; label: string }> = [
+  { key: 'computation', label: 'Computation' },
+  { key: 'payables', label: 'Payables' },
+  { key: 'outstanding', label: 'Outstanding' },
+  { key: 'returns', label: '24Q / 26Q / 27Q / 27EQ' },
+  { key: 'certificates', label: '16 / 16A / 27D' },
+  { key: 'reconciliation', label: '26AS / AIS' },
+  { key: 'mismatches', label: 'Mismatches' },
+  { key: 'challans', label: 'Challans' },
+  { key: 'payment_register', label: 'Payment Register' },
+  { key: 'corrections', label: 'Corrections' },
+  { key: 'audit_trail', label: 'Audit Trail' },
+  { key: 'tax_audit_34a', label: 'Tax Audit 34(a)' },
+];
+
+interface AccountingLogicDefinition {
+  title: string;
+  manualAnchor: string;
+  summary: string;
+  formulas: string[];
+  dataSources: string[];
+}
+
+const dashboardLogic: AccountingLogicDefinition = {
+  title: 'Dashboard logic',
+  manualAnchor: 'accounting-dashboard-logic',
+  summary: 'The dashboard combines posted accounting movement for the selected date range with recent invoices, payments, journals, and compliance activity.',
+  formulas: [
+    'Selected Revenue = posted sales/accounting income between the selected start and end dates.',
+    'Month-to-date Revenue = posted income from the first day of the selected end-date month through the selected end date.',
+    'Expenses = posted expense ledger movement inside the selected date range.',
+    'Profit = Selected Revenue minus Expenses for the selected date range.',
+    'GST Payable = output GST payable less input/settled GST movement posted up to the selected end date.',
+  ],
+  dataSources: ['Account ledger entries', 'Accounting invoices', 'Accounting payments', 'Journal entries', 'TDS/GST workspaces'],
+};
+
+const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
+  overview: {
+    title: 'Accounting reports overview logic',
+    manualAnchor: 'accounting-report-logic',
+    summary: 'The overview shows high-level income, expense, profit/loss, balance sheet status, TDS status, and recent accounting activity for the selected period.',
+    formulas: [
+      'Total Income = income ledger credits minus income ledger debits, plus legacy POS/manual income fallback rows when needed.',
+      'Total Expense = expense ledger debits minus expense ledger credits, plus legacy payroll/contract/manual expense fallback rows when needed.',
+      'Net Profit/Loss = Total Income - Total Expense.',
+      'Balance Sheet Difference = Assets - (Liabilities + Equity including retained earnings and diagnostic rows).',
+    ],
+    dataSources: ['Profit & loss report API', 'Balance sheet report API', 'TDS report API', 'Recent invoices/payments/vouchers/journals'],
+  },
+  trial_balance: {
+    title: 'Trial balance logic',
+    manualAnchor: 'accounting-trial-balance-logic',
+    summary: 'Trial Balance proves whether all ledger balances are balanced as debit and credit totals.',
+    formulas: [
+      'Opening Balance = chart opening balance unless an opening ledger entry already exists, plus all ledger movement before the start date.',
+      'Period Debit = sum of debit ledger entries inside the selected date range.',
+      'Period Credit = sum of credit ledger entries inside the selected date range.',
+      'Closing Balance = Opening Balance + Period Debit - Period Credit.',
+      'Debit Balance and Credit Balance are derived from the closing balance normal side.',
+    ],
+    dataSources: ['Chart accounts', 'Account ledger entries', 'Opening balance ledger entries', 'Legacy diagnostic rows'],
+  },
+  profit_loss: {
+    title: 'Profit & loss logic',
+    manualAnchor: 'accounting-profit-loss-logic',
+    summary: 'Profit & Loss compares all period income against all period expenses.',
+    formulas: [
+      'Income = income ledger credits minus debits, excluding opening entries.',
+      'Expense = expense ledger debits minus credits, excluding opening entries.',
+      'Legacy fallback income/expense is included only when source documents do not already have ledger postings.',
+      'Net Profit/Loss = Total Income - Total Expense.',
+    ],
+    dataSources: ['Income/expense ledger accounts', 'Sales fallback rows', 'Day book fallback rows', 'Salary and contract fallback rows'],
+  },
+  balance_sheet: {
+    title: 'Balance sheet logic',
+    manualAnchor: 'accounting-balance-sheet-logic',
+    summary: 'Balance Sheet shows the financial position as on the selected end date.',
+    formulas: [
+      'Assets = debit-positive closing balances of asset accounts.',
+      'Liabilities = credit-positive closing balances of liability accounts.',
+      'Equity = capital/equity/opening-balance accounts plus retained earnings.',
+      'Retained Earnings = profit/loss accumulated up to the selected as-on date.',
+      'Difference = Assets - (Liabilities + Equity). It should be zero after diagnostics are resolved.',
+    ],
+    dataSources: ['Chart accounts', 'Account ledger entries up to as-on date', 'Profit & loss retained earnings bridge'],
+  },
+  tds: {
+    title: 'TDS report logic',
+    manualAnchor: 'accounting-tds-report-logic',
+    summary: 'The TDS suite follows deduction, payable, challan deposit, return, certificate, reconciliation, correction, and audit lifecycle.',
+    formulas: [
+      'TDS Deducted = sum of TDS transaction amounts.',
+      'Deposited = non-cancelled challan payments recorded against TDS.',
+      'Outstanding = deducted amount minus deposited/allocated amount.',
+      'Mismatch rows compare books, challans, returns, and reconciliation imports where available.',
+    ],
+    dataSources: ['TDS transactions', 'TDS challans', 'TDS returns', 'TDS certificates', 'TDS reconciliation records'],
+  },
+  vendors: {
+    title: 'Vendor report logic',
+    manualAnchor: 'accounting-master-report-logic',
+    summary: 'Vendor report lists vendor master balances and statutory details used by expense, TDS, and payable workflows.',
+    formulas: ['Balance = vendor opening balance and linked supplier ledger movement where available.', 'TDS flags come from vendor statutory setup.'],
+    dataSources: ['Vendor master', 'Linked chart accounts', 'TDS section setup'],
+  },
+  assets: {
+    title: 'Fixed asset report logic',
+    manualAnchor: 'accounting-master-report-logic',
+    summary: 'Asset report lists active/disposed fixed assets and depreciation setup.',
+    formulas: ['Book value = cost minus accumulated depreciation posted through asset workflows.'],
+    dataSources: ['Fixed asset master', 'Depreciation journals'],
+  },
+  periods: {
+    title: 'Financial period report logic',
+    manualAnchor: 'accounting-master-report-logic',
+    summary: 'Period report shows accounting periods and whether entry locks are active.',
+    formulas: ['Closed/locked period status is used by validation checks to flag backdated postings.'],
+    dataSources: ['Financial period master'],
+  },
+  invoices: {
+    title: 'Invoice report logic',
+    manualAnchor: 'accounting-transaction-report-logic',
+    summary: 'Invoice report lists accounting invoices generated manually or from sales/booking workflows.',
+    formulas: ['Balance = invoice total amount minus paid amount.', 'Status is based on posted, partial, paid, draft, or cancelled state.'],
+    dataSources: ['Accounting invoices', 'Accounting payments', 'Journal entries'],
+  },
+  payments: {
+    title: 'Payment report logic',
+    manualAnchor: 'accounting-transaction-report-logic',
+    summary: 'Payment report lists customer/vendor payments posted into books.',
+    formulas: ['Payment amount is the saved posted amount by mode and party.', 'Cancelled payments are excluded from final summaries.'],
+    dataSources: ['Accounting payments', 'Ledger entries', 'Invoices'],
+  },
+  vouchers: {
+    title: 'Voucher report logic',
+    manualAnchor: 'accounting-transaction-report-logic',
+    summary: 'Voucher report lists receipt, payment, journal, and transfer vouchers.',
+    formulas: ['Voucher total is the saved voucher amount.', 'Balanced vouchers must have equal debit and credit lines.'],
+    dataSources: ['Accounting vouchers', 'Voucher lines', 'Account ledger entries'],
+  },
+  salary: {
+    title: 'Salary report logic',
+    manualAnchor: 'accounting-payroll-report-logic',
+    summary: 'Salary report shows payroll payments including gross salary, deductions, net pay, employer contributions, and payroll cost.',
+    formulas: ['Net Pay = Gross Salary - statutory deductions - voluntary deductions.', 'Total Payroll Cost = Gross Salary + employer payroll taxes + benefits expense.'],
+    dataSources: ['Salary payments', 'Employee master', 'Payroll statutory records'],
+  },
+  contracts: {
+    title: 'Contract report logic',
+    manualAnchor: 'accounting-payroll-report-logic',
+    summary: 'Contract report lists contractor payments and related TDS/accounting status.',
+    formulas: ['Contract expense = posted contractor payment amount.', 'TDS is calculated from applicable section/rate where enabled.'],
+    dataSources: ['Contract payments', 'TDS transactions', 'Ledger entries'],
+  },
+  daybook: {
+    title: 'Day book report logic',
+    manualAnchor: 'accounting-book-report-logic',
+    summary: 'Day Book is the chronological register of manual income/expense entries and operational accounting movement.',
+    formulas: ['Income entries increase income totals.', 'Expense entries increase expense totals.', 'Payment mode decides cash or bank book impact.'],
+    dataSources: ['Day book entries', 'Ledger entries'],
+  },
+  cash_entries: {
+    title: 'Cash book report logic',
+    manualAnchor: 'accounting-book-report-logic',
+    summary: 'Cash book shows only entries that affect cash-in-hand accounts.',
+    formulas: ['Cash closing = opening cash + cash inflows - cash outflows.'],
+    dataSources: ['Cash ledger accounts', 'Cash vouchers', 'Cash sales/receipts/expenses'],
+  },
+  bank_entries: {
+    title: 'Bank book report logic',
+    manualAnchor: 'accounting-book-report-logic',
+    summary: 'Bank book shows only entries that affect bank accounts.',
+    formulas: ['Bank closing = opening bank balance + bank inflows - bank outflows.'],
+    dataSources: ['Bank ledger accounts', 'Bank vouchers', 'Bank feed reconciliation'],
+  },
+};
+
+const AccountingLogicHelpCard: React.FC<{
+  logic: AccountingLogicDefinition;
+  compact?: boolean;
+  helpLabel?: string;
+  variant?: 'inline' | 'drawer';
+  triggerLabel?: string;
+}> = ({ compact = false, helpLabel = 'Open full help', logic, variant = 'inline', triggerLabel }) => {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  if (variant === 'drawer') {
+    return (
+      <>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setIsDrawerOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200/50 hover:bg-cyan-400/15 hover:text-white"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950/30 text-[11px]">?</span>
+            <span>{triggerLabel || logic.title}</span>
+          </button>
+        </div>
+
+        {isDrawerOpen && (
+          <div className="fixed inset-0 z-[90]">
+            <button
+              type="button"
+              aria-label="Close logic drawer"
+              className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm"
+              onClick={() => setIsDrawerOpen(false)}
+            />
+            <aside
+              role="dialog"
+              aria-modal="true"
+              aria-label={logic.title}
+              className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-cyan-300/20 bg-slate-950/95 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200/70">Accounting Help</p>
+                  <h2 className="mt-1 text-lg font-semibold text-white">{logic.title}</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg text-gray-200 transition hover:bg-white/10 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-5 px-5 py-5 text-sm">
+                <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-cyan-50">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white">How this section is calculated</p>
+                    <ManualHelpLink
+                      anchor={logic.manualAnchor}
+                      label={helpLabel}
+                      className="bg-slate-950/30 px-2.5 py-1 text-[11px]"
+                    />
+                  </div>
+                  <p className="mt-3 text-cyan-50/85">{logic.summary}</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Formula / Logic</p>
+                  <ul className="mt-3 space-y-2 text-gray-200">
+                    {logic.formulas.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Data Used</p>
+                  <ul className="mt-3 space-y-2 text-gray-200">
+                    {logic.dataSources.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </aside>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <details
+      className={`rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-50 ${
+        compact ? 'px-4 py-2.5 text-sm' : 'p-4 text-sm'
+      }`}
+    >
+      <summary className={`flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 ${compact ? 'text-sm font-semibold' : 'font-semibold'}`}>
+        <span>{logic.title}</span>
+        <ManualHelpLink
+          anchor={logic.manualAnchor}
+          label={helpLabel}
+          className={compact ? 'bg-slate-950/30 px-2.5 py-1 text-[11px]' : 'bg-slate-950/30'}
+        />
+      </summary>
+      <p className="mt-3 text-cyan-50/85">{logic.summary}</p>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Formula / Logic</p>
+          <ul className="mt-2 space-y-1 text-cyan-50/85">
+            {logic.formulas.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Data Used</p>
+          <ul className="mt-2 space-y-1 text-cyan-50/85">
+            {logic.dataSources.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      </div>
+    </details>
+  );
+};
+const tdsReportDefinitions: Record<TdsReportTabKey, TdsReportDefinition> = {
+  computation: {
+    title: 'TDS Computation Report',
+    itemLabel: 'TDS sections',
+    searchPlaceholder: 'Search by section, form, or nature of payment',
+    exportSlug: 'tds-computation',
+    dataPath: ['compliance', 'tdsComputation'],
+    filters: [{ key: 'formType', label: 'Return Form' }, { key: 'dueStatus', label: 'Due Status' }],
+    fields: [
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'formType', header: 'Return' },
+      { key: 'natureOfPayment', header: 'Nature of Payment' },
+      { key: 'transactionCount', header: 'Txns', kind: 'number' },
+      { key: 'partyCount', header: 'Parties', kind: 'number' },
+      { key: 'taxableAmount', header: 'Taxable', kind: 'money' },
+      { key: 'tdsDeducted', header: 'TDS Deducted', kind: 'money' },
+      { key: 'tdsPaid', header: 'Deposited', kind: 'money' },
+      { key: 'tdsPending', header: 'Payable', kind: 'money' },
+      { key: 'overdueAmount', header: 'Overdue', kind: 'money' },
+      { key: 'dueStatus', header: 'Status' },
+    ],
+  },
+  payables: {
+    title: 'TDS Payables Report',
+    itemLabel: 'payable sections',
+    searchPlaceholder: 'Search payables by section, form, or nature',
+    exportSlug: 'tds-payables',
+    dataPath: ['compliance', 'tdsPayables'],
+    filters: [{ key: 'status', label: 'Status' }, { key: 'formType', label: 'Return Form' }],
+    fields: [
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'formType', header: 'Return' },
+      { key: 'natureOfPayment', header: 'Nature of Payment' },
+      { key: 'pendingTransactions', header: 'Pending Txns', kind: 'number' },
+      { key: 'outstandingAmount', header: 'Outstanding', kind: 'money' },
+      { key: 'overdueAmount', header: 'Overdue', kind: 'money' },
+      { key: 'earliestDueDate', header: 'Earliest Due', kind: 'date' },
+      { key: 'status', header: 'Status' },
+    ],
+  },
+  outstanding: {
+    title: 'TDS Outstanding Report',
+    itemLabel: 'outstanding deductions',
+    searchPlaceholder: 'Search by deductee, PAN, section, reference, or residency',
+    exportSlug: 'tds-outstanding',
+    dataPath: ['compliance', 'tdsOutstanding'],
+    filters: [{ key: 'sectionCode', label: 'Section' }, { key: 'residentialStatus', label: 'Residency' }, { key: 'status', label: 'Status' }],
+    fields: [
+      { key: 'transactionDate', header: 'Date', kind: 'date' },
+      { key: 'dueDate', header: 'Due Date', kind: 'date' },
+      { key: 'deducteeName', header: 'Deductee' },
+      { key: 'pan', header: 'PAN' },
+      { key: 'residentialStatus', header: 'Residency' },
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'referenceNo', header: 'Reference' },
+      { key: 'tdsAmount', header: 'TDS', kind: 'money' },
+      { key: 'paidAmount', header: 'Paid', kind: 'money' },
+      { key: 'balanceAmount', header: 'Balance', kind: 'money' },
+      { key: 'status', header: 'Status' },
+    ],
+  },
+  returns: {
+    title: 'Quarterly TDS Returns',
+    itemLabel: 'return periods',
+    searchPlaceholder: 'Search Form 24Q, 26Q, 27Q, or 27EQ',
+    exportSlug: 'tds-quarterly-returns',
+    dataPath: ['statutory', 'quarterlyReturns'],
+    filters: [{ key: 'formType', label: 'Form' }, { key: 'quarter', label: 'Quarter' }, { key: 'status', label: 'Status', kind: 'upper' }],
+    fields: [
+      { key: 'formType', header: 'Form' },
+      { key: 'financialYear', header: 'FY' },
+      { key: 'quarter', header: 'Quarter' },
+      { key: 'reportName', header: 'Report' },
+      { key: 'transactionCount', header: 'Rows', kind: 'number' },
+      { key: 'taxableAmount', header: 'Taxable', kind: 'money' },
+      { key: 'tdsAmount', header: 'TDS', kind: 'money' },
+      { key: 'generatedDrafts', header: 'Drafts', kind: 'number' },
+      { key: 'status', header: 'Status', kind: 'upper' },
+      { key: 'fvuValidationStatus', header: 'FVU', kind: 'upper' },
+      { key: 'acknowledgementNo', header: 'Ack No.' },
+      { key: 'fileName', header: 'File' },
+    ],
+  },
+  certificates: {
+    title: 'TDS Certificates',
+    itemLabel: 'certificates',
+    searchPlaceholder: 'Search Form 16, Form 16A, Form 27D, deductee, PAN, or certificate number',
+    exportSlug: 'tds-certificates',
+    dataPath: ['statutory', 'certificates'],
+    filters: [{ key: 'formType', label: 'Form' }, { key: 'status', label: 'Status' }],
+    fields: [
+      { key: 'formType', header: 'Form' },
+      { key: 'period', header: 'Period', kind: 'period' },
+      { key: 'deducteeName', header: 'Deductee' },
+      { key: 'pan', header: 'PAN' },
+      { key: 'certificateNumber', header: 'Certificate No.' },
+      { key: 'transactionCount', header: 'Txns', kind: 'number' },
+      { key: 'status', header: 'Status' },
+      { key: 'emailedTo', header: 'Emailed To' },
+      { key: 'createdAt', header: 'Created', kind: 'date' },
+    ],
+  },
+  reconciliation: {
+    title: 'Form 26AS / AIS Reconciliation',
+    itemLabel: 'reconciliation runs',
+    searchPlaceholder: 'Search reconciliation source, quarter, or notes',
+    exportSlug: 'tds-reconciliation',
+    dataPath: ['reconciliation', 'runs'],
+    filters: [{ key: 'sourceType', label: 'Source', kind: 'upper' }, { key: 'quarter', label: 'Quarter' }],
+    fields: [
+      { key: 'createdAt', header: 'Run Date', kind: 'date' },
+      { key: 'sourceType', header: 'Source', kind: 'upper' },
+      { key: 'period', header: 'Period', kind: 'period' },
+      { key: 'importedRows', header: 'Imported', kind: 'number' },
+      { key: 'booksRows', header: 'Books', kind: 'number' },
+      { key: 'matchedRows', header: 'Matched', kind: 'number' },
+      { key: 'mismatchRows', header: 'Mismatches', kind: 'number' },
+      { key: 'missingInBooks', header: 'Missing Books', kind: 'number' },
+      { key: 'missingInImport', header: 'Missing Import', kind: 'number' },
+      { key: 'notes', header: 'Notes' },
+    ],
+  },
+  mismatches: {
+    title: 'TDS Mismatch Report',
+    itemLabel: 'mismatch rows',
+    searchPlaceholder: 'Search mismatches by source, type, reference, or PAN',
+    exportSlug: 'tds-mismatches',
+    dataPath: ['reconciliation', 'mismatches'],
+    filters: [{ key: 'sourceType', label: 'Source', kind: 'upper' }, { key: 'mismatchType', label: 'Type', kind: 'upper' }],
+    fields: [
+      { key: 'createdAt', header: 'Run Date', kind: 'date' },
+      { key: 'sourceType', header: 'Source', kind: 'upper' },
+      { key: 'mismatchType', header: 'Type', kind: 'upper' },
+      { key: 'referenceNo', header: 'Reference' },
+      { key: 'pan', header: 'PAN' },
+      { key: 'bookAmount', header: 'Books', kind: 'money' },
+      { key: 'importAmount', header: 'Import', kind: 'money' },
+      { key: 'difference', header: 'Difference', kind: 'money' },
+      { key: 'notes', header: 'Notes' },
+    ],
+  },
+  challans: {
+    title: 'Challan Status Report',
+    itemLabel: 'challans',
+    searchPlaceholder: 'Search by CIN, BSR, challan serial, bank, or section',
+    exportSlug: 'tds-challan-status',
+    dataPath: ['challans', 'status'],
+    filters: [{ key: 'sectionCode', label: 'Section' }, { key: 'status', label: 'Status' }, { key: 'consumptionStatus', label: 'Consumption' }],
+    fields: [
+      { key: 'paymentDate', header: 'Payment Date', kind: 'date' },
+      { key: 'period', header: 'Period', kind: 'period' },
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'challanSerialNo', header: 'Challan No.' },
+      { key: 'bsrCode', header: 'BSR' },
+      { key: 'cin', header: 'CIN' },
+      { key: 'bankName', header: 'Bank' },
+      { key: 'amount', header: 'Amount', kind: 'money' },
+      { key: 'allocatedAmount', header: 'Allocated', kind: 'money' },
+      { key: 'unallocatedAmount', header: 'Unallocated', kind: 'money' },
+      { key: 'consumptionStatus', header: 'Consumption' },
+      { key: 'status', header: 'Status' },
+    ],
+  },
+  payment_register: {
+    title: 'TDS Payment Register',
+    itemLabel: 'payments',
+    searchPlaceholder: 'Search payment register by CIN, BSR, serial, bank, or section',
+    exportSlug: 'tds-payment-register',
+    dataPath: ['challans', 'paymentRegister'],
+    filters: [{ key: 'sectionCode', label: 'Section' }, { key: 'status', label: 'Status' }, { key: 'consumptionStatus', label: 'Consumption' }],
+    fields: [
+      { key: 'paymentDate', header: 'Payment Date', kind: 'date' },
+      { key: 'period', header: 'Period', kind: 'period' },
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'challanSerialNo', header: 'Challan No.' },
+      { key: 'bsrCode', header: 'BSR' },
+      { key: 'cin', header: 'CIN' },
+      { key: 'bankName', header: 'Bank' },
+      { key: 'amount', header: 'Amount', kind: 'money' },
+      { key: 'allocatedAmount', header: 'Allocated', kind: 'money' },
+      { key: 'unallocatedAmount', header: 'Unallocated', kind: 'money' },
+      { key: 'status', header: 'Status' },
+    ],
+  },
+  corrections: {
+    title: 'Correction Return Report',
+    itemLabel: 'correction returns',
+    searchPlaceholder: 'Search by form, token, acknowledgement, or status',
+    exportSlug: 'tds-correction-returns',
+    dataPath: ['audit', 'correctionReturns'],
+    filters: [{ key: 'formType', label: 'Form' }, { key: 'status', label: 'Status' }],
+    fields: [
+      { key: 'formType', header: 'Form' },
+      { key: 'financialYear', header: 'FY' },
+      { key: 'quarter', header: 'Quarter' },
+      { key: 'status', header: 'Status' },
+      { key: 'originalTokenNo', header: 'Original Token' },
+      { key: 'correctionTokenNo', header: 'Correction Token' },
+      { key: 'acknowledgementNo', header: 'Ack No.' },
+      { key: 'updatedAt', header: 'Updated', kind: 'date' },
+      { key: 'notes', header: 'Notes' },
+    ],
+  },
+  audit_trail: {
+    title: 'TDS Audit Trail Report',
+    itemLabel: 'audit events',
+    searchPlaceholder: 'Search by action, entity, reference, user, or store',
+    exportSlug: 'tds-audit-trail',
+    dataPath: ['audit', 'auditTrail'],
+    filters: [{ key: 'action', label: 'Action' }, { key: 'entityType', label: 'Entity' }],
+    fields: [
+      { key: 'createdAt', header: 'Date', kind: 'date' },
+      { key: 'action', header: 'Action' },
+      { key: 'entityType', header: 'Entity' },
+      { key: 'referenceNo', header: 'Reference' },
+      { key: 'userId', header: 'User' },
+      { key: 'storeKey', header: 'Store' },
+      { key: 'details', header: 'Details' },
+    ],
+  },
+  tax_audit_34a: {
+    title: 'Tax Audit Report - Clause 34(a)',
+    itemLabel: 'tax audit rows',
+    searchPlaceholder: 'Search by section, form, or nature',
+    exportSlug: 'tds-tax-audit-clause-34a',
+    dataPath: ['audit', 'taxAuditClause34'],
+    filters: [{ key: 'formType', label: 'Return Form' }, { key: 'sectionCode', label: 'Section' }],
+    fields: [
+      { key: 'sectionCode', header: 'Section' },
+      { key: 'returnSectionCode', header: 'Return Code' },
+      { key: 'natureOfPayment', header: 'Nature of Payment' },
+      { key: 'formType', header: 'Form' },
+      { key: 'amountPaidOrCredited', header: 'Amount Paid/Credited', kind: 'money' },
+      { key: 'taxDeductible', header: 'Tax Deductible', kind: 'money' },
+      { key: 'taxDeducted', header: 'Tax Deducted', kind: 'money' },
+      { key: 'taxPaid', header: 'Tax Paid', kind: 'money' },
+      { key: 'taxPayable', header: 'Tax Payable', kind: 'money' },
+      { key: 'amountNotDeducted', header: 'Not Deducted Base', kind: 'money' },
+      { key: 'remarks', header: 'Remarks' },
+    ],
+  },
+};
+
+const readTdsPath = (source: any, path: string[]) =>
+  path.reduce((current, key) => (current && current[key] !== undefined ? current[key] : undefined), source);
+
+const formatTdsReportDate = (value: unknown) => {
+  if (!value) return '-';
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('en-IN');
+};
+
+const getTdsReportCellValue = (row: any, field: TdsReportField): unknown => {
+  if (field.kind === 'period') return `${row.financialYear || ''} ${row.quarter || ''}`.trim();
+  return row[field.key];
+};
+
+const renderTdsReportCell = (row: any, field: TdsReportField) => {
+  const value = getTdsReportCellValue(row, field);
+  if (field.kind === 'money') return formatCurrency(Number(value || 0));
+  if (field.kind === 'number') return Number(value || 0);
+  if (field.kind === 'date') return formatTdsReportDate(value);
+  if (field.kind === 'upper') return String(value || field.empty || '-').replace(/_/g, ' ').toUpperCase();
+  const text = String(value ?? '').trim();
+  return text || field.empty || '-';
+};
+
+const exportTdsReportCell = (row: any, field: TdsReportField) => {
+  const value = getTdsReportCellValue(row, field);
+  if (field.kind === 'money' || field.kind === 'number') return Number(value || 0);
+  if (field.kind === 'date') return value ? String(value).slice(0, 10) : '';
+  if (field.kind === 'upper') return String(value || '').replace(/_/g, ' ').toUpperCase();
+  return String(value ?? '').trim();
+};
+
+const sortTdsReportCell = (row: any, field: TdsReportField) => {
+  const value = getTdsReportCellValue(row, field);
+  if (field.kind === 'money' || field.kind === 'number') return Number(value || 0);
+  if (field.kind === 'date') return value || '';
+  return String(value ?? '');
+};
+
+const isAccountingTabKey = (value: string | null): value is TabKey =>
+  Boolean(value && tabs.some((item) => item.key === value));
+
+const isReportsTabKey = (value: string | null): value is ReportsTabKey =>
+  Boolean(value && reportsTabs.some((item) => item.key === value));
+
+const isTdsReportTabKey = (value: string | null): value is TdsReportTabKey =>
+  Boolean(value && tdsReportTabs.some((item) => item.key === value));
 
 const paymentModes = ['cash', 'bank', 'upi', 'card', 'cheque', 'online', 'bank_transfer'];
 const salaryPaymentModes = ['cash', 'bank', 'upi', 'card', 'cheque'];
+const paymentModeOptions = paymentModes.map((mode) => ({ value: mode, label: mode.toUpperCase() }));
+const salaryPaymentModeOptions = salaryPaymentModes.map((mode) => ({ value: mode, label: mode.toUpperCase() }));
+const debitCreditOptions = [
+  { value: 'debit', label: 'Debit / Dr' },
+  { value: 'credit', label: 'Credit / Cr' },
+];
+const accountTypeOptions = [
+  { value: 'asset', label: 'Asset' },
+  { value: 'liability', label: 'Liability' },
+  { value: 'income', label: 'Income' },
+  { value: 'expense', label: 'Expense' },
+];
+const accountSubTypeOptions = [
+  { value: 'general', label: 'General' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'bank', label: 'Bank' },
+  { value: 'customer', label: 'Customer' },
+  { value: 'supplier', label: 'Supplier' },
+  { value: 'stock', label: 'Stock' },
+];
+const vendorDeducteeTypes = [
+  { value: 'vendor', label: 'Vendor' },
+  { value: 'contractor', label: 'Contractor' },
+  { value: 'professional', label: 'Professional / Consultant' },
+  { value: 'landlord', label: 'Landlord / Rent' },
+  { value: 'other', label: 'Other' },
+];
+const vendorTdsSections = [
+  { value: '194C', label: '194C - Contractor' },
+  { value: '194J', label: '194J - Professional Fees' },
+  { value: '194I', label: '194I - Rent' },
+  { value: '194-IB', label: '194-IB - Residential Rent' },
+  { value: '194B', label: '194B - Prize / Winnings' },
+  { value: '194Q', label: '194Q - Purchase of Goods' },
+  { value: '192', label: '192 - Salary' },
+];
 
 const createSalaryFormState = () => ({
   employeeId: '',
@@ -195,6 +949,20 @@ const createSalaryFormState = () => ({
   payDate: new Date().toISOString().slice(0, 10),
   amount: '',
   bonusAmount: '',
+  grossSalary: '',
+  employeePf: '',
+  employeeEsi: '',
+  professionalTax: '',
+  tdsAmount: '',
+  statutoryDeductions: '',
+  retirementContribution: '',
+  insurancePremium: '',
+  otherDeductions: '',
+  voluntaryDeductions: '',
+  employerPf: '',
+  employerEsi: '',
+  employerPayrollTaxes: '',
+  benefitsExpense: '',
   paymentMethod: 'bank',
   notes: '',
 });
@@ -261,11 +1029,40 @@ const createTransferFormState = () => ({
 
 const createVendorFormState = () => ({
   name: '',
+  groupId: '',
   contact: '',
   phone: '',
+  alternatePhone: '',
   email: '',
   gstin: '',
+  pan: '',
   address: '',
+  isTdsApplicable: true,
+  deducteeType: 'vendor',
+  tdsSectionCode: '',
+  tdsRate: '',
+  openingBalance: '',
+  openingSide: 'credit',
+});
+
+const createGroupFormState = () => ({
+  groupName: '',
+  groupCode: '',
+  under: 'asset',
+  parentGroupId: '',
+  isActive: true,
+});
+
+const createLedgerFormState = () => ({
+  accountCode: '',
+  accountName: '',
+  groupId: '',
+  subType: 'general',
+  gstNumber: '',
+  panNumber: '',
+  openingBalance: '',
+  openingSide: 'debit',
+  isActive: true,
 });
 
 const IconBase: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -424,7 +1221,11 @@ const ExportIcon = () => (
 );
 
 export const Accounting: React.FC = () => {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
+  const [collapsedAccountingGroups, setCollapsedAccountingGroups] = useState<Set<string>>(
+    () => new Set(accountingMenuGroups.map((group) => group.title).filter((title) => title !== 'Overview'))
+  );
   const [mastersTab, setMastersTab] = useState<MastersTabKey>('vendors');
   const [invoicesTab, setInvoicesTab] = useState<InvoicesTabKey>('invoice_entry');
   const [paymentsTab, setPaymentsTab] = useState<PaymentsTabKey>('salary_entry');
@@ -434,6 +1235,7 @@ export const Accounting: React.FC = () => {
   const [booksTab, setBooksTab] = useState<BooksTabKey>('summary');
   const [ledgerTab, setLedgerTab] = useState<LedgerTabKey>('create_account');
   const [reportsTab, setReportsTab] = useState<ReportsTabKey>('overview');
+  const [tdsReportTab, setTdsReportTab] = useState<TdsReportTabKey>('computation');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -442,6 +1244,8 @@ export const Accounting: React.FC = () => {
   const [editingContractId, setEditingContractId] = useState<string | null>(null);
   const [editingDaybookId, setEditingDaybookId] = useState<string | null>(null);
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<{ id: string; type: Exclude<VouchersTabKey, 'list'> } | null>(null);
 
   const [salaryList, setSalaryList] = useState<SalaryPayment[]>([]);
@@ -449,6 +1253,8 @@ export const Accounting: React.FC = () => {
   const [daybookRows, setDaybookRows] = useState<DayBookEntry[]>([]);
   const [voucherRows, setVoucherRows] = useState<VoucherRow[]>([]);
   const [chartAccounts, setChartAccounts] = useState<ChartAccount[]>([]);
+  const [accountGroups, setAccountGroups] = useState<AccountGroup[]>([]);
+  const [ledgerAccounts, setLedgerAccounts] = useState<ChartAccount[]>([]);
   const [employeeMaster, setEmployeeMaster] = useState<EmployeeMasterRow[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [ledgerRows, setLedgerRows] = useState<any[]>([]);
@@ -463,6 +1269,8 @@ export const Accounting: React.FC = () => {
   const [trialBalance, setTrialBalance] = useState<any>(null);
   const [profitLoss, setProfitLoss] = useState<any>(null);
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
+  const [tdsReport, setTdsReport] = useState<any>(null);
+  const [tdsDetailedReports, setTdsDetailedReports] = useState<any>(null);
   const [dashboardSummary, setDashboardSummary] = useState<any>(null);
   const [coreInvoices, setCoreInvoices] = useState<any[]>([]);
   const [corePayments, setCorePayments] = useState<any[]>([]);
@@ -479,6 +1287,11 @@ export const Accounting: React.FC = () => {
   const [dayBookDate, setDayBookDate] = useState(new Date().toISOString().slice(0, 10));
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const monthToDateStart = /^\d{4}-\d{2}-\d{2}$/.test(String(endDate || '')) ? `${String(endDate).slice(0, 7)}-01` : endDate;
+  const dashboardRangeLabel = `${formatShortDate(startDate)} - ${formatShortDate(endDate)}`;
+  const monthToDateLabel = `${formatShortDate(monthToDateStart)} - ${formatShortDate(endDate)}`;
+  const selectedRevenueValue = Number(dashboardSummary?.selectedRevenue ?? dashboardSummary?.todayRevenue ?? 0);
+  const monthToDateRevenueValue = Number(dashboardSummary?.monthToDateRevenue ?? dashboardSummary?.monthlyRevenue ?? 0);
 
   const [salaryForm, setSalaryForm] = useState(createSalaryFormState);
   const [contractForm, setContractForm] = useState(createContractFormState);
@@ -504,6 +1317,8 @@ export const Accounting: React.FC = () => {
     accountType: 'asset',
     subType: 'general',
   });
+  const [groupForm, setGroupForm] = useState(createGroupFormState);
+  const [ledgerForm, setLedgerForm] = useState(createLedgerFormState);
   const [invoiceForm, setInvoiceForm] = useState({
     invoiceDate: new Date().toISOString().slice(0, 10),
     customerName: '',
@@ -534,10 +1349,166 @@ export const Accounting: React.FC = () => {
     vendorName: '',
   });
 
+  const moneyValue = (value: unknown) => Math.max(0, Number(value || 0));
+  const salaryDerived = useMemo(() => {
+    const grossSalary = moneyValue(salaryForm.grossSalary || (Number(salaryForm.amount || 0) + Number(salaryForm.bonusAmount || 0)));
+    const knownStatutory = moneyValue(salaryForm.employeePf)
+      + moneyValue(salaryForm.employeeEsi)
+      + moneyValue(salaryForm.professionalTax)
+      + moneyValue(salaryForm.tdsAmount);
+    const statutoryDeductions = Math.max(knownStatutory, moneyValue(salaryForm.statutoryDeductions));
+    const knownVoluntary = moneyValue(salaryForm.retirementContribution)
+      + moneyValue(salaryForm.insurancePremium)
+      + moneyValue(salaryForm.otherDeductions);
+    const voluntaryDeductions = Math.max(knownVoluntary, moneyValue(salaryForm.voluntaryDeductions));
+    const knownEmployerTaxes = moneyValue(salaryForm.employerPf) + moneyValue(salaryForm.employerEsi);
+    const employerPayrollTaxes = Math.max(knownEmployerTaxes, moneyValue(salaryForm.employerPayrollTaxes));
+    const benefitsExpense = moneyValue(salaryForm.benefitsExpense);
+    const totalDeductions = statutoryDeductions + voluntaryDeductions;
+    const netPay = Math.max(0, grossSalary - totalDeductions);
+    const totalPayrollCost = grossSalary + employerPayrollTaxes + benefitsExpense;
+
+    return {
+      grossSalary,
+      statutoryDeductions,
+      voluntaryDeductions,
+      employerPayrollTaxes,
+      benefitsExpense,
+      totalDeductions,
+      netPay,
+      totalPayrollCost,
+    };
+  }, [salaryForm]);
+
   const cashEntries = cashBook?.entries || [];
   const bankEntries = bankBook?.entries || [];
   const reconciliationPending = bankBook?.reconciliationPending || [];
   const trialBalanceRows = trialBalance?.rows || [];
+  const vendorGroupOptions = accountGroups.filter((group) => group.isActive !== false && group.under === 'liability');
+  const tdsTransactions = useMemo(() => {
+    const start = startDate ? new Date(`${startDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+    const end = endDate ? new Date(`${endDate}T23:59:59`).getTime() : Number.POSITIVE_INFINITY;
+    return (tdsReport?.transactions || []).filter((row: any) => {
+      const timestamp = new Date(row.transactionDate || row.createdAt || 0).getTime();
+      if (Number.isNaN(timestamp)) return false;
+      return timestamp >= start && timestamp <= end;
+    });
+  }, [endDate, startDate, tdsReport]);
+  const profitLossRows = useMemo(() => {
+    if (Array.isArray(profitLoss?.rows) && profitLoss.rows.length > 0) {
+      return profitLoss.rows.map((row: any, index: number) => ({
+        _id: row._id || `pl-row-${index}`,
+        section: row.section || 'Other',
+        particulars: row.particulars || row.accountName || 'Ledger line',
+        amount: Number(row.amount || 0),
+        isTotal: Boolean(row.isTotal),
+        isContra: Boolean(row.isContra),
+      }));
+    }
+
+    return [
+      { _id: 'pl-sales-income', section: 'Income', particulars: 'Sales / Service Income', amount: Number(profitLoss?.income?.salesIncome || 0) },
+      { _id: 'pl-return-contra', section: 'Income', particulars: 'Less: Sales Returns / Refunds', amount: -Number(profitLoss?.income?.salesReturnContra || 0), isContra: true },
+      { _id: 'pl-other-income', section: 'Income', particulars: 'Other Income', amount: Number(profitLoss?.income?.nonSalesIncome || 0) },
+      { _id: 'pl-total-income', section: 'Income', particulars: 'Total Income', amount: Number(profitLoss?.income?.totalIncome || 0), isTotal: true },
+      { _id: 'pl-cogs-expense', section: 'Expense', particulars: 'Cost of Goods Sold', amount: Number(profitLoss?.expenses?.cogsExpense || 0) },
+      { _id: 'pl-salary-expense', section: 'Expense', particulars: 'Salary Expense', amount: Number(profitLoss?.expenses?.salaryExpense || 0) },
+      { _id: 'pl-contract-expense', section: 'Expense', particulars: 'Contract Expense', amount: Number(profitLoss?.expenses?.contractExpense || 0) },
+      { _id: 'pl-depreciation-expense', section: 'Expense', particulars: 'Depreciation Expense', amount: Number(profitLoss?.expenses?.depreciationExpense || 0) },
+      { _id: 'pl-manual-expense', section: 'Expense', particulars: 'Other Ledger / Manual Expense', amount: Number(profitLoss?.expenses?.manualExpense || 0) },
+      { _id: 'pl-total-expense', section: 'Expense', particulars: 'Total Expense', amount: Number(profitLoss?.expenses?.totalExpense || 0), isTotal: true },
+      {
+        _id: 'pl-net-profit',
+        section: 'Result',
+        particulars: Number(profitLoss?.netProfit || 0) >= 0 ? 'Net Profit' : 'Net Loss',
+        amount: Number(profitLoss?.netProfit || 0),
+        isTotal: true,
+      },
+    ];
+  }, [profitLoss]);
+  const balanceSheetRows = useMemo(
+    () => [
+      ...(balanceSheet?.assets || []).map((row: any, index: number) => ({
+        _id: `asset-${row.accountCode || index}`,
+        section: 'Assets',
+        accountCode: row.accountCode || '-',
+        accountName: row.accountName || 'Asset',
+        amount: Number(row.amount || 0),
+      })),
+      ...(balanceSheet?.liabilities || []).map((row: any, index: number) => ({
+        _id: `liability-${row.accountCode || index}`,
+        section: 'Liabilities',
+        accountCode: row.accountCode || '-',
+        accountName: row.accountName || 'Liability',
+        amount: Number(row.amount || 0),
+      })),
+      ...(
+        Array.isArray(balanceSheet?.equityRows) && balanceSheet.equityRows.length > 0
+          ? balanceSheet.equityRows
+          : [{ accountCode: '-', accountName: 'Retained Earnings', amount: Number(balanceSheet?.equity || 0) }]
+      ).map((row: any, index: number) => ({
+        _id: `equity-${row.accountCode || index}`,
+        section: 'Equity',
+        accountCode: row.accountCode || '-',
+        accountName: row.accountName || 'Equity',
+        amount: Number(row.amount || 0),
+        diagnostic: Boolean(row.diagnostic),
+      })),
+    ],
+    [balanceSheet]
+  );
+  const recentAccountingActivity = useMemo(() => {
+    const rows = [
+      ...coreInvoices.map((row: any) => ({
+        _id: `invoice-${row._id}`,
+        date: row.invoiceDate,
+        type: 'Invoice',
+        reference: row.invoiceNumber || row.referenceType || '-',
+        party: row.customerName || row.vendorName || 'N/A',
+        amount: Number(row.totalAmount || 0),
+        status: row.status || 'posted',
+      })),
+      ...corePayments.map((row: any) => ({
+        _id: `payment-${row._id}`,
+        date: row.paymentDate,
+        type: 'Payment',
+        reference: row.paymentNumber || row.referenceNo || '-',
+        party: row.customerName || row.vendorName || 'N/A',
+        amount: Number(row.amount || 0),
+        status: row.status || 'posted',
+      })),
+      ...voucherRows.map((row: any) => ({
+        _id: `voucher-${row._id}`,
+        date: row.voucherDate,
+        type: `Voucher ${String(row.voucherType || '').toUpperCase()}`,
+        reference: row.voucherNumber || row.referenceNo || '-',
+        party: row.counterpartyName || 'N/A',
+        amount: Number(row.totalAmount || 0),
+        status: row.isPrinted ? 'printed' : 'saved',
+      })),
+      ...coreJournals.map((row: any) => ({
+        _id: `journal-${row._id}`,
+        date: row.entryDate,
+        type: 'Journal',
+        reference: row.entryNumber || row.referenceNo || '-',
+        party: row.description || row.referenceType || 'N/A',
+        amount: Number(row.totalDebit || 0),
+        status: row.status || 'posted',
+      })),
+      ...tdsTransactions.map((row: any) => ({
+        _id: `tds-${row._id}`,
+        date: row.transactionDate,
+        type: 'TDS',
+        reference: row.referenceNo || row.sectionCode || '-',
+        party: row.deducteeName || 'Deductee',
+        amount: Number(row.tdsAmount || 0),
+        status: row.status || 'deducted',
+      })),
+    ];
+    return rows
+      .sort((left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime())
+      .slice(0, 25);
+  }, [coreInvoices, coreJournals, corePayments, tdsTransactions, voucherRows]);
 
   const daybookPagination = usePaginatedRows(daybookRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
   const voucherPagination = usePaginatedRows(voucherRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
@@ -562,11 +1533,26 @@ export const Accounting: React.FC = () => {
   const buttonClass = 'inline-flex items-center gap-2 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60';
   const secondaryButtonClass = 'inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-60';
 
-  const formatShortDate = (value?: string | Date) => {
+  function formatShortDate(value?: string | Date) {
     if (!value) return '-';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '-';
     return date.toLocaleDateString('en-IN');
+  }
+
+  const accountTypeToLabel = (value?: string) => {
+    switch (String(value || '').toLowerCase()) {
+      case 'asset':
+        return 'Assets';
+      case 'liability':
+        return 'Liabilities';
+      case 'income':
+        return 'Income';
+      case 'expense':
+        return 'Expenses';
+      default:
+        return String(value || '-');
+    }
   };
 
   const normalizeId = (value: unknown) => String(value || '').trim();
@@ -757,6 +1743,7 @@ export const Accounting: React.FC = () => {
     }
     if (tab === 'masters') {
       tasks.push({ label: 'Vendors, assets, and periods', run: refreshMasters });
+      tasks.push({ label: 'Account groups', run: refreshAccountGroups });
     }
     if (tab === 'payments') {
       tasks.push({ label: 'Employee master', run: refreshEmployeeMaster });
@@ -778,6 +1765,8 @@ export const Accounting: React.FC = () => {
     }
     if (tab === 'ledger') {
       tasks.push({ label: 'Chart of accounts', run: refreshChart });
+      tasks.push({ label: 'Account groups', run: refreshAccountGroups });
+      tasks.push({ label: 'Ledger masters', run: refreshLedgerAccounts });
       if (selectedAccountId) {
         tasks.push({ label: 'Ledger details', run: () => refreshLedger(selectedAccountId) });
       }
@@ -857,6 +1846,16 @@ export const Accounting: React.FC = () => {
     setChartAccounts(data.data || []);
   };
 
+  const refreshAccountGroups = async () => {
+    const data = await apiJson('/api/accounting/groups');
+    setAccountGroups(data.data || []);
+  };
+
+  const refreshLedgerAccounts = async () => {
+    const data = await apiJson('/api/accounting/ledgers');
+    setLedgerAccounts(data.data || []);
+  };
+
   const refreshBooks = async () => {
     const [cashData, bankData] = await Promise.all([
       apiJson(`/api/accounting/books/cash?startDate=${startDate}&endDate=${endDate}`),
@@ -867,23 +1866,27 @@ export const Accounting: React.FC = () => {
   };
 
   const refreshReports = async () => {
-    const [expenseData, incomeData, trialData, pnlData, bsData] = await Promise.all([
+    const [expenseData, incomeData, trialData, pnlData, bsData, tdsData, tdsReportsData] = await Promise.all([
       apiJson(`/api/accounting/reports/expense?startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/reports/income?startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/reports/trial-balance?startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/reports/profit-loss?startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/reports/balance-sheet?asOnDate=${endDate}`),
+      apiJson('/api/accounting/tds/bootstrap').catch(() => ({ data: null })),
+      apiJson(`/api/accounting/tds/reports?startDate=${startDate}&endDate=${endDate}`).catch(() => ({ data: null })),
     ]);
     setExpenseReport(expenseData.data || null);
     setIncomeReport(incomeData.data || null);
     setTrialBalance(trialData.data || null);
     setProfitLoss(pnlData.data || null);
     setBalanceSheet(bsData.data || null);
+    setTdsReport(tdsData.data || null);
+    setTdsDetailedReports(tdsReportsData.data || null);
   };
 
   const refreshDashboard = async () => {
     const [dashboardData, invoiceData, paymentData, journalData] = await Promise.all([
-      apiJson('/api/accounting/core/dashboard'),
+      apiJson(`/api/accounting/core/dashboard?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`),
       apiJson(`/api/accounting/core/invoices?limit=200&startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/core/payments?limit=200&startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/core/journal-entries?limit=200&startDate=${startDate}&endDate=${endDate}`),
@@ -926,8 +1929,36 @@ export const Accounting: React.FC = () => {
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const nextTab = params.get('tab');
+    const nextReport = params.get('report');
+    const nextTdsReport = params.get('tdsReport');
+
+    if (isAccountingTabKey(nextTab)) {
+      setActiveTab(nextTab);
+    }
+    if (nextTab === 'reports' && isReportsTabKey(nextReport)) {
+      setReportsTab(nextReport);
+    }
+    if (nextTab === 'reports' && nextReport === 'tds' && isTdsReportTabKey(nextTdsReport)) {
+      setTdsReportTab(nextTdsReport);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
     withLoading(async () => {
       await loadTabData(activeTab);
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
+    const groupTitle = accountingMenuGroups.find((group) => group.items.some((item) => item.key === activeTab))?.title;
+    if (!groupTitle) return;
+    setCollapsedAccountingGroups((prev) => {
+      if (!prev.has(groupTitle)) return prev;
+      const next = new Set(prev);
+      next.delete(groupTitle);
+      return next;
     });
   }, [activeTab]);
 
@@ -942,7 +1973,7 @@ export const Accounting: React.FC = () => {
     if (activeTab === 'expenses') setExpensesTab('entry');
     if (activeTab === 'vouchers') setVouchersTab(editingVoucher?.type || 'receipt');
     if (activeTab === 'books') setBooksTab('summary');
-    if (activeTab === 'ledger') setLedgerTab('create_account');
+    if (activeTab === 'ledger') setLedgerTab('groups');
   }, [activeTab, editingContractId, editingVendorId, editingVoucher?.type]);
 
   useEffect(() => {
@@ -955,6 +1986,15 @@ export const Accounting: React.FC = () => {
       await runTaskGroup([{ label: 'Vendors, assets, and periods', run: refreshMasters }]);
     });
   }, [periodYear]);
+
+  useEffect(() => {
+    if (editingVendorId || vendorForm.groupId || !accountGroups.length) return;
+    const defaultGroup = accountGroups.find((group) => /sundry creditors/i.test(group.groupName))
+      || accountGroups.find((group) => group.under === 'liability');
+    if (defaultGroup) {
+      setVendorForm((prev) => prev.groupId ? prev : { ...prev, groupId: defaultGroup._id });
+    }
+  }, [accountGroups, editingVendorId, vendorForm.groupId]);
 
   const handleRefreshCurrentTab = () => {
     if (activeTab === 'treasury') {
@@ -1010,6 +2050,42 @@ export const Accounting: React.FC = () => {
     setMessage('Voucher edit cancelled');
   };
 
+  const loadPayrollComponentsForSalary = async () => {
+    const selectedEmployee = employeeMaster.find((row) => row._id === salaryForm.employeeId);
+    if (!selectedEmployee) {
+      setError('Select an employee before loading payroll components');
+      return;
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(salaryForm.month || ''))) {
+      setError('Select a valid payroll month first');
+      return;
+    }
+
+    await withLoading(async () => {
+      const response = await apiJson(`/api/payroll/generate?month=${encodeURIComponent(salaryForm.month)}`);
+      const row = (response.data?.rows || []).find((item: any) => String(item.employeeId || '') === String(selectedEmployee._id));
+      if (!row) {
+        throw new Error('Payroll row was not found for the selected employee and month');
+      }
+
+      setSalaryForm((prev) => ({
+        ...prev,
+        amount: String(Number(row.basePay || 0)),
+        bonusAmount: String(Number(row.overtimePay || 0) + Number(row.arrearsPay || 0)),
+        grossSalary: String(Number(row.grossPay || 0)),
+        employeePf: String(Number(row.pfEmployee || 0)),
+        employeeEsi: String(Number(row.esiEmployee || 0)),
+        professionalTax: String(Number(row.professionalTax || 0)),
+        tdsAmount: String(Number(row.tdsAmount || 0)),
+        statutoryDeductions: String(Number(row.totalDeductions || 0)),
+        employerPf: String(Number(row.pfEmployer || 0)),
+        employerEsi: String(Number(row.esiEmployer || 0)),
+        employerPayrollTaxes: String(Number(row.totalEmployerContribution || 0)),
+      }));
+      setMessage(`Loaded payroll components for ${selectedEmployee.name} (${salaryForm.month})`);
+    });
+  };
+
   const submitSalary = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalizedMonth = String(salaryForm.month || '').trim();
@@ -1056,6 +2132,22 @@ export const Accounting: React.FC = () => {
         designation: selectedEmployee?.designation || salaryForm.designation || '',
         amount: Number(salaryForm.amount || 0),
         bonusAmount: Number(salaryForm.bonusAmount || 0),
+        grossSalary: salaryDerived.grossSalary,
+        employeePf: Number(salaryForm.employeePf || 0),
+        employeeEsi: Number(salaryForm.employeeEsi || 0),
+        professionalTax: Number(salaryForm.professionalTax || 0),
+        tdsAmount: Number(salaryForm.tdsAmount || 0),
+        statutoryDeductions: salaryDerived.statutoryDeductions,
+        retirementContribution: Number(salaryForm.retirementContribution || 0),
+        insurancePremium: Number(salaryForm.insurancePremium || 0),
+        otherDeductions: Number(salaryForm.otherDeductions || 0),
+        voluntaryDeductions: salaryDerived.voluntaryDeductions,
+        employerPf: Number(salaryForm.employerPf || 0),
+        employerEsi: Number(salaryForm.employerEsi || 0),
+        employerPayrollTaxes: salaryDerived.employerPayrollTaxes,
+        benefitsExpense: salaryDerived.benefitsExpense,
+        netPay: salaryDerived.netPay,
+        totalPayrollCost: salaryDerived.totalPayrollCost,
       };
 
       const response = await apiJson(
@@ -1208,6 +2300,86 @@ export const Accounting: React.FC = () => {
       setMessage('Chart account added');
       setAccountForm({ accountName: '', accountType: 'asset', subType: 'general' });
       await refreshChart();
+      await refreshLedgerAccounts();
+    });
+  };
+
+  const resetGroupForm = () => {
+    setEditingGroupId(null);
+    setGroupForm(createGroupFormState());
+  };
+
+  const startGroupEdit = (row: AccountGroup) => {
+    setEditingGroupId(row._id);
+    setGroupForm({
+      groupName: row.groupName || '',
+      groupCode: row.groupCode || '',
+      under: row.under || 'asset',
+      parentGroupId: row.parentGroupId || '',
+      isActive: row.isActive !== false,
+    });
+  };
+
+  const saveAccountGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      const payload = {
+        ...groupForm,
+        parentGroupId: groupForm.parentGroupId || '',
+      };
+      const path = editingGroupId ? `/api/accounting/groups/${editingGroupId}` : '/api/accounting/groups';
+      await apiJson(path, {
+        method: editingGroupId ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      setMessage(editingGroupId ? 'Account group updated' : 'Account group created');
+      resetGroupForm();
+      await refreshAccountGroups();
+      await refreshLedgerAccounts();
+      await refreshChart();
+    });
+  };
+
+  const resolveGroupIdForLedger = (row: ChartAccount) =>
+    String(row.groupId || accountGroups.find((group) => group.groupName === row.groupName)?._id || '');
+
+  const resetLedgerForm = () => {
+    setEditingLedgerId(null);
+    setLedgerForm(createLedgerFormState());
+  };
+
+  const startLedgerEdit = (row: ChartAccount) => {
+    setEditingLedgerId(row._id);
+    setLedgerForm({
+      accountCode: row.accountCode || '',
+      accountName: row.accountName || '',
+      groupId: resolveGroupIdForLedger(row),
+      subType: row.subType || 'general',
+      gstNumber: row.gstNumber || '',
+      panNumber: row.panNumber || '',
+      openingBalance: String(row.openingBalance ?? ''),
+      openingSide: row.openingSide || 'debit',
+      isActive: row.isActive !== false,
+    });
+  };
+
+  const saveLedgerAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await withLoading(async () => {
+      const payload = {
+        ...ledgerForm,
+        openingBalance: Number(ledgerForm.openingBalance || 0),
+      };
+      const path = editingLedgerId ? `/api/accounting/ledgers/${editingLedgerId}` : '/api/accounting/ledgers';
+      await apiJson(path, {
+        method: editingLedgerId ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      setMessage(editingLedgerId ? 'Ledger updated' : 'Ledger created');
+      resetLedgerForm();
+      await refreshLedgerAccounts();
+      await refreshChart();
+      if (selectedAccountId) await refreshLedger(selectedAccountId);
     });
   };
 
@@ -1476,6 +2648,20 @@ export const Accounting: React.FC = () => {
       payDate: rowPayDate,
       amount: String(Number(row.baseAmount ?? row.amount ?? 0)),
       bonusAmount: String(Number(row.bonusAmount || 0)),
+      grossSalary: String(Number(row.grossSalary || (Number(row.baseAmount ?? row.amount ?? 0) + Number(row.bonusAmount || 0)))),
+      employeePf: String(Number(row.employeePf || 0)),
+      employeeEsi: String(Number(row.employeeEsi || 0)),
+      professionalTax: String(Number(row.professionalTax || 0)),
+      tdsAmount: String(Number(row.tdsAmount || 0)),
+      statutoryDeductions: String(Number(row.statutoryDeductions || 0)),
+      retirementContribution: String(Number(row.retirementContribution || 0)),
+      insurancePremium: String(Number(row.insurancePremium || 0)),
+      otherDeductions: String(Number(row.otherDeductions || 0)),
+      voluntaryDeductions: String(Number(row.voluntaryDeductions || 0)),
+      employerPf: String(Number(row.employerPf || 0)),
+      employerEsi: String(Number(row.employerEsi || 0)),
+      employerPayrollTaxes: String(Number(row.employerPayrollTaxes || 0)),
+      benefitsExpense: String(Number(row.benefitsExpense || 0)),
       paymentMethod: row.paymentMethod || 'bank',
       notes: row.notes || '',
     });
@@ -1508,11 +2694,20 @@ export const Accounting: React.FC = () => {
     setEditingVendorId(normalizeId(row._id));
     setVendorForm({
       name: row.name || '',
+      groupId: row.groupId || '',
       contact: row.contact || '',
       phone: row.phone || '',
+      alternatePhone: row.alternatePhone || '',
       email: row.email || '',
       gstin: row.gstin || '',
+      pan: row.pan || '',
       address: row.address || '',
+      isTdsApplicable: row.isTdsApplicable !== false,
+      deducteeType: row.deducteeType || 'vendor',
+      tdsSectionCode: row.tdsSectionCode || '',
+      tdsRate: row.tdsRate !== undefined && row.tdsRate !== null ? String(row.tdsRate) : '',
+      openingBalance: row.openingBalance !== undefined && row.openingBalance !== null ? String(row.openingBalance) : '',
+      openingSide: row.openingSide || 'credit',
     });
     setMastersTab('vendors');
     setMessage(`Editing vendor ${row.name}`);
@@ -1933,6 +3128,34 @@ export const Accounting: React.FC = () => {
               <p className="text-sm text-gray-300">Difference: {formatCurrency(balanceSheet?.totals?.difference || 0)}</p>
               <p className="mt-3 text-xs text-gray-400">Use the report tabs for master details, vouchers, invoices, payments, and cash or bank entries with search, filters, sorting, pagination, and CSV export.</p>
             </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <h3 className="mb-2 text-white font-semibold">TDS Snapshot</h3>
+              <p className="text-sm text-gray-300">Deducted: {formatCurrency(tdsReport?.summary?.deducted || 0)}</p>
+              <p className="text-sm text-gray-300">Deposited: {formatCurrency(tdsReport?.summary?.paid || 0)}</p>
+              <p className="text-sm text-amber-300">Outstanding: {formatCurrency(tdsReport?.summary?.outstanding || 0)}</p>
+              <p className="mt-3 text-xs text-gray-400">{tdsReport?.summary?.overdueCount || 0} overdue deduction(s) in the current TDS workspace.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <ReportDataTable
+              title="Recent Accounting Activity"
+              data={recentAccountingActivity}
+              itemLabel="recent rows"
+              searchPlaceholder="Search recent invoices, payments, vouchers, journals, or TDS"
+              exportFileName={`recent-accounting-activity-${startDate}-${endDate}.csv`}
+              filters={[
+                { key: 'type', label: 'Type', getValue: (row: any) => String(row.type || 'Other') },
+                { key: 'status', label: 'Status', getValue: (row: any) => String(row.status || '').toUpperCase() || 'POSTED' },
+              ]}
+              columns={[
+                { key: 'date', header: 'Date', render: (row: any) => formatShortDate(row.date), exportValue: (row: any) => String(row.date || '').slice(0, 10), sortValue: (row: any) => row.date },
+                { key: 'type', header: 'Type', accessor: 'type' },
+                { key: 'reference', header: 'Reference', accessor: 'reference' },
+                { key: 'party', header: 'Party / Description', accessor: 'party' },
+                { key: 'amount', header: 'Amount', render: (row: any) => formatCurrency(row.amount || 0), exportValue: (row: any) => Number(row.amount || 0), sortValue: (row: any) => Number(row.amount || 0), align: 'right' },
+                { key: 'statusValue', header: 'Status', render: (row: any) => String(row.status || '-').toUpperCase(), exportValue: (row: any) => String(row.status || '').toUpperCase() },
+              ]}
+            />
             <ReportDataTable
               title="Recent Journal Entries"
               data={coreJournals}
@@ -1963,7 +3186,7 @@ export const Accounting: React.FC = () => {
           title="Vendor Master Report"
           data={vendors}
           itemLabel="vendors"
-          searchPlaceholder="Search vendors by name, contact, phone, email, or address"
+          searchPlaceholder="Search vendors by name, group, contact, phone, PAN, GSTIN, TDS, email, or address"
           exportFileName={`vendors-report-${endDate}.csv`}
           filters={[
             {
@@ -1971,13 +3194,29 @@ export const Accounting: React.FC = () => {
               label: 'Balance',
               getValue: (row: any) => Number(row.balance || 0) > 0 ? 'With Balance' : 'Settled',
             },
+            {
+              key: 'group',
+              label: 'Group',
+              getValue: (row: any) => row.groupName || 'Ungrouped',
+            },
+            {
+              key: 'tds',
+              label: 'TDS',
+              getValue: (row: any) => row.isTdsApplicable ? 'TDS Applicable' : 'No TDS',
+            },
           ]}
           columns={[
             { key: 'name', header: 'Vendor', accessor: 'name' },
+            { key: 'groupName', header: 'Group', render: (row: any) => row.groupName || '-', exportValue: (row: any) => row.groupName || '' },
             { key: 'contact', header: 'Contact', render: (row: any) => row.contact || '-', exportValue: (row: any) => row.contact || '' },
             { key: 'phone', header: 'Phone', render: (row: any) => row.phone || '-', exportValue: (row: any) => row.phone || '' },
+            { key: 'alternatePhone', header: 'Alt Phone', render: (row: any) => row.alternatePhone || '-', exportValue: (row: any) => row.alternatePhone || '' },
+            { key: 'pan', header: 'PAN', render: (row: any) => row.pan || '-', exportValue: (row: any) => row.pan || '' },
+            { key: 'gstin', header: 'GSTIN', render: (row: any) => row.gstin || '-', exportValue: (row: any) => row.gstin || '' },
+            { key: 'tdsStatus', header: 'TDS', render: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || '-'} @ ${Number(row.tdsRate || 0)}%` : 'No', exportValue: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || ''} @ ${Number(row.tdsRate || 0)}%` : 'No' },
             { key: 'email', header: 'Email', render: (row: any) => row.email || '-', exportValue: (row: any) => row.email || '' },
             { key: 'address', header: 'Address', render: (row: any) => row.address || '-', exportValue: (row: any) => row.address || '' },
+            { key: 'openingBalance', header: 'Opening', render: (row: any) => `${formatCurrency(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, exportValue: (row: any) => `${Number(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, sortValue: (row: any) => Number(row.openingBalance || 0), align: 'right' },
             { key: 'totalPayable', header: 'Total Payable', render: (row: any) => formatCurrency(row.totalPayable || 0), exportValue: (row: any) => Number(row.totalPayable || 0), sortValue: (row: any) => Number(row.totalPayable || 0), align: 'right' },
             { key: 'paid', header: 'Paid', render: (row: any) => formatCurrency(row.paid || 0), exportValue: (row: any) => Number(row.paid || 0), sortValue: (row: any) => Number(row.paid || 0), align: 'right' },
             { key: 'balanceValue', header: 'Balance', render: (row: any) => formatCurrency(row.balance || 0), exportValue: (row: any) => Number(row.balance || 0), sortValue: (row: any) => Number(row.balance || 0), align: 'right' },
@@ -2124,7 +3363,13 @@ export const Accounting: React.FC = () => {
             { key: 'payDate', header: 'Pay Date', render: (row: any) => formatShortDate(row.payDate), exportValue: (row: any) => String(row.payDate || '').slice(0, 10), sortValue: (row: any) => row.payDate },
             { key: 'baseAmount', header: 'Base', render: (row: any) => formatCurrency(Number(row.baseAmount ?? row.amount ?? 0)), exportValue: (row: any) => Number(row.baseAmount ?? row.amount ?? 0), sortValue: (row: any) => Number(row.baseAmount ?? row.amount ?? 0), align: 'right' },
             { key: 'bonusAmount', header: 'Bonus', render: (row: any) => formatCurrency(Number(row.bonusAmount || 0)), exportValue: (row: any) => Number(row.bonusAmount || 0), sortValue: (row: any) => Number(row.bonusAmount || 0), align: 'right' },
-            { key: 'amount', header: 'Total', render: (row: any) => formatCurrency(row.amount || 0), exportValue: (row: any) => Number(row.amount || 0), sortValue: (row: any) => Number(row.amount || 0), align: 'right' },
+            { key: 'grossSalary', header: 'Gross', render: (row: any) => formatCurrency(Number(row.grossSalary || Number(row.baseAmount ?? row.amount ?? 0) + Number(row.bonusAmount || 0))), exportValue: (row: any) => Number(row.grossSalary || Number(row.baseAmount ?? row.amount ?? 0) + Number(row.bonusAmount || 0)), sortValue: (row: any) => Number(row.grossSalary || 0), align: 'right' },
+            { key: 'statutoryDeductions', header: 'Statutory', render: (row: any) => formatCurrency(Number(row.statutoryDeductions || 0)), exportValue: (row: any) => Number(row.statutoryDeductions || 0), sortValue: (row: any) => Number(row.statutoryDeductions || 0), align: 'right' },
+            { key: 'voluntaryDeductions', header: 'Voluntary', render: (row: any) => formatCurrency(Number(row.voluntaryDeductions || 0)), exportValue: (row: any) => Number(row.voluntaryDeductions || 0), sortValue: (row: any) => Number(row.voluntaryDeductions || 0), align: 'right' },
+            { key: 'employerPayrollTaxes', header: 'Employer Tax', render: (row: any) => formatCurrency(Number(row.employerPayrollTaxes || 0)), exportValue: (row: any) => Number(row.employerPayrollTaxes || 0), sortValue: (row: any) => Number(row.employerPayrollTaxes || 0), align: 'right' },
+            { key: 'benefitsExpense', header: 'Benefits Expense', render: (row: any) => formatCurrency(Number(row.benefitsExpense || 0)), exportValue: (row: any) => Number(row.benefitsExpense || 0), sortValue: (row: any) => Number(row.benefitsExpense || 0), align: 'right' },
+            { key: 'netPay', header: 'Net Pay', render: (row: any) => formatCurrency(Number(row.netPay ?? row.amount ?? 0)), exportValue: (row: any) => Number(row.netPay ?? row.amount ?? 0), sortValue: (row: any) => Number(row.netPay ?? row.amount ?? 0), align: 'right' },
+            { key: 'totalPayrollCost', header: 'Payroll Cost', render: (row: any) => formatCurrency(Number(row.totalPayrollCost || row.grossSalary || row.amount || 0)), exportValue: (row: any) => Number(row.totalPayrollCost || row.grossSalary || row.amount || 0), sortValue: (row: any) => Number(row.totalPayrollCost || row.grossSalary || row.amount || 0), align: 'right' },
             { key: 'paymentMethod', header: 'Method', render: (row: any) => String(row.paymentMethod || '-').toUpperCase(), exportValue: (row: any) => String(row.paymentMethod || '').toUpperCase() },
             { key: 'payslipSentAt', header: 'Payslip', render: (row: any) => row.payslipSentAt ? 'Sent' : 'Pending', exportValue: (row: any) => row.payslipSentAt ? 'Sent' : 'Pending' },
           ]}
@@ -2236,9 +3481,194 @@ export const Accounting: React.FC = () => {
       );
     }
 
+    if (reportsTab === 'profit_loss') {
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Income</p>
+              <p className="text-xl font-semibold text-emerald-300">{formatCurrency(profitLoss?.income?.totalIncome || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Expense</p>
+              <p className="text-xl font-semibold text-red-300">{formatCurrency(profitLoss?.expenses?.totalExpense || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Net Profit / Loss</p>
+              <p className={`text-xl font-semibold ${Number(profitLoss?.netProfit || 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                {formatCurrency(profitLoss?.netProfit || 0)}
+              </p>
+            </div>
+          </div>
+          {profitLoss?.formula && (
+            <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs leading-relaxed text-cyan-100">
+              <p><span className="font-semibold">Income:</span> {profitLoss.formula.income}</p>
+              <p><span className="font-semibold">Expense:</span> {profitLoss.formula.expense}</p>
+            </div>
+          )}
+          <ReportDataTable
+            title="Profit & Loss Statement"
+            data={profitLossRows}
+            itemLabel="statement rows"
+            searchPlaceholder="Search income, expense, or result lines"
+            exportFileName={`profit-loss-${startDate}-${endDate}.csv`}
+            filters={[
+              { key: 'section', label: 'Section', getValue: (row: any) => String(row.section || 'Other') },
+            ]}
+            columns={[
+              { key: 'section', header: 'Section', accessor: 'section' },
+              { key: 'particulars', header: 'Particulars', accessor: 'particulars' },
+              {
+                key: 'amount',
+                header: 'Amount',
+                render: (row: any) => <span className={row.isTotal ? 'font-semibold text-white' : ''}>{formatCurrency(row.amount || 0)}</span>,
+                exportValue: (row: any) => Number(row.amount || 0),
+                sortValue: (row: any) => Number(row.amount || 0),
+                align: 'right',
+              },
+            ]}
+          />
+        </div>
+      );
+    }
+
+    if (reportsTab === 'balance_sheet') {
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Assets</p>
+              <p className="text-xl font-semibold text-emerald-300">{formatCurrency(balanceSheet?.totals?.totalAssets || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Liabilities</p>
+              <p className="text-xl font-semibold text-amber-300">{formatCurrency(balanceSheet?.totals?.totalLiabilities || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Retained Earnings</p>
+              <p className="text-xl font-semibold text-indigo-200">{formatCurrency(balanceSheet?.retainedEarnings ?? balanceSheet?.equity ?? 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Difference</p>
+              <p className={`text-xl font-semibold ${Number(balanceSheet?.totals?.difference || 0) === 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                {formatCurrency(balanceSheet?.totals?.difference || 0)}
+              </p>
+            </div>
+          </div>
+          {(Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 || Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0) && (
+            <div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs leading-relaxed text-amber-100">
+              <p className="font-semibold">Balance Sheet diagnostics</p>
+              {Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 && (
+                <p>Opening balances are one-sided by {formatCurrency(balanceSheet.diagnostics.openingBalanceDifference)}. The report shows this under Opening Balance Equity / Suspense until opening balances are corrected.</p>
+              )}
+              {Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0 && (
+                <p>Legacy records not yet posted to ledger create a clearing adjustment of {formatCurrency(balanceSheet.diagnostics.legacyClearing)}. Migrate those records into ledger entries to remove this diagnostic row.</p>
+              )}
+            </div>
+          )}
+          <ReportDataTable
+            title={`Balance Sheet as on ${formatShortDate(balanceSheet?.asOnDate || endDate)}`}
+            data={balanceSheetRows}
+            itemLabel="balance rows"
+            searchPlaceholder="Search asset, liability, equity, account code, or account name"
+            exportFileName={`balance-sheet-${endDate}.csv`}
+            filters={[
+              { key: 'section', label: 'Section', getValue: (row: any) => String(row.section || 'Other') },
+            ]}
+            columns={[
+              { key: 'section', header: 'Section', accessor: 'section' },
+              { key: 'accountCode', header: 'Code', accessor: 'accountCode' },
+              { key: 'accountName', header: 'Account', accessor: 'accountName' },
+              { key: 'amount', header: 'Amount', render: (row: any) => formatCurrency(row.amount || 0), exportValue: (row: any) => Number(row.amount || 0), sortValue: (row: any) => Number(row.amount || 0), align: 'right' },
+            ]}
+          />
+        </div>
+      );
+    }
+
+    if (reportsTab === 'tds') {
+      const detailed = tdsDetailedReports || {};
+      const summary = detailed.summary || tdsReport?.summary || {};
+      const period = detailed.period || {};
+      const definition = tdsReportDefinitions[tdsReportTab];
+      const detailedRows = (readTdsPath(detailed, definition.dataPath) || []) as any[];
+      const detailedFilters = (definition.filters || []).map((filter) => ({
+        key: filter.key,
+        label: filter.label,
+        getValue: (row: any) => String(renderTdsReportCell(row, { key: filter.key, header: filter.label, kind: filter.kind }) || '-'),
+      }));
+      const detailedColumns = definition.fields.map((field) => ({
+        key: field.key,
+        header: field.header,
+        render: (row: any) => renderTdsReportCell(row, field),
+        exportValue: (row: any) => exportTdsReportCell(row, field),
+        sortValue: (row: any) => sortTdsReportCell(row, field),
+        align: field.kind === 'money' || field.kind === 'number' ? 'right' as const : undefined,
+      }));
+
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">TDS Deducted</p>
+              <p className="text-xl font-semibold text-cyan-200">{formatCurrency(summary.deducted || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Deposited</p>
+              <p className="text-xl font-semibold text-emerald-300">{formatCurrency(summary.paid || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Outstanding</p>
+              <p className="text-xl font-semibold text-amber-300">{formatCurrency(summary.outstanding || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Reports / Mismatches</p>
+              <p className="text-xl font-semibold text-white">{summary.reportCount || 12} / {summary.mismatches || 0}</p>
+            </div>
+          </div>
+          <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm text-cyan-50">
+            <p className="font-semibold">TDS report suite is synced with books for {period.startDate || startDate} to {period.endDate || endDate}.</p>
+            <p className="mt-1 text-cyan-100/80">Statutory rows cover Form 24Q, 26Q, 27Q, and 27EQ for FY {period.financialYear || 'selected FY'}; certificates cover Form 16, 16A, and 27D.</p>
+          </div>
+          {tdsReport?.warnings?.length > 0 && (
+            <div className="rounded-xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">
+              {tdsReport.warnings.map((warning: string) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
+          <CardTabs
+            items={tdsReportTabs}
+            activeKey={tdsReportTab}
+            onChange={setTdsReportTab}
+            ariaLabel="TDS report navigation"
+            compact
+          />
+          <ReportDataTable
+            key={tdsReportTab}
+            title={definition.title}
+            data={detailedRows}
+            itemLabel={definition.itemLabel}
+            searchPlaceholder={definition.searchPlaceholder}
+            exportFileName={`${definition.exportSlug}-${period.financialYear || startDate}-${endDate}.csv`}
+            filters={detailedFilters}
+            columns={detailedColumns}
+          />
+        </div>
+      );
+    }
+
     return null;
   };
 
+  const activeMenuGroup = accountingMenuGroups.find((group) => group.items.some((item) => item.key === activeTab));
+  const activeMenuItem = activeMenuGroup?.items.find((item) => item.key === activeTab);
+  const toggleAccountingGroup = (title: string) => {
+    setCollapsedAccountingGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  };
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2253,28 +3683,102 @@ export const Accounting: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-6">
-        <aside className="rounded-xl border border-white/10 bg-white/5 p-3 lg:sticky lg:top-20 lg:h-fit">
-          <CardTabs
-            frame={false}
-            ariaLabel="Accounting menu navigation"
-            items={tabs}
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            listClassName="grid grid-cols-2 gap-2 border-b-0 px-0 pt-0 sm:grid-cols-3 lg:grid-cols-1"
-          />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[205px_minmax(0,1fr)] lg:gap-5">
+        <aside className="rounded-xl border border-white/10 bg-white/5 p-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <nav aria-label="Accounting menu navigation" className="space-y-1.5">
+            {accountingMenuGroups.map((group) => {
+              const groupActive = group.items.some((item) => item.key === activeTab);
+              const activeGroupItem = group.items.find((item) => item.key === activeTab);
+              const isCollapsed = collapsedAccountingGroups.has(group.title);
+              return (
+                <section key={group.title} className="rounded-lg border border-white/10 bg-slate-950/20 p-1.5">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70"
+                    onClick={() => toggleAccountingGroup(group.title)}
+                    aria-expanded={!isCollapsed}
+                    aria-controls={`accounting-menu-group-${group.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  >
+                    <div className="min-w-0">
+                      <p className={`truncate text-[11px] font-semibold uppercase tracking-[0.16em] ${groupActive ? 'text-indigo-200' : 'text-gray-400'}`}>{group.title}</p>
+                      {isCollapsed && activeGroupItem && (
+                        <p className="mt-0.5 truncate text-[10px] font-semibold text-indigo-100">{activeGroupItem.label}</p>
+                      )}
+                    </div>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {groupActive && <span className="h-1.5 w-1.5 rounded-full bg-indigo-300" aria-hidden="true" />}
+                      <svg
+                        className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path d="M5 8L10 13L15 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                    <div id={`accounting-menu-group-${group.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`} className="mt-1 space-y-1">
+                      {group.items.map((item) => {
+                        const isActive = activeTab === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setActiveTab(item.key)}
+                            aria-current={isActive ? 'page' : undefined}
+                            title={item.description}
+                            className={`w-full rounded-md px-2 py-1.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70 ${
+                              isActive
+                                ? 'border border-indigo-300/40 bg-indigo-500 text-white shadow-md shadow-indigo-950/20'
+                                : 'border border-transparent bg-white/5 text-gray-300 hover:border-white/10 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <span className="block truncate text-xs font-semibold">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </nav>
         </aside>
 
         <div className="min-w-0 space-y-5">
+          {activeMenuGroup && activeMenuItem && (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-200">{activeMenuGroup.title}</p>
+                  <h2 className="mt-1 text-xl font-semibold text-white">{activeMenuItem.label}</h2>
+                  <p className="mt-1 text-sm text-gray-300">{activeMenuItem.description}</p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold text-gray-300">
+                  {activeMenuGroup.helper}
+                </span>
+              </div>
+            </div>
+          )}
           {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}
           {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
 
       {activeTab === 'dashboard' && (
         <div className="space-y-4">
+          <AccountingLogicHelpCard
+            logic={dashboardLogic}
+            helpLabel="Open full help"
+            variant="drawer"
+            triggerLabel="Dashboard logic"
+          />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-400">Today Revenue</p>
+                <div>
+                  <p className="text-xs text-gray-400">Selected Revenue</p>
+                  <p className="mt-1 text-[11px] text-gray-500">{dashboardRangeLabel}</p>
+                </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
@@ -2282,11 +3786,14 @@ export const Accounting: React.FC = () => {
                   </svg>
                 </span>
               </div>
-              <p className="mt-2 text-xl font-semibold text-emerald-300">{formatCurrency(dashboardSummary?.todayRevenue || 0)}</p>
+              <p className="mt-2 text-xl font-semibold text-emerald-300">{formatCurrency(selectedRevenueValue)}</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-400">Monthly Revenue</p>
+                <div>
+                  <p className="text-xs text-gray-400">Month-to-date Revenue</p>
+                  <p className="mt-1 text-[11px] text-gray-500">{monthToDateLabel}</p>
+                </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-200">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M4 20H20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -2295,11 +3802,14 @@ export const Accounting: React.FC = () => {
                   </svg>
                 </span>
               </div>
-              <p className="mt-2 text-xl font-semibold text-white">{formatCurrency(dashboardSummary?.monthlyRevenue || 0)}</p>
+              <p className="mt-2 text-xl font-semibold text-white">{formatCurrency(monthToDateRevenueValue)}</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-400">Expenses</p>
+                <div>
+                  <p className="text-xs text-gray-400">Expenses</p>
+                  <p className="mt-1 text-[11px] text-gray-500">{dashboardRangeLabel}</p>
+                </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/15 text-red-300">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <rect x="3" y="7" width="18" height="12" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
@@ -2312,7 +3822,10 @@ export const Accounting: React.FC = () => {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-400">Profit</p>
+                <div>
+                  <p className="text-xs text-gray-400">Profit</p>
+                  <p className="mt-1 text-[11px] text-gray-500">{dashboardRangeLabel}</p>
+                </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/15 text-sky-300">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M4 20H20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -2325,7 +3838,10 @@ export const Accounting: React.FC = () => {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-400">GST Payable</p>
+                <div>
+                  <p className="text-xs text-gray-400">GST Payable</p>
+                  <p className="mt-1 text-[11px] text-gray-500">As on {formatShortDate(endDate)}</p>
+                </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" />
@@ -2410,29 +3926,39 @@ export const Accounting: React.FC = () => {
                 <h2 className="text-lg font-semibold text-white">Create Accounting Invoice</h2>
                 <ManualHelpLink anchor="transaction-accounting-invoice" />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input className={inputClass} type="date" value={invoiceForm.invoiceDate} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoiceDate: e.target.value }))} />
-                <input className={inputClass} placeholder="Customer / Party Name" required value={invoiceForm.customerName} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customerName: e.target.value }))} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Invoice Date" type="date" value={invoiceForm.invoiceDate} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, invoiceDate: value }))} />
+                <FloatingField label="Customer / Party Name" required value={invoiceForm.customerName} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, customerName: value }))} />
               </div>
-              <input className={inputClass} placeholder="Description" value={invoiceForm.description} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, description: e.target.value }))} />
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Base Amount" required value={invoiceForm.baseAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, baseAmount: e.target.value }))} />
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="GST Amount" value={invoiceForm.gstAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, gstAmount: e.target.value }))} />
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Initial Payment" value={invoiceForm.paymentAmount} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, paymentAmount: e.target.value }))} />
+              <FloatingField label="Description" value={invoiceForm.description} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, description: value }))} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Base Amount" type="number" min="0" step="0.01" required value={invoiceForm.baseAmount} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, baseAmount: value }))} />
+                <FloatingField label="GST Amount" type="number" min="0" step="0.01" value={invoiceForm.gstAmount} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, gstAmount: value }))} />
+                <FloatingField label="Initial Payment" type="number" min="0" step="0.01" value={invoiceForm.paymentAmount} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, paymentAmount: value }))} />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <select className={inputClass} value={invoiceForm.gstTreatment} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, gstTreatment: e.target.value }))}>
-                  <option value="none">No GST</option>
-                  <option value="intrastate">CGST + SGST</option>
-                  <option value="interstate">IGST</option>
-                </select>
-                <select className={inputClass} value={invoiceForm.paymentMode} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, paymentMode: e.target.value }))}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
-                <select className={inputClass} value={invoiceForm.revenueAccountKey} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, revenueAccountKey: e.target.value }))}>
-                  <option value="booking_revenue">Booking Revenue</option>
-                  <option value="event_revenue">Event Revenue</option>
-                  <option value="sales_revenue">Sales Revenue</option>
-                  <option value="other_income">Other Income</option>
-                </select>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField
+                  label="GST Treatment"
+                  value={invoiceForm.gstTreatment}
+                  onChange={(value) => setInvoiceForm((prev) => ({ ...prev, gstTreatment: value }))}
+                  options={[
+                    { value: 'none', label: 'No GST' },
+                    { value: 'intrastate', label: 'CGST + SGST' },
+                    { value: 'interstate', label: 'IGST' },
+                  ]}
+                />
+                <FloatingField label="Payment Mode" value={invoiceForm.paymentMode} onChange={(value) => setInvoiceForm((prev) => ({ ...prev, paymentMode: value }))} options={paymentModeOptions} />
+                <FloatingField
+                  label="Revenue Account"
+                  value={invoiceForm.revenueAccountKey}
+                  onChange={(value) => setInvoiceForm((prev) => ({ ...prev, revenueAccountKey: value }))}
+                  options={[
+                    { value: 'booking_revenue', label: 'Booking Revenue' },
+                    { value: 'event_revenue', label: 'Event Revenue' },
+                    { value: 'sales_revenue', label: 'Sales Revenue' },
+                    { value: 'other_income', label: 'Other Income' },
+                  ]}
+                />
               </div>
               <button className={buttonClass}>
                 <InvoiceIcon />
@@ -2447,24 +3973,26 @@ export const Accounting: React.FC = () => {
                 <h2 className="text-lg font-semibold text-white">Record Expense / Vendor Bill</h2>
                 <ManualHelpLink anchor="transaction-expense-vendor-bill" />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input className={inputClass} type="date" value={expenseCoreForm.expenseDate} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, expenseDate: e.target.value }))} />
-                <input className={inputClass} placeholder="Description" required value={expenseCoreForm.description} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, description: e.target.value }))} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Expense Date" type="date" value={expenseCoreForm.expenseDate} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, expenseDate: value }))} />
+                <FloatingField label="Description" required value={expenseCoreForm.description} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, description: value }))} />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" required value={expenseCoreForm.amount} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, amount: e.target.value }))} />
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Paid Amount" value={expenseCoreForm.paidAmount} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, paidAmount: e.target.value }))} />
-                <select className={inputClass} value={expenseCoreForm.paymentMode} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, paymentMode: e.target.value }))}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={expenseCoreForm.amount} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, amount: value }))} />
+                <FloatingField label="Paid Amount" type="number" min="0" step="0.01" value={expenseCoreForm.paidAmount} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, paidAmount: value }))} />
+                <FloatingField label="Payment Mode" value={expenseCoreForm.paymentMode} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, paymentMode: value }))} options={paymentModeOptions} />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input className={inputClass} placeholder="Expense Account Name" value={expenseCoreForm.expenseAccountName} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, expenseAccountName: e.target.value }))} />
-                <select className={inputClass} value={expenseCoreForm.vendorId} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, vendorId: e.target.value }))}>
-                  <option value="">Select vendor (optional)</option>
-                  {vendors.map((row) => <option key={row._id} value={row._id}>{row.name}</option>)}
-                </select>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Expense Account Name" value={expenseCoreForm.expenseAccountName} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, expenseAccountName: value }))} />
+                <FloatingField
+                  label="Vendor"
+                  value={expenseCoreForm.vendorId}
+                  onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, vendorId: value }))}
+                  options={[{ value: '', label: 'Select vendor (optional)' }, ...vendors.map((row) => ({ value: row._id, label: row.name }))]}
+                />
               </div>
               {!expenseCoreForm.vendorId && (
-                <input className={inputClass} placeholder="New Vendor Name (optional)" value={expenseCoreForm.vendorName} onChange={(e) => setExpenseCoreForm((prev) => ({ ...prev, vendorName: e.target.value }))} />
+                <FloatingField label="New Vendor Name (optional)" value={expenseCoreForm.vendorName} onChange={(value) => setExpenseCoreForm((prev) => ({ ...prev, vendorName: value }))} />
               )}
               <button className={buttonClass}>
                 <ExpenseIcon />
@@ -2523,16 +4051,92 @@ export const Accounting: React.FC = () => {
           />
 
           {mastersTab === 'vendors' && (
-            <div className="grid items-start grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
-              <form onSubmit={submitVendor} className="self-start rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-                <h2 className="text-lg font-semibold text-white">{editingVendorId ? 'Edit Vendor Master' : 'Vendor Master'}</h2>
-                {editingVendorId && <p className="text-xs text-cyan-300">Edit mode is active. Update the vendor and save changes with confirmation.</p>}
-                <input className={inputClass} placeholder="Vendor Name" required value={vendorForm.name} onChange={(e) => setVendorForm((prev) => ({ ...prev, name: e.target.value }))} />
-                <input className={inputClass} placeholder="Contact Person" value={vendorForm.contact} onChange={(e) => setVendorForm((prev) => ({ ...prev, contact: e.target.value }))} />
-                <input className={inputClass} placeholder="Phone" value={vendorForm.phone} onChange={(e) => setVendorForm((prev) => ({ ...prev, phone: e.target.value }))} />
-                <input className={inputClass} placeholder="Email" value={vendorForm.email} onChange={(e) => setVendorForm((prev) => ({ ...prev, email: e.target.value }))} />
-                <input className={inputClass} placeholder="GSTIN" value={vendorForm.gstin} onChange={(e) => setVendorForm((prev) => ({ ...prev, gstin: e.target.value.toUpperCase() }))} />
-                <textarea className={inputClass} rows={3} placeholder="Address" value={vendorForm.address} onChange={(e) => setVendorForm((prev) => ({ ...prev, address: e.target.value }))} />
+            <div className="space-y-5">
+              <form onSubmit={submitVendor} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-5">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">{editingVendorId ? 'Edit Vendor Master' : 'Add Vendor'}</h2>
+                  <p className="text-xs text-gray-400">Maintain statutory, contact, TDS, and opening balance details for vendor ledgers.</p>
+                  {editingVendorId && <p className="mt-1 text-xs text-cyan-300">Edit mode is active. Update the vendor and save changes with confirmation.</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Account Setup</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <FloatingField label="Account Name" required value={vendorForm.name} onChange={(value) => setVendorForm((prev) => ({ ...prev, name: value }))} />
+                    <FloatingField
+                      label="Choose Group"
+                      required
+                      value={vendorForm.groupId}
+                      onChange={(value) => setVendorForm((prev) => ({ ...prev, groupId: value }))}
+                      options={[
+                        { value: '', label: 'Select vendor group' },
+                        ...vendorGroupOptions.map((group) => ({ value: group._id, label: `${group.groupName} (${group.groupCode})` })),
+                      ]}
+                    />
+                    <FloatingField
+                      label="Is TDS Applicable"
+                      required
+                      value={vendorForm.isTdsApplicable ? 'yes' : 'no'}
+                      onChange={(value) => setVendorForm((prev) => ({ ...prev, isTdsApplicable: value === 'yes' }))}
+                      options={[
+                        { value: 'yes', label: 'Yes' },
+                        { value: 'no', label: 'No' },
+                      ]}
+                    />
+                    <FloatingField label="Contact Person" value={vendorForm.contact} onChange={(value) => setVendorForm((prev) => ({ ...prev, contact: value }))} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Statutory Information</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <FloatingField
+                      label="Deductee Type"
+                      required={vendorForm.isTdsApplicable}
+                      value={vendorForm.deducteeType}
+                      onChange={(value) => setVendorForm((prev) => ({ ...prev, deducteeType: value }))}
+                      options={vendorDeducteeTypes}
+                    />
+                    <FloatingField
+                      label="Section Number"
+                      required={vendorForm.isTdsApplicable}
+                      value={vendorForm.tdsSectionCode}
+                      onChange={(value) => setVendorForm((prev) => ({ ...prev, tdsSectionCode: value }))}
+                      options={[{ value: '', label: 'Select section' }, ...vendorTdsSections]}
+                    />
+                    <FloatingField label="TDS Rate (%)" type="number" min="0" step="0.01" required={vendorForm.isTdsApplicable} value={vendorForm.tdsRate} onChange={(value) => setVendorForm((prev) => ({ ...prev, tdsRate: value }))} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Mailing And Tax Registration Details</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <FloatingField label="Primary Phone Number" value={vendorForm.phone} onChange={(value) => setVendorForm((prev) => ({ ...prev, phone: value }))} />
+                    <FloatingField label="Alternate Phone Number" value={vendorForm.alternatePhone} onChange={(value) => setVendorForm((prev) => ({ ...prev, alternatePhone: value }))} />
+                    <FloatingField label="PAN" maxLength={10} value={vendorForm.pan} onChange={(value) => setVendorForm((prev) => ({ ...prev, pan: value.toUpperCase() }))} />
+                    <FloatingField label="GSTIN" value={vendorForm.gstin} onChange={(value) => setVendorForm((prev) => ({ ...prev, gstin: value.toUpperCase() }))} />
+                    <FloatingField label="Email Address" type="email" value={vendorForm.email} onChange={(value) => setVendorForm((prev) => ({ ...prev, email: value }))} />
+                    <FloatingField label="Address" rows={4} className="md:col-span-2 xl:col-span-1 xl:row-span-2" value={vendorForm.address} onChange={(value) => setVendorForm((prev) => ({ ...prev, address: value }))} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Balances</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <FloatingField
+                      label="Cr/Dr"
+                      required
+                      value={vendorForm.openingSide}
+                      onChange={(value) => setVendorForm((prev) => ({ ...prev, openingSide: value }))}
+                      options={[
+                        { value: 'credit', label: 'Credit (Cr)' },
+                        { value: 'debit', label: 'Debit (Dr)' },
+                      ]}
+                    />
+                    <FloatingField label="Opening Balance" required type="number" min="0" step="0.01" value={vendorForm.openingBalance} onChange={(value) => setVendorForm((prev) => ({ ...prev, openingBalance: value }))} />
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={buttonClass}>
                     <VendorIcon />
@@ -2547,31 +4151,42 @@ export const Accounting: React.FC = () => {
                 </div>
               </form>
 
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
-                <h3 className="mb-2 text-white font-semibold">Vendor Balances</h3>
-                <table className="min-w-full text-sm">
-                  <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Vendor</th><th className="px-2 py-1 text-left">Contact</th><th className="px-2 py-1 text-left">GSTIN</th><th className="px-2 py-1 text-left">Email</th><th className="px-2 py-1 text-left">Total Payable</th><th className="px-2 py-1 text-left">Paid</th><th className="px-2 py-1 text-left">Balance</th><th className="px-2 py-1 text-left">Action</th></tr></thead>
-                  <tbody>
-                    {vendors.map((row) => (
-                      <tr key={row._id} className="border-t border-white/10">
-                        <td className="px-2 py-1">{row.name}</td>
-                        <td className="px-2 py-1">{row.contact || row.phone || '-'}</td>
-                        <td className="px-2 py-1">{row.gstin || '-'}</td>
-                        <td className="px-2 py-1">{row.email || '-'}</td>
-                        <td className="px-2 py-1">{formatCurrency(row.totalPayable || 0)}</td>
-                        <td className="px-2 py-1">{formatCurrency(row.paid || 0)}</td>
-                        <td className="px-2 py-1">{formatCurrency(row.balance || 0)}</td>
-                        <td className="px-2 py-1">
-                          <button type="button" className="inline-flex items-center gap-1 text-cyan-300 hover:text-cyan-200" onClick={() => editVendor(row)}>
-                            <EditIcon />
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {!vendors.length && <tr><td colSpan={8} className="px-2 py-3 text-center text-gray-400">No vendors available yet.</td></tr>}
-                  </tbody>
-                </table>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <ReportDataTable
+                  title="Vendor Balances"
+                  data={vendors}
+                  itemLabel="vendors"
+                  searchPlaceholder="Search vendor, group, phone, PAN, GSTIN, TDS section, email, or address"
+                  exportFileName={`vendor-master-${endDate}.csv`}
+                  filters={[
+                    { key: 'group', label: 'Group', getValue: (row: any) => row.groupName || 'Ungrouped' },
+                    { key: 'tds', label: 'TDS', getValue: (row: any) => row.isTdsApplicable ? 'TDS Applicable' : 'No TDS' },
+                    { key: 'balance', label: 'Balance', getValue: (row: any) => Number(row.balance || 0) > 0 ? 'With Balance' : 'Settled' },
+                  ]}
+                  columns={[
+                    { key: 'name', header: 'Vendor', accessor: 'name' },
+                    { key: 'groupName', header: 'Group', render: (row: any) => row.groupName || '-', exportValue: (row: any) => row.groupName || '' },
+                    { key: 'phone', header: 'Primary Phone', render: (row: any) => row.phone || '-', exportValue: (row: any) => row.phone || '' },
+                    { key: 'alternatePhone', header: 'Alt Phone', render: (row: any) => row.alternatePhone || '-', exportValue: (row: any) => row.alternatePhone || '' },
+                    { key: 'pan', header: 'PAN', render: (row: any) => row.pan || '-', exportValue: (row: any) => row.pan || '' },
+                    { key: 'gstin', header: 'GSTIN', render: (row: any) => row.gstin || '-', exportValue: (row: any) => row.gstin || '' },
+                    { key: 'tdsStatus', header: 'TDS', render: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || '-'} @ ${Number(row.tdsRate || 0)}%` : 'No', exportValue: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || ''} @ ${Number(row.tdsRate || 0)}%` : 'No' },
+                    { key: 'email', header: 'Email', render: (row: any) => row.email || '-', exportValue: (row: any) => row.email || '' },
+                    { key: 'openingBalance', header: 'Opening', render: (row: any) => `${formatCurrency(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, exportValue: (row: any) => `${Number(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, sortValue: (row: any) => Number(row.openingBalance || 0), align: 'right' },
+                    { key: 'balanceValue', header: 'Balance', render: (row: any) => formatCurrency(row.balance || 0), exportValue: (row: any) => Number(row.balance || 0), sortValue: (row: any) => Number(row.balance || 0), align: 'right' },
+                    {
+                      key: 'actions',
+                      header: 'Action',
+                      render: (row: any) => (
+                        <button type="button" className={secondaryButtonClass} onClick={() => editVendor(row)}>
+                          <EditIcon />
+                          Edit
+                        </button>
+                      ),
+                      exportValue: () => '',
+                    },
+                  ]}
+                />
               </div>
             </div>
           )}
@@ -2580,12 +4195,12 @@ export const Accounting: React.FC = () => {
             <div className="grid items-start grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
               <form onSubmit={submitAsset} className="self-start rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
                 <h2 className="text-lg font-semibold text-white">Fixed Asset</h2>
-                <input className={inputClass} placeholder="Asset Name" required value={assetForm.assetName} onChange={(e) => setAssetForm((prev) => ({ ...prev, assetName: e.target.value }))} />
-                <input className={inputClass} placeholder="Description" value={assetForm.description} onChange={(e) => setAssetForm((prev) => ({ ...prev, description: e.target.value }))} />
-                <div className="grid grid-cols-3 gap-2">
-                  <input className={inputClass} type="number" min="0" step="0.01" placeholder="Cost" required value={assetForm.cost} onChange={(e) => setAssetForm((prev) => ({ ...prev, cost: e.target.value }))} />
-                  <input className={inputClass} type="number" min="1" placeholder="Life Years" required value={assetForm.lifeYears} onChange={(e) => setAssetForm((prev) => ({ ...prev, lifeYears: e.target.value }))} />
-                  <input className={inputClass} type="date" value={assetForm.purchaseDate} onChange={(e) => setAssetForm((prev) => ({ ...prev, purchaseDate: e.target.value }))} />
+                <FloatingField label="Asset Name" required value={assetForm.assetName} onChange={(value) => setAssetForm((prev) => ({ ...prev, assetName: value }))} />
+                <FloatingField label="Description" value={assetForm.description} onChange={(value) => setAssetForm((prev) => ({ ...prev, description: value }))} />
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FloatingField label="Cost" type="number" min="0" step="0.01" required value={assetForm.cost} onChange={(value) => setAssetForm((prev) => ({ ...prev, cost: value }))} />
+                  <FloatingField label="Life Years" type="number" min="1" required value={assetForm.lifeYears} onChange={(value) => setAssetForm((prev) => ({ ...prev, lifeYears: value }))} />
+                  <FloatingField label="Purchase Date" type="date" value={assetForm.purchaseDate} onChange={(value) => setAssetForm((prev) => ({ ...prev, purchaseDate: value }))} />
                 </div>
                 <button className={buttonClass}>
                   <AssetIcon />
@@ -2623,7 +4238,7 @@ export const Accounting: React.FC = () => {
             <div className="grid items-start grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
               <div className="self-start rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
                 <h2 className="text-lg font-semibold text-white">Financial Periods</h2>
-                <input className={inputClass} type="number" value={periodYear} onChange={(e) => setPeriodYear(Number(e.target.value || new Date().getFullYear()))} />
+                <FloatingField label="Year" type="number" value={String(periodYear)} onChange={(value) => setPeriodYear(Number(value || new Date().getFullYear()))} />
                 <div className="space-y-2">
                   {periods.map((row) => (
                     <div key={row._id} className="flex items-center justify-between rounded border border-white/10 px-3 py-2 text-sm">
@@ -2677,19 +4292,19 @@ export const Accounting: React.FC = () => {
           />
 
           {paymentsTab === 'salary_entry' && (
-            <form onSubmit={submitSalary} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+            <form onSubmit={submitSalary} className="max-w-7xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-white">{editingSalaryId ? 'Edit Salary Payment' : 'Salary Payment'}</h2>
                 <ManualHelpLink anchor="transaction-salary-payment" />
               </div>
               {editingSalaryId && <p className="text-xs text-cyan-300">Edit mode is active. Update details and click Save Changes.</p>}
-              <select
-                className={inputClass}
+              <FloatingField
+                label="Employee"
                 required
                 value={salaryForm.employeeId}
                 disabled={employeeMaster.length === 0 || Boolean(editingSalaryId)}
-                onChange={(e) => {
-                  const employeeId = e.target.value;
+                onChange={(value) => {
+                  const employeeId = value;
                   const selected = employeeMaster.find((row) => row._id === employeeId);
                   setSalaryForm({
                     ...salaryForm,
@@ -2698,28 +4313,72 @@ export const Accounting: React.FC = () => {
                     designation: selected?.designation || '',
                   });
                 }}
-              >
-                <option value="">Select Employee</option>
-                {employeeMaster.map((row) => (
-                  <option key={row._id} value={row._id}>
-                    {row.employeeCode} - {row.name}
-                  </option>
-                ))}
-              </select>
-              <input className={inputClass} placeholder="Designation" value={salaryForm.designation} readOnly />
-              <div className="grid grid-cols-3 gap-2">
-                <input className={inputClass} type="month" required value={salaryForm.month} onChange={(e) => setSalaryForm({ ...salaryForm, month: e.target.value })} />
-                <input className={inputClass} type="date" required value={salaryForm.payDate} onChange={(e) => setSalaryForm({ ...salaryForm, payDate: e.target.value })} />
-                <input className={inputClass} type="number" min="0" step="0.01" required placeholder="Amount" value={salaryForm.amount} onChange={(e) => setSalaryForm({ ...salaryForm, amount: e.target.value })} />
+                options={[{ value: '', label: 'Select Employee' }, ...employeeMaster.map((row) => ({ value: row._id, label: `${row.employeeCode} - ${row.name}` }))]}
+              />
+              <FloatingField label="Designation" value={salaryForm.designation} onChange={() => undefined} readOnly />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Salary Month" type="month" required value={salaryForm.month} onChange={(value) => setSalaryForm({ ...salaryForm, month: value })} />
+                <FloatingField label="Pay Date" type="date" required value={salaryForm.payDate} onChange={(value) => setSalaryForm({ ...salaryForm, payDate: value })} />
+                <button type="button" className={secondaryButtonClass} onClick={loadPayrollComponentsForSalary}>
+                  Load Payroll Components
+                </button>
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Bonus Amount (optional)" value={salaryForm.bonusAmount} onChange={(e) => setSalaryForm({ ...salaryForm, bonusAmount: e.target.value })} />
-                <input className={inputClass} placeholder="Notes (optional)" value={salaryForm.notes} onChange={(e) => setSalaryForm({ ...salaryForm, notes: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Base Salary / Earnings" type="number" min="0" step="0.01" required value={salaryForm.amount} onChange={(value) => setSalaryForm({ ...salaryForm, amount: value })} />
+                <FloatingField label="Bonus / OT / Arrears" type="number" min="0" step="0.01" value={salaryForm.bonusAmount} onChange={(value) => setSalaryForm({ ...salaryForm, bonusAmount: value })} />
+                <FloatingField label="Gross Salary" type="number" min="0" step="0.01" value={salaryForm.grossSalary} onChange={(value) => setSalaryForm({ ...salaryForm, grossSalary: value })} />
               </div>
-              <select className={inputClass} value={salaryForm.paymentMethod} onChange={(e) => setSalaryForm({ ...salaryForm, paymentMethod: e.target.value })}>
-                {salaryPaymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}
-              </select>
-              <p className="text-xs text-gray-400">Duplicate salary for same employee on same date within the month is blocked. Bonus is optional. Payslip is emailed automatically after payment. Use History / Edit to update an existing salary.</p>
+              <div className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Statutory Deductions</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                  <FloatingField label="Employee PF" type="number" min="0" step="0.01" value={salaryForm.employeePf} onChange={(value) => setSalaryForm({ ...salaryForm, employeePf: value })} />
+                  <FloatingField label="Employee ESI" type="number" min="0" step="0.01" value={salaryForm.employeeEsi} onChange={(value) => setSalaryForm({ ...salaryForm, employeeEsi: value })} />
+                  <FloatingField label="Professional Tax" type="number" min="0" step="0.01" value={salaryForm.professionalTax} onChange={(value) => setSalaryForm({ ...salaryForm, professionalTax: value })} />
+                  <FloatingField label="Salary TDS" type="number" min="0" step="0.01" value={salaryForm.tdsAmount} onChange={(value) => setSalaryForm({ ...salaryForm, tdsAmount: value })} />
+                  <FloatingField label="Total Statutory" type="number" min="0" step="0.01" value={salaryForm.statutoryDeductions} onChange={(value) => setSalaryForm({ ...salaryForm, statutoryDeductions: value })} />
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Voluntary Deductions & Benefits</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <FloatingField label="Retirement Contribution" type="number" min="0" step="0.01" value={salaryForm.retirementContribution} onChange={(value) => setSalaryForm({ ...salaryForm, retirementContribution: value })} />
+                  <FloatingField label="Insurance Premium" type="number" min="0" step="0.01" value={salaryForm.insurancePremium} onChange={(value) => setSalaryForm({ ...salaryForm, insurancePremium: value })} />
+                  <FloatingField label="Other Deductions" type="number" min="0" step="0.01" value={salaryForm.otherDeductions} onChange={(value) => setSalaryForm({ ...salaryForm, otherDeductions: value })} />
+                  <FloatingField label="Total Voluntary" type="number" min="0" step="0.01" value={salaryForm.voluntaryDeductions} onChange={(value) => setSalaryForm({ ...salaryForm, voluntaryDeductions: value })} />
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Employer Payroll Taxes & Benefits Expense</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <FloatingField label="Employer PF" type="number" min="0" step="0.01" value={salaryForm.employerPf} onChange={(value) => setSalaryForm({ ...salaryForm, employerPf: value })} />
+                  <FloatingField label="Employer ESI" type="number" min="0" step="0.01" value={salaryForm.employerEsi} onChange={(value) => setSalaryForm({ ...salaryForm, employerEsi: value })} />
+                  <FloatingField label="Employer Payroll Taxes" type="number" min="0" step="0.01" value={salaryForm.employerPayrollTaxes} onChange={(value) => setSalaryForm({ ...salaryForm, employerPayrollTaxes: value })} />
+                  <FloatingField label="Benefits Expense" type="number" min="0" step="0.01" value={salaryForm.benefitsExpense} onChange={(value) => setSalaryForm({ ...salaryForm, benefitsExpense: value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs text-gray-400">Gross Salary</p>
+                  <p className="font-semibold text-white">{formatCurrency(salaryDerived.grossSalary)}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs text-gray-400">Total Deductions</p>
+                  <p className="font-semibold text-amber-200">{formatCurrency(salaryDerived.totalDeductions)}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs text-gray-400">Net Pay To Bank/Cash</p>
+                  <p className="font-semibold text-emerald-300">{formatCurrency(salaryDerived.netPay)}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <p className="text-xs text-gray-400">Total Payroll Cost</p>
+                  <p className="font-semibold text-cyan-200">{formatCurrency(salaryDerived.totalPayrollCost)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Notes (optional)" value={salaryForm.notes} onChange={(value) => setSalaryForm({ ...salaryForm, notes: value })} />
+                <FloatingField label="Payment Method" value={salaryForm.paymentMethod} onChange={(value) => setSalaryForm({ ...salaryForm, paymentMethod: value })} options={salaryPaymentModeOptions} />
+              </div>
+              <p className="text-xs text-gray-400">Journal posting: debit gross salary, employer payroll tax, and benefits expenses; credit payroll/PF/ESI/retirement/insurance liabilities and cash or bank only for net pay. Liability settlement is handled later through payment vouchers/challans.</p>
               {employeeMaster.length === 0 && (
                 <p className="text-xs text-amber-300">No active employees in master. Add employee in Employees menu first.</p>
               )}
@@ -2751,15 +4410,24 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-contract-payment" />
               </div>
               {editingContractId && <p className="text-xs text-cyan-300">Edit mode is active. Update the contract payment and save changes with confirmation.</p>}
-              <input className={inputClass} placeholder="Contractor Name" required value={contractForm.contractorName} onChange={(e) => setContractForm({ ...contractForm, contractorName: e.target.value })} />
-              <input className={inputClass} placeholder="Contract Title" required value={contractForm.contractTitle} onChange={(e) => setContractForm({ ...contractForm, contractTitle: e.target.value })} />
-              <div className="grid grid-cols-4 gap-2">
-                <input className={inputClass} type="date" required value={contractForm.paymentDate} onChange={(e) => setContractForm({ ...contractForm, paymentDate: e.target.value })} />
-                <input className={inputClass} type="number" min="0" step="0.01" required placeholder="Amount" value={contractForm.amount} onChange={(e) => setContractForm({ ...contractForm, amount: e.target.value })} />
-                <select className={inputClass} value={contractForm.status} onChange={(e) => setContractForm({ ...contractForm, status: e.target.value })}><option value="paid">PAID</option><option value="partial">PARTIAL</option><option value="pending">PENDING</option></select>
-                <select className={inputClass} value={contractForm.paymentMethod} onChange={(e) => setContractForm({ ...contractForm, paymentMethod: e.target.value })}>{salaryPaymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
+              <FloatingField label="Contractor Name" required value={contractForm.contractorName} onChange={(value) => setContractForm({ ...contractForm, contractorName: value })} />
+              <FloatingField label="Contract Title" required value={contractForm.contractTitle} onChange={(value) => setContractForm({ ...contractForm, contractTitle: value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                <FloatingField label="Payment Date" type="date" required value={contractForm.paymentDate} onChange={(value) => setContractForm({ ...contractForm, paymentDate: value })} />
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={contractForm.amount} onChange={(value) => setContractForm({ ...contractForm, amount: value })} />
+                <FloatingField
+                  label="Status"
+                  value={contractForm.status}
+                  onChange={(value) => setContractForm({ ...contractForm, status: value })}
+                  options={[
+                    { value: 'paid', label: 'PAID' },
+                    { value: 'partial', label: 'PARTIAL' },
+                    { value: 'pending', label: 'PENDING' },
+                  ]}
+                />
+                <FloatingField label="Payment Method" value={contractForm.paymentMethod} onChange={(value) => setContractForm({ ...contractForm, paymentMethod: value })} options={salaryPaymentModeOptions} />
               </div>
-              <textarea className={inputClass} rows={2} placeholder="Notes (optional)" value={contractForm.notes} onChange={(e) => setContractForm({ ...contractForm, notes: e.target.value })} />
+              <FloatingField label="Notes (optional)" rows={2} value={contractForm.notes} onChange={(value) => setContractForm({ ...contractForm, notes: value })} />
               <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
                   <SaveIcon />
@@ -2784,9 +4452,10 @@ export const Accounting: React.FC = () => {
                     <tr className="text-gray-300">
                       <th className="px-2 py-1 text-left">Employee</th>
                       <th className="px-2 py-1 text-left">Month</th>
-                      <th className="px-2 py-1 text-left">Base</th>
-                      <th className="px-2 py-1 text-left">Bonus</th>
-                      <th className="px-2 py-1 text-left">Total</th>
+                      <th className="px-2 py-1 text-left">Gross</th>
+                      <th className="px-2 py-1 text-left">Deductions</th>
+                      <th className="px-2 py-1 text-left">Net Pay</th>
+                      <th className="px-2 py-1 text-left">Cost</th>
                       <th className="px-2 py-1 text-left">Payslip</th>
                       <th className="px-2 py-1 text-left">Action</th>
                     </tr>
@@ -2796,9 +4465,10 @@ export const Accounting: React.FC = () => {
                       <tr key={row._id} className="border-t border-white/10">
                         <td className="px-2 py-1">{row.employeeName}</td>
                         <td className="px-2 py-1">{row.month}</td>
-                        <td className="px-2 py-1">{formatCurrency(Number(row.baseAmount ?? row.amount ?? 0))}</td>
-                        <td className="px-2 py-1">{formatCurrency(Number(row.bonusAmount || 0))}</td>
-                        <td className="px-2 py-1">{formatCurrency(row.amount)}</td>
+                        <td className="px-2 py-1">{formatCurrency(Number(row.grossSalary || Number(row.baseAmount ?? row.amount ?? 0) + Number(row.bonusAmount || 0)))}</td>
+                        <td className="px-2 py-1">{formatCurrency(Number(row.totalDeductions || 0))}</td>
+                        <td className="px-2 py-1">{formatCurrency(Number(row.netPay ?? row.amount ?? 0))}</td>
+                        <td className="px-2 py-1">{formatCurrency(Number(row.totalPayrollCost || row.grossSalary || row.amount || 0))}</td>
                         <td className="px-2 py-1">
                           {row.payslipSentAt ? (
                             <span className="text-emerald-300">Sent</span>
@@ -2816,7 +4486,7 @@ export const Accounting: React.FC = () => {
                     ))}
                     {!salaryList.length && (
                       <tr>
-                        <td colSpan={7} className="px-2 py-3 text-center text-gray-400">
+                        <td colSpan={8} className="px-2 py-3 text-center text-gray-400">
                           No salary payments for selected range.
                         </td>
                       </tr>
@@ -2888,23 +4558,23 @@ export const Accounting: React.FC = () => {
 
             {openingTab === 'balances' && (
               <>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                  <input className={inputClass} type="number" placeholder="Cash Amount" value={openingForm.cashAmount} onChange={(e) => setOpeningForm({ ...openingForm, cashAmount: e.target.value })} />
-                  <input className={inputClass} type="number" placeholder="Bank Amount" value={openingForm.bankAmount} onChange={(e) => setOpeningForm({ ...openingForm, bankAmount: e.target.value })} />
-                  <input className={inputClass} type="number" placeholder="Opening Stock Value" value={openingForm.openingStockValue} onChange={(e) => setOpeningForm({ ...openingForm, openingStockValue: e.target.value })} />
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FloatingField label="Cash Amount" type="number" value={openingForm.cashAmount} onChange={(value) => setOpeningForm({ ...openingForm, cashAmount: value })} />
+                  <FloatingField label="Bank Amount" type="number" value={openingForm.bankAmount} onChange={(value) => setOpeningForm({ ...openingForm, bankAmount: value })} />
+                  <FloatingField label="Opening Stock Value" type="number" value={openingForm.openingStockValue} onChange={(value) => setOpeningForm({ ...openingForm, openingStockValue: value })} />
                 </div>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                  <select className={inputClass} value={openingForm.cashSide} onChange={(e) => setOpeningForm({ ...openingForm, cashSide: e.target.value })}><option value="debit">Cash Debit</option><option value="credit">Cash Credit</option></select>
-                  <select className={inputClass} value={openingForm.bankSide} onChange={(e) => setOpeningForm({ ...openingForm, bankSide: e.target.value })}><option value="debit">Bank Debit</option><option value="credit">Bank Credit</option></select>
-                  <select className={inputClass} value={openingForm.openingStockSide} onChange={(e) => setOpeningForm({ ...openingForm, openingStockSide: e.target.value })}><option value="debit">Stock Debit</option><option value="credit">Stock Credit</option></select>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FloatingField label="Cash Side" value={openingForm.cashSide} onChange={(value) => setOpeningForm({ ...openingForm, cashSide: value })} options={[{ value: 'debit', label: 'Cash Debit' }, { value: 'credit', label: 'Cash Credit' }]} />
+                  <FloatingField label="Bank Side" value={openingForm.bankSide} onChange={(value) => setOpeningForm({ ...openingForm, bankSide: value })} options={[{ value: 'debit', label: 'Bank Debit' }, { value: 'credit', label: 'Bank Credit' }]} />
+                  <FloatingField label="Opening Stock Side" value={openingForm.openingStockSide} onChange={(value) => setOpeningForm({ ...openingForm, openingStockSide: value })} options={[{ value: 'debit', label: 'Stock Debit' }, { value: 'credit', label: 'Stock Credit' }]} />
                 </div>
               </>
             )}
 
             {openingTab === 'party_openings' && (
               <>
-                <textarea className={inputClass} rows={4} placeholder="Customer accounts: name:amount:side (one per line)" value={openingForm.customerAccountsText} onChange={(e) => setOpeningForm({ ...openingForm, customerAccountsText: e.target.value })} />
-                <textarea className={inputClass} rows={4} placeholder="Supplier accounts: name:amount:side (one per line)" value={openingForm.supplierAccountsText} onChange={(e) => setOpeningForm({ ...openingForm, supplierAccountsText: e.target.value })} />
+                <FloatingField label="Customer accounts: name:amount:side (one per line)" rows={4} value={openingForm.customerAccountsText} onChange={(value) => setOpeningForm({ ...openingForm, customerAccountsText: value })} />
+                <FloatingField label="Supplier accounts: name:amount:side (one per line)" rows={4} value={openingForm.supplierAccountsText} onChange={(value) => setOpeningForm({ ...openingForm, supplierAccountsText: value })} />
               </>
             )}
 
@@ -2941,17 +4611,17 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-daybook-entry" />
               </div>
               {editingDaybookId && <p className="text-xs text-cyan-300">Edit mode is active. Update the entry and save changes with confirmation.</p>}
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <select className={inputClass} value={manualForm.entryType} onChange={(e) => setManualForm({ ...manualForm, entryType: e.target.value })}><option value="expense">Expense</option><option value="income">Income</option></select>
-                <input className={inputClass} placeholder="Category (rent/electricity/interest/etc)" value={manualForm.category} required onChange={(e) => setManualForm({ ...manualForm, category: e.target.value })} />
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" value={manualForm.amount} required onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Entry Type" value={manualForm.entryType} onChange={(value) => setManualForm({ ...manualForm, entryType: value })} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]} />
+                <FloatingField label="Category (rent/electricity/interest/etc)" required value={manualForm.category} onChange={(value) => setManualForm({ ...manualForm, category: value })} />
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={manualForm.amount} onChange={(value) => setManualForm({ ...manualForm, amount: value })} />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <select className={inputClass} value={manualForm.paymentMethod} onChange={(e) => setManualForm({ ...manualForm, paymentMethod: e.target.value })}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
-                <input className={inputClass} type="date" value={manualForm.entryDate} onChange={(e) => setManualForm({ ...manualForm, entryDate: e.target.value })} />
-                <input className={inputClass} placeholder="Reference No" value={manualForm.referenceNo} onChange={(e) => setManualForm({ ...manualForm, referenceNo: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Payment Method" value={manualForm.paymentMethod} onChange={(value) => setManualForm({ ...manualForm, paymentMethod: value })} options={paymentModeOptions} />
+                <FloatingField label="Entry Date" type="date" value={manualForm.entryDate} onChange={(value) => setManualForm({ ...manualForm, entryDate: value })} />
+                <FloatingField label="Reference No" value={manualForm.referenceNo} onChange={(value) => setManualForm({ ...manualForm, referenceNo: value })} />
               </div>
-              <textarea className={inputClass} rows={2} placeholder="Narration" value={manualForm.narration} onChange={(e) => setManualForm({ ...manualForm, narration: e.target.value })} />
+              <FloatingField label="Narration" rows={2} value={manualForm.narration} onChange={(value) => setManualForm({ ...manualForm, narration: value })} />
               <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
                   <SaveIcon />
@@ -3035,15 +4705,15 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-receipt-voucher" />
               </div>
               {editingVoucher?.type === 'receipt' && <p className="text-xs text-cyan-300">Edit mode is active. Update the voucher and save changes with confirmation.</p>}
-              <div className="grid grid-cols-2 gap-2">
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" required value={receiptForm.amount} onChange={(e) => setReceiptForm({ ...receiptForm, amount: e.target.value })} />
-                <input className={inputClass} type="date" required value={receiptForm.voucherDate} onChange={(e) => setReceiptForm({ ...receiptForm, voucherDate: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={receiptForm.amount} onChange={(value) => setReceiptForm({ ...receiptForm, amount: value })} />
+                <FloatingField label="Voucher Date" type="date" required value={receiptForm.voucherDate} onChange={(value) => setReceiptForm({ ...receiptForm, voucherDate: value })} />
               </div>
-              <input className={inputClass} placeholder="Category (interest/commission/service)" required value={receiptForm.category} onChange={(e) => setReceiptForm({ ...receiptForm, category: e.target.value })} />
-              <select className={inputClass} value={receiptForm.paymentMode} onChange={(e) => setReceiptForm({ ...receiptForm, paymentMode: e.target.value })}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
-              <input className={inputClass} placeholder="Counterparty" value={receiptForm.counterpartyName} onChange={(e) => setReceiptForm({ ...receiptForm, counterpartyName: e.target.value })} />
-              <input className={inputClass} placeholder="Reference No" value={receiptForm.referenceNo} onChange={(e) => setReceiptForm({ ...receiptForm, referenceNo: e.target.value })} />
-              <textarea className={inputClass} rows={2} placeholder="Notes (optional)" value={receiptForm.notes} onChange={(e) => setReceiptForm({ ...receiptForm, notes: e.target.value })} />
+              <FloatingField label="Category (interest/commission/service)" required value={receiptForm.category} onChange={(value) => setReceiptForm({ ...receiptForm, category: value })} />
+              <FloatingField label="Payment Mode" value={receiptForm.paymentMode} onChange={(value) => setReceiptForm({ ...receiptForm, paymentMode: value })} options={paymentModeOptions} />
+              <FloatingField label="Counterparty" value={receiptForm.counterpartyName} onChange={(value) => setReceiptForm({ ...receiptForm, counterpartyName: value })} />
+              <FloatingField label="Reference No" value={receiptForm.referenceNo} onChange={(value) => setReceiptForm({ ...receiptForm, referenceNo: value })} />
+              <FloatingField label="Notes (optional)" rows={2} value={receiptForm.notes} onChange={(value) => setReceiptForm({ ...receiptForm, notes: value })} />
               <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
                   <ReceiptIcon />
@@ -3094,21 +4764,21 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-payment-voucher" />
               </div>
               {editingVoucher?.type === 'payment' && <p className="text-xs text-cyan-300">Edit mode is active. Update the voucher and save changes with confirmation.</p>}
-              <div className="grid grid-cols-2 gap-2">
-                <input className={inputClass} placeholder="No. / Reference No" value={paymentForm.referenceNo} onChange={(e) => setPaymentForm({ ...paymentForm, referenceNo: e.target.value })} />
-                <input className={inputClass} type="date" required value={paymentForm.voucherDate} onChange={(e) => setPaymentForm({ ...paymentForm, voucherDate: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="No. / Reference No" value={paymentForm.referenceNo} onChange={(value) => setPaymentForm({ ...paymentForm, referenceNo: value })} />
+                <FloatingField label="Voucher Date" type="date" required value={paymentForm.voucherDate} onChange={(value) => setPaymentForm({ ...paymentForm, voucherDate: value })} />
               </div>
-              <input className={inputClass} placeholder="Name of the account" required value={paymentForm.accountName} onChange={(e) => setPaymentForm({ ...paymentForm, accountName: e.target.value })} />
-              <textarea className={inputClass} rows={2} placeholder="Being Payment of" required value={paymentForm.beingPaymentOf} onChange={(e) => setPaymentForm({ ...paymentForm, beingPaymentOf: e.target.value })} />
-              <input className={inputClass} placeholder="For the period" value={paymentForm.forPeriod} onChange={(e) => setPaymentForm({ ...paymentForm, forPeriod: e.target.value })} />
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Amount" required value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} />
-                <select className={inputClass} value={paymentForm.paymentMode} onChange={(e) => setPaymentForm({ ...paymentForm, paymentMode: e.target.value })}>{paymentModes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}</select>
-                <input className={inputClass} placeholder="Expense category / account head" required value={paymentForm.category} onChange={(e) => setPaymentForm({ ...paymentForm, category: e.target.value })} />
+              <FloatingField label="Name of the account" required value={paymentForm.accountName} onChange={(value) => setPaymentForm({ ...paymentForm, accountName: value })} />
+              <FloatingField label="Being Payment of" rows={2} required value={paymentForm.beingPaymentOf} onChange={(value) => setPaymentForm({ ...paymentForm, beingPaymentOf: value })} />
+              <FloatingField label="For the period" value={paymentForm.forPeriod} onChange={(value) => setPaymentForm({ ...paymentForm, forPeriod: value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={paymentForm.amount} onChange={(value) => setPaymentForm({ ...paymentForm, amount: value })} />
+                <FloatingField label="Payment Mode" value={paymentForm.paymentMode} onChange={(value) => setPaymentForm({ ...paymentForm, paymentMode: value })} options={paymentModeOptions} />
+                <FloatingField label="Expense category / account head" required value={paymentForm.category} onChange={(value) => setPaymentForm({ ...paymentForm, category: value })} />
               </div>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  <input className={inputClass} placeholder="Received by" value={paymentForm.receivedBy} onChange={(e) => setPaymentForm({ ...paymentForm, receivedBy: e.target.value })} />
-                  <input className={inputClass} placeholder="Authorized by" value={paymentForm.authorizedBy} onChange={(e) => setPaymentForm({ ...paymentForm, authorizedBy: e.target.value })} />
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <FloatingField label="Received by" value={paymentForm.receivedBy} onChange={(value) => setPaymentForm({ ...paymentForm, receivedBy: value })} />
+                  <FloatingField label="Authorized by" value={paymentForm.authorizedBy} onChange={(value) => setPaymentForm({ ...paymentForm, authorizedBy: value })} />
                 </div>
                 <p className="text-xs text-gray-400">
                   Signature fields are kept out of the voucher form for physical signing. Printed signature lines can be turned on or off from General Settings &gt; Printing Preferences.
@@ -3166,14 +4836,26 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-journal-voucher" />
               </div>
               {editingVoucher?.type === 'journal' && <p className="text-xs text-cyan-300">Edit mode is active. Update the journal and save changes with confirmation.</p>}
-              <div className="grid grid-cols-3 gap-2">
-                <input className={inputClass} type="date" required value={journalForm.voucherDate} onChange={(e) => setJournalForm({ ...journalForm, voucherDate: e.target.value })} />
-                <select className={inputClass} required value={journalForm.debitAccountId} onChange={(e) => setJournalForm({ ...journalForm, debitAccountId: e.target.value })}><option value="">Debit Account</option>{chartAccounts.map((row) => <option key={row._id} value={row._id}>{row.accountCode} - {row.accountName}</option>)}</select>
-                <select className={inputClass} required value={journalForm.creditAccountId} onChange={(e) => setJournalForm({ ...journalForm, creditAccountId: e.target.value })}><option value="">Credit Account</option>{chartAccounts.map((row) => <option key={row._id} value={row._id}>{row.accountCode} - {row.accountName}</option>)}</select>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Voucher Date" type="date" required value={journalForm.voucherDate} onChange={(value) => setJournalForm({ ...journalForm, voucherDate: value })} />
+                <FloatingField
+                  label="Debit Account"
+                  required
+                  value={journalForm.debitAccountId}
+                  onChange={(value) => setJournalForm({ ...journalForm, debitAccountId: value })}
+                  options={[{ value: '', label: 'Debit Account' }, ...chartAccounts.map((row) => ({ value: row._id, label: `${row.accountCode} - ${row.accountName}` }))]}
+                />
+                <FloatingField
+                  label="Credit Account"
+                  required
+                  value={journalForm.creditAccountId}
+                  onChange={(value) => setJournalForm({ ...journalForm, creditAccountId: value })}
+                  options={[{ value: '', label: 'Credit Account' }, ...chartAccounts.map((row) => ({ value: row._id, label: `${row.accountCode} - ${row.accountName}` }))]}
+                />
               </div>
-              <input className={inputClass} type="number" min="0" step="0.01" required placeholder="Amount" value={journalForm.amount} onChange={(e) => setJournalForm({ ...journalForm, amount: e.target.value })} />
-              <input className={inputClass} placeholder="Reference No" value={journalForm.referenceNo} onChange={(e) => setJournalForm({ ...journalForm, referenceNo: e.target.value })} />
-              <textarea className={inputClass} rows={2} placeholder="Notes (optional)" value={journalForm.notes} onChange={(e) => setJournalForm({ ...journalForm, notes: e.target.value })} />
+              <FloatingField label="Amount" type="number" min="0" step="0.01" required value={journalForm.amount} onChange={(value) => setJournalForm({ ...journalForm, amount: value })} />
+              <FloatingField label="Reference No" value={journalForm.referenceNo} onChange={(value) => setJournalForm({ ...journalForm, referenceNo: value })} />
+              <FloatingField label="Notes (optional)" rows={2} value={journalForm.notes} onChange={(value) => setJournalForm({ ...journalForm, notes: value })} />
               <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
                   <JournalIcon />
@@ -3207,14 +4889,14 @@ export const Accounting: React.FC = () => {
                 <ManualHelpLink anchor="transaction-cash-bank-transfer" />
               </div>
               {editingVoucher?.type === 'transfer' && <p className="text-xs text-cyan-300">Edit mode is active. Update the transfer and save changes with confirmation.</p>}
-              <div className="grid grid-cols-3 gap-2">
-                <input className={inputClass} type="number" min="0" step="0.01" required placeholder="Amount" value={transferForm.amount} onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })} />
-                <input className={inputClass} type="date" required value={transferForm.transferDate} onChange={(e) => setTransferForm({ ...transferForm, transferDate: e.target.value })} />
-                <select className={inputClass} value={transferForm.direction} onChange={(e) => setTransferForm({ ...transferForm, direction: e.target.value })}><option value="cash_to_bank">Cash to Bank</option><option value="bank_to_cash">Bank to Cash</option></select>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <FloatingField label="Amount" type="number" min="0" step="0.01" required value={transferForm.amount} onChange={(value) => setTransferForm({ ...transferForm, amount: value })} />
+                <FloatingField label="Transfer Date" type="date" required value={transferForm.transferDate} onChange={(value) => setTransferForm({ ...transferForm, transferDate: value })} />
+                <FloatingField label="Direction" value={transferForm.direction} onChange={(value) => setTransferForm({ ...transferForm, direction: value })} options={[{ value: 'cash_to_bank', label: 'Cash to Bank' }, { value: 'bank_to_cash', label: 'Bank to Cash' }]} />
               </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input className={inputClass} placeholder="Reference No" value={transferForm.referenceNo} onChange={(e) => setTransferForm({ ...transferForm, referenceNo: e.target.value })} />
-                <input className={inputClass} placeholder="Notes" value={transferForm.notes} onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Reference No" value={transferForm.referenceNo} onChange={(value) => setTransferForm({ ...transferForm, referenceNo: value })} />
+                <FloatingField label="Notes" value={transferForm.notes} onChange={(value) => setTransferForm({ ...transferForm, notes: value })} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
@@ -3484,7 +5166,13 @@ export const Accounting: React.FC = () => {
                 </div>
                 <p className="text-xs text-gray-400">Paste a bank statement CSV with at least `Date` and `Amount` columns, then compare it against unreconciled bank ledger rows.</p>
               </div>
-              <textarea className={inputClass} rows={6} placeholder="Date,Amount,Description&#10;2026-04-01,2000,UPI receipt" value={bankCsvText} onChange={(e) => setBankCsvText(e.target.value)} />
+              <FloatingField
+                label="Bank statement CSV"
+                rows={6}
+                value={bankCsvText}
+                onChange={setBankCsvText}
+                inputClassName="font-mono"
+              />
               <div className="flex flex-wrap gap-2">
                 <button className={buttonClass} onClick={() => importBankCsv(false)} disabled={!bankCsvText.trim()}>
                   <CompareIcon />
@@ -3526,13 +5214,229 @@ export const Accounting: React.FC = () => {
             listClassName="border-b-0 px-0 pt-0"
           />
 
+          {ledgerTab === 'groups' && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+              <form onSubmit={saveAccountGroup} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">{editingGroupId ? 'Edit Group' : 'Add Group'}</h3>
+                    <p className="text-xs text-gray-400">Create the accounting group first, then attach ledgers under it.</p>
+                  </div>
+                  {editingGroupId && (
+                    <button type="button" className={secondaryButtonClass} onClick={resetGroupForm}>
+                      Cancel
+                    </button>
+                  )}
+                </div>
+                <FloatingField label="Group Name" maxLength={50} required value={groupForm.groupName} onChange={(value) => setGroupForm({ ...groupForm, groupName: value })} />
+                <FloatingField
+                  label="Group Code (auto if blank)"
+                  value={groupForm.groupCode}
+                  onChange={(value) => setGroupForm({ ...groupForm, groupCode: value })}
+                  disabled={Boolean(editingGroupId && accountGroups.find((group) => group._id === editingGroupId)?.isSystem)}
+                />
+                <FloatingField
+                  label="Under"
+                  required
+                  value={groupForm.under}
+                  onChange={(value) => setGroupForm({ ...groupForm, under: value })}
+                  disabled={Boolean(editingGroupId && accountGroups.find((group) => group._id === editingGroupId)?.isSystem)}
+                  options={[
+                    { value: 'asset', label: 'Assets' },
+                    { value: 'liability', label: 'Liabilities' },
+                    { value: 'income', label: 'Income' },
+                    { value: 'expense', label: 'Expenses' },
+                  ]}
+                />
+                <FloatingField
+                  label="Parent Group"
+                  value={groupForm.parentGroupId}
+                  onChange={(value) => setGroupForm({ ...groupForm, parentGroupId: value })}
+                  options={[
+                    { value: '', label: 'SELF / No parent group' },
+                    ...accountGroups
+                      .filter((group) => group._id !== editingGroupId)
+                      .map((group) => ({ value: group._id, label: `${group.groupName} (${group.groupCode})` })),
+                  ]}
+                />
+                {editingGroupId && (
+                  <label className="flex items-center gap-2 text-sm text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={groupForm.isActive}
+                      onChange={(e) => setGroupForm({ ...groupForm, isActive: e.target.checked })}
+                      disabled={Boolean(accountGroups.find((group) => group._id === editingGroupId)?.isSystem)}
+                    />
+                    Active group
+                  </label>
+                )}
+                <button className={buttonClass} disabled={loading}>
+                  <CreateIcon />
+                  {editingGroupId ? 'Update Group' : 'Save Group'}
+                </button>
+              </form>
+
+              <ReportDataTable
+                title="Manage Groups"
+                data={accountGroups}
+                itemLabel="groups"
+                searchPlaceholder="Search group name, code, under, or parent"
+                exportFileName={`account-groups-${endDate}.csv`}
+                filters={[
+                  {
+                    key: 'under',
+                    label: 'Under',
+                    getValue: (row: AccountGroup) => accountTypeToLabel(row.under),
+                  },
+                  {
+                    key: 'status',
+                    label: 'Status',
+                    getValue: (row: AccountGroup) => row.isActive === false ? 'Inactive' : 'Active',
+                  },
+                ]}
+                columns={[
+                  { key: 'groupName', header: 'Group Name', accessor: 'groupName' },
+                  { key: 'groupCode', header: 'Group Code', accessor: 'groupCode' },
+                  { key: 'underValue', header: 'Under', render: (row: AccountGroup) => accountTypeToLabel(row.under), exportValue: (row: AccountGroup) => accountTypeToLabel(row.under) },
+                  { key: 'parentGroupName', header: 'Parent Group', render: (row: AccountGroup) => row.parentGroupName || 'SELF', exportValue: (row: AccountGroup) => row.parentGroupName || 'SELF' },
+                  { key: 'statusValue', header: 'Status', render: (row: AccountGroup) => row.isActive === false ? 'Inactive' : 'Active', exportValue: (row: AccountGroup) => row.isActive === false ? 'Inactive' : 'Active' },
+                  {
+                    key: 'actions',
+                    header: 'Action',
+                    render: (row: AccountGroup) => (
+                      <button type="button" className={secondaryButtonClass} onClick={() => startGroupEdit(row)}>
+                        Edit
+                      </button>
+                    ),
+                    exportValue: () => '',
+                  },
+                ]}
+              />
+            </div>
+          )}
+
+          {ledgerTab === 'ledgers' && (
+            <div className="space-y-4">
+              <form onSubmit={saveLedgerAccount} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">{editingLedgerId ? 'Edit Ledger' : 'Add Ledger'}</h3>
+                    <p className="text-xs text-gray-400">Ledger records are saved as chart accounts, so accounting reports stay in sync.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {editingLedgerId && (
+                      <button type="button" className={secondaryButtonClass} onClick={resetLedgerForm}>
+                        Cancel
+                      </button>
+                    )}
+                    <button type="button" className={secondaryButtonClass} onClick={() => setLedgerTab('groups')}>
+                      Add / Edit Groups
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FloatingField
+                    label="Folio No. / Account Code"
+                    value={ledgerForm.accountCode}
+                    onChange={(value) => setLedgerForm({ ...ledgerForm, accountCode: value })}
+                    disabled={Boolean(editingLedgerId && ledgerAccounts.find((row) => row._id === editingLedgerId)?.isSystem)}
+                  />
+                  <FloatingField label="Account Name" required value={ledgerForm.accountName} onChange={(value) => setLedgerForm({ ...ledgerForm, accountName: value })} />
+                  <FloatingField
+                    label="Group"
+                    required
+                    value={ledgerForm.groupId}
+                    onChange={(value) => setLedgerForm({ ...ledgerForm, groupId: value })}
+                    options={[
+                      { value: '', label: 'Select Group' },
+                      ...accountGroups
+                        .filter((group) => group.isActive !== false)
+                        .map((group) => ({ value: group._id, label: `${group.groupName} - ${accountTypeToLabel(group.under)}` })),
+                    ]}
+                  />
+                  <FloatingField label="GST #" value={ledgerForm.gstNumber} onChange={(value) => setLedgerForm({ ...ledgerForm, gstNumber: value.toUpperCase() })} />
+                  <FloatingField label="PAN #" value={ledgerForm.panNumber} onChange={(value) => setLedgerForm({ ...ledgerForm, panNumber: value.toUpperCase() })} />
+                  <FloatingField
+                    label="Ledger Type"
+                    value={ledgerForm.subType}
+                    onChange={(value) => setLedgerForm({ ...ledgerForm, subType: value })}
+                    disabled={Boolean(editingLedgerId && ledgerAccounts.find((row) => row._id === editingLedgerId)?.isSystem)}
+                    options={[
+                      { value: 'general', label: 'General Ledger' },
+                      { value: 'cash', label: 'Cash' },
+                      { value: 'bank', label: 'Bank' },
+                      { value: 'customer', label: 'Customer' },
+                      { value: 'supplier', label: 'Supplier' },
+                      { value: 'stock', label: 'Stock' },
+                    ]}
+                  />
+                  <FloatingField label="Opening Balance" type="number" min="0" step="0.01" value={ledgerForm.openingBalance} onChange={(value) => setLedgerForm({ ...ledgerForm, openingBalance: value })} />
+                  <FloatingField label="Opening Side" value={ledgerForm.openingSide} onChange={(value) => setLedgerForm({ ...ledgerForm, openingSide: value })} options={debitCreditOptions} />
+                </div>
+                {editingLedgerId && (
+                  <label className="flex items-center gap-2 text-sm text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={ledgerForm.isActive}
+                      onChange={(e) => setLedgerForm({ ...ledgerForm, isActive: e.target.checked })}
+                      disabled={Boolean(ledgerAccounts.find((row) => row._id === editingLedgerId)?.isSystem)}
+                    />
+                    Active ledger
+                  </label>
+                )}
+                <button className={buttonClass} disabled={loading}>
+                  <AccountIcon />
+                  {editingLedgerId ? 'Update Ledger' : 'Save Ledger'}
+                </button>
+              </form>
+
+              <ReportDataTable
+                title="Manage Ledgers"
+                data={ledgerAccounts}
+                itemLabel="ledgers"
+                searchPlaceholder="Search folio, account, group, GST, or PAN"
+                exportFileName={`account-ledgers-${endDate}.csv`}
+                filters={[
+                  { key: 'group', label: 'Group', getValue: (row: ChartAccount) => row.groupName || row.underLabel || accountTypeToLabel(row.accountType) },
+                  { key: 'type', label: 'Type', getValue: (row: ChartAccount) => accountTypeToLabel(row.accountType) },
+                  { key: 'status', label: 'Status', getValue: (row: ChartAccount) => row.isActive === false ? 'Inactive' : 'Active' },
+                ]}
+                columns={[
+                  { key: 'folioNo', header: 'Folio No.', render: (row: ChartAccount) => row.accountCode || '-', exportValue: (row: ChartAccount) => row.accountCode || '' },
+                  { key: 'accountName', header: 'Account Name', accessor: 'accountName' },
+                  { key: 'groupName', header: 'Group', render: (row: ChartAccount) => row.groupName || row.underLabel || accountTypeToLabel(row.accountType), exportValue: (row: ChartAccount) => row.groupName || row.underLabel || accountTypeToLabel(row.accountType) },
+                  { key: 'gstNumber', header: 'GST #', render: (row: ChartAccount) => row.gstNumber || '-', exportValue: (row: ChartAccount) => row.gstNumber || '' },
+                  { key: 'panNumber', header: 'PAN #', render: (row: ChartAccount) => row.panNumber || '-', exportValue: (row: ChartAccount) => row.panNumber || '' },
+                  {
+                    key: 'openingBalance',
+                    header: 'Opening Balance',
+                    render: (row: ChartAccount) => `${formatCurrency(row.openingBalance || 0)} ${String(row.openingSide || 'debit').toUpperCase() === 'CREDIT' ? 'Cr' : 'Dr'}`,
+                    exportValue: (row: ChartAccount) => `${Number(row.openingBalance || 0)} ${String(row.openingSide || 'debit').toUpperCase() === 'CREDIT' ? 'Cr' : 'Dr'}`,
+                    sortValue: (row: ChartAccount) => Number(row.openingBalance || 0),
+                    align: 'right',
+                  },
+                  {
+                    key: 'actions',
+                    header: 'Action',
+                    render: (row: ChartAccount) => (
+                      <button type="button" className={secondaryButtonClass} onClick={() => startLedgerEdit(row)}>
+                        Edit
+                      </button>
+                    ),
+                    exportValue: () => '',
+                  },
+                ]}
+              />
+            </div>
+          )}
+
           {ledgerTab === 'create_account' && (
             <form onSubmit={saveChartAccount} className="max-w-4xl rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               <h3 className="text-white font-semibold">Create Chart Account</h3>
-              <input className={inputClass} placeholder="Account Name" value={accountForm.accountName} onChange={(e) => setAccountForm({ ...accountForm, accountName: e.target.value })} required />
-              <div className="grid grid-cols-2 gap-2">
-                <select className={inputClass} value={accountForm.accountType} onChange={(e) => setAccountForm({ ...accountForm, accountType: e.target.value })}><option value="asset">Asset</option><option value="liability">Liability</option><option value="income">Income</option><option value="expense">Expense</option></select>
-                <select className={inputClass} value={accountForm.subType} onChange={(e) => setAccountForm({ ...accountForm, subType: e.target.value })}><option value="general">General</option><option value="cash">Cash</option><option value="bank">Bank</option><option value="customer">Customer</option><option value="supplier">Supplier</option><option value="stock">Stock</option></select>
+              <FloatingField label="Account Name" value={accountForm.accountName} onChange={(value) => setAccountForm({ ...accountForm, accountName: value })} required />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField label="Account Type" value={accountForm.accountType} onChange={(value) => setAccountForm({ ...accountForm, accountType: value })} options={accountTypeOptions} />
+                <FloatingField label="Sub Type" value={accountForm.subType} onChange={(value) => setAccountForm({ ...accountForm, subType: value })} options={accountSubTypeOptions} />
               </div>
               <button className={buttonClass}>
                 <AccountIcon />
@@ -3545,22 +5449,16 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
               <h3 className="text-white font-semibold">Ledger View</h3>
               <div className="mt-2 max-w-xl">
-                <select
-                  className={inputClass}
+                <FloatingField
+                  label="Ledger Account"
                   value={selectedAccountId}
-                  onChange={(e) => {
-                    const id = e.target.value;
+                  onChange={(value) => {
+                    const id = value;
                     setSelectedAccountId(id);
                     if (id) withLoading(async () => refreshLedger(id));
                   }}
-                >
-                  <option value="">Select account for ledger</option>
-                  {chartAccounts.map((row) => (
-                    <option key={row._id} value={row._id}>
-                      {row.accountCode} - {row.accountName}
-                    </option>
-                  ))}
-                </select>
+                  options={[{ value: '', label: 'Select account for ledger' }, ...chartAccounts.map((row) => ({ value: row._id, label: `${row.accountCode} - ${row.accountName}` }))]}
+                />
               </div>
               <p className="mt-2 text-sm text-gray-300">Opening: {formatCurrency(ledgerSummary?.openingBalance || 0)}</p>
               <p className="text-sm text-gray-300">Closing: {formatCurrency(ledgerSummary?.totals?.closing || 0)}</p>
@@ -3593,8 +5491,11 @@ export const Accounting: React.FC = () => {
 
       {activeTab === 'gst' && <AccountingGstWorkspace />}
 
+      {activeTab === 'tds' && <AccountingTdsWorkspace />}
+
       {activeTab === 'reports' && (
         <div className="space-y-4">
+          <AccountingLogicHelpCard logic={reportLogicByTab[reportsTab]} />
           <CardTabs
             ariaLabel="Reports section tabs"
             items={reportsTabs}

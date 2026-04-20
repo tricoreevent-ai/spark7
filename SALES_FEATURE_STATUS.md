@@ -9,6 +9,7 @@ Scope: offline/internal sales workflows only. Online commerce features like e-co
 - Sales history editing for draft/posted invoices
 - Credit notes, receipt vouchers, settlement/day-end workflows
 - Sales dashboards, gross profit, receivables, customer-wise/item-wise reports
+- Sales tax summary report with GST rate-wise sales and return tax values
 - Low-stock reporting, procurement, and purchase-order workflows
 
 ## Added In This Batch

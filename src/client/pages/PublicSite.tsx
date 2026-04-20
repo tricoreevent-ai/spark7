@@ -723,9 +723,6 @@ const PublicShell: React.FC<PublicShellProps> = ({
                 />
                 <div className="min-w-0">
                   <p className="text-2xl font-bold tracking-tight text-white">{PUBLIC_BRAND_NAME}</p>
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400 transition group-hover:text-slate-200">
-                    {PUBLIC_BRAND_TAGLINE}
-                  </p>
                 </div>
               </Link>
 

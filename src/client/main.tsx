@@ -1,5 +1,6 @@
 import React from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import './index.css'
 import { AppDialogProvider } from './components/AppDialogProvider'
@@ -14,6 +15,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/inventory$/, title: 'Inventory' },
   { match: /^\/sales\/quotes$/, title: 'Quotations' },
   { match: /^\/sales$/, title: 'Sales' },
+  { match: /^\/customers\/directory$/, title: 'Customer Directory' },
   { match: /^\/customers\/profiles$/, title: 'Customer Profiles' },
   { match: /^\/customers\/enquiries$/, title: 'Customer Enquiries' },
   { match: /^\/customers\/campaigns$/, title: 'Customer Campaigns' },
@@ -29,6 +31,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/settings$/, title: 'Settings' },
   { match: /^\/admin\/company-create$/, title: 'Company Creation' },
   { match: /^\/accounting\/settlements$/, title: 'Settlement Center' },
+  { match: /^\/accounting\/validation$/, title: 'Accounting Validation' },
   { match: /^\/accounting$/, title: 'Accounting' },
   { match: /^\/reports$/, title: 'Reports' },
   { match: /^\/user-manual$/, title: 'User Manual' },
@@ -40,6 +43,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/payroll$/, title: 'Payroll' },
   { match: /^\/events\/quotations$/, title: 'Event Quotations' },
   { match: /^\/events$/, title: 'Event Management' },
+  { match: /^\/services$/, title: 'Service Desk' },
   { match: /^\/facilities\/setup$/, title: 'Facility Setup' },
   { match: /^\/facilities$/, title: 'Facilities' },
   { match: /^\/membership-plans\/create$/, title: 'Membership Plan Setup' },
@@ -92,13 +96,23 @@ const installPrivateDocumentTitleSync = (): void => {
 }
 
 const rootElement = document.getElementById('root')!
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+})
 const app = (
   <React.StrictMode>
-    <AppErrorBoundary>
-      <AppDialogProvider>
-        <App />
-      </AppDialogProvider>
-    </AppErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <AppErrorBoundary>
+        <AppDialogProvider>
+          <App />
+        </AppDialogProvider>
+      </AppErrorBoundary>
+    </QueryClientProvider>
   </React.StrictMode>
 )
 

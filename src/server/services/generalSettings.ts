@@ -69,3 +69,26 @@ export const loadTenantGeneralSettings = async (tenantId?: string) => {
   const row = await findGeneralSettingsRowForTenant(tenantId);
   return mergeGeneralSettingsWithDefaults(row?.value || {});
 };
+
+export const saveTenantGeneralSettingsRow = async (args: {
+  tenantId?: string;
+  settings: any;
+  updatedBy?: string;
+}) => {
+  const filter: Record<string, any> = { key: GENERAL_SETTINGS_KEY };
+  if (args.tenantId) filter.tenantId = args.tenantId;
+
+  const normalized = mergeGeneralSettingsWithDefaults(args.settings);
+  return AppSetting.findOneAndUpdate(
+    filter,
+    {
+      $set: {
+        key: GENERAL_SETTINGS_KEY,
+        tenantId: args.tenantId,
+        value: normalized,
+        updatedBy: args.updatedBy,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+};

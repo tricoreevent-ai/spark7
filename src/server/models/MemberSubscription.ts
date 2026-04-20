@@ -7,6 +7,7 @@ export interface IMemberSubscription extends Document {
   gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say';
   dateOfBirth?: Date;
   profilePhotoUrl?: string;
+  profilePhotoStoragePath?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -88,6 +89,7 @@ const MemberSubscriptionSchema = new Schema<IMemberSubscription>(
     },
     dateOfBirth: { type: Date },
     profilePhotoUrl: { type: String, trim: true },
+    profilePhotoStoragePath: { type: String, trim: true, default: '' },
     phone: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     address: { type: String, trim: true },

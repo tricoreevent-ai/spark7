@@ -3,6 +3,7 @@ import { Product } from '../models/Product.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { getCurrentTenantId } from '../services/tenantContext.js';
 import { validateHsnSacCode } from '../services/gstCompliance.js';
+import { writeAuditLog } from '../services/audit.js';
 
 const router = Router();
 
@@ -15,7 +16,23 @@ const normalizePriceTiers = (value: any): Array<{ tierName: string; minQuantity:
       unitPrice: Number(row?.unitPrice || 0),
     }))
     .filter((row) => row.unitPrice > 0)
-    .sort((a, b) => a.minQuantity - b.minQuantity || a.tierName.localeCompare(b.tierName));
+      .sort((a, b) => a.minQuantity - b.minQuantity || a.tierName.localeCompare(b.tierName));
+};
+
+const normalizeVariantMatrix = (
+  value: any
+): Array<{ size: string; color: string; skuSuffix: string; barcode: string; price: number; isActive: boolean }> => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row: any) => ({
+      size: String(row?.size || '').trim(),
+      color: String(row?.color || '').trim(),
+      skuSuffix: String(row?.skuSuffix || '').trim().toUpperCase(),
+      barcode: String(row?.barcode || '').trim().toUpperCase(),
+      price: Math.max(0, Number(row?.price || 0)),
+      isActive: row?.isActive !== false,
+    }))
+    .filter((row) => row.size || row.color || row.skuSuffix || row.barcode || row.price > 0);
 };
 
 const normalizeOptionalHsnCode = (value: any): string => String(value || '').trim().replace(/\s+/g, '');
@@ -48,7 +65,18 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
     if (subcategory) filter.subcategory = subcategory;
     if (typeof q === 'string' && q.trim()) {
       const regex = new RegExp(q.trim(), 'i');
-      filter.$or = [{ name: regex }, { sku: regex }, { barcode: regex }, { description: regex }];
+      filter.$or = [
+        { name: regex },
+        { sku: regex },
+        { barcode: regex },
+        { description: regex },
+        { variantSize: regex },
+        { variantColor: regex },
+        { 'variantMatrix.size': regex },
+        { 'variantMatrix.color': regex },
+        { 'variantMatrix.barcode': regex },
+        { 'variantMatrix.skuSuffix': regex },
+      ];
     }
 
     const products = await Product.find(filter)
@@ -128,8 +156,13 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       priceTiers,
       cost,
       gstRate,
+      cgstRate,
+      sgstRate,
+      igstRate,
       taxType,
       stock,
+      openingStockValue,
+      stockLedgerAccountId,
       minStock,
       autoReorder,
       reorderQuantity,
@@ -138,12 +171,13 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       allowNegativeStock,
       batchTracking,
       expiryRequired,
-      serialNumberTracking,
-      variantSize,
-      variantColor,
-      returnStock,
-      damagedStock,
-      imageUrl,
+        serialNumberTracking,
+        variantSize,
+        variantColor,
+        variantMatrix,
+        returnStock,
+        damagedStock,
+        imageUrl,
     } = req.body;
 
     // Validation
@@ -220,8 +254,13 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       priceTiers: normalizePriceTiers(priceTiers),
       cost,
       gstRate: gstRate || 18,
+      cgstRate: Number(cgstRate || 0),
+      sgstRate: Number(sgstRate || 0),
+      igstRate: Number(igstRate || 0),
       taxType: taxType || 'gst',
       stock: stock || 0,
+      openingStockValue: Number(openingStockValue || 0),
+      ...(stockLedgerAccountId && { stockLedgerAccountId }),
       returnStock: returnStock || 0,
       damagedStock: damagedStock || 0,
       minStock: minStock || 10,
@@ -232,11 +271,12 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       allowNegativeStock: Boolean(allowNegativeStock),
       batchTracking: Boolean(batchTracking),
       expiryRequired: Boolean(expiryRequired),
-      serialNumberTracking: Boolean(serialNumberTracking),
-      variantSize: variantSize || '',
-      variantColor: variantColor || '',
-      imageUrl: imageUrl || '',
-    });
+        serialNumberTracking: Boolean(serialNumberTracking),
+        variantSize: variantSize || '',
+        variantColor: variantColor || '',
+        variantMatrix: normalizeVariantMatrix(variantMatrix),
+        imageUrl: imageUrl || '',
+      });
 
     await product.save();
 
@@ -273,8 +313,13 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       priceTiers,
       cost,
       gstRate,
+      cgstRate,
+      sgstRate,
+      igstRate,
       taxType,
       stock,
+      openingStockValue,
+      stockLedgerAccountId,
       returnStock,
       damagedStock,
       minStock,
@@ -286,11 +331,12 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       allowNegativeStock,
       batchTracking,
       expiryRequired,
-      serialNumberTracking,
-      variantSize,
-      variantColor,
-      imageUrl,
-    } = req.body;
+        serialNumberTracking,
+        variantSize,
+        variantColor,
+        variantMatrix,
+        imageUrl,
+      } = req.body;
 
     const updates: any = {
       ...(name !== undefined && { name }),
@@ -312,8 +358,13 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       ...(priceTiers !== undefined && { priceTiers: normalizePriceTiers(priceTiers) }),
       ...(cost !== undefined && { cost }),
       ...(gstRate !== undefined && { gstRate }),
+      ...(cgstRate !== undefined && { cgstRate: Number(cgstRate || 0) }),
+      ...(sgstRate !== undefined && { sgstRate: Number(sgstRate || 0) }),
+      ...(igstRate !== undefined && { igstRate: Number(igstRate || 0) }),
       ...(taxType !== undefined && { taxType }),
       ...(stock !== undefined && { stock }),
+      ...(openingStockValue !== undefined && { openingStockValue: Number(openingStockValue || 0) }),
+      ...(stockLedgerAccountId !== undefined && { stockLedgerAccountId: stockLedgerAccountId || undefined }),
       ...(returnStock !== undefined && { returnStock }),
       ...(damagedStock !== undefined && { damagedStock }),
       ...(minStock !== undefined && { minStock }),
@@ -328,6 +379,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       ...(serialNumberTracking !== undefined && { serialNumberTracking: Boolean(serialNumberTracking) }),
       ...(variantSize !== undefined && { variantSize }),
       ...(variantColor !== undefined && { variantColor }),
+      ...(variantMatrix !== undefined && { variantMatrix: normalizeVariantMatrix(variantMatrix) }),
       ...(imageUrl !== undefined && { imageUrl }),
     };
 
@@ -425,10 +477,7 @@ router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Res
       });
     }
 
-    const product = await Product.findOneAndDelete({
-      _id: req.params.id,
-      tenantId,
-    });
+    const product = await Product.findOne({ _id: req.params.id, tenantId });
 
     if (!product) {
       return res.status(404).json({
@@ -437,9 +486,30 @@ router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Res
       });
     }
 
+    const before = product.toObject();
+    product.isActive = false;
+    (product as any).deletedAt = new Date();
+    (product as any).deletedBy = req.userId;
+    (product as any).deletionReason = String(req.body?.reason || req.query?.reason || 'Product removed from catalog').trim();
+    await product.save();
+
+    await writeAuditLog({
+      module: 'products',
+      action: 'product_soft_deleted',
+      entityType: 'product',
+      entityId: product._id.toString(),
+      referenceNo: product.sku,
+      userId: req.userId,
+      metadata: {
+        reason: (product as any).deletionReason,
+      },
+      before,
+      after: product.toObject(),
+    });
+
     res.status(200).json({
       success: true,
-      message: 'Product deleted successfully',
+      message: 'Product removed from active catalog',
       data: product,
     });
   } catch (error: any) {

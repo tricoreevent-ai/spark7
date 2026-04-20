@@ -4,6 +4,80 @@ import { useCategories } from '../hooks/useCategories';
 import { apiUrl } from '../utils/api';
 import { showAlertDialog } from '../utils/appDialogs';
 
+interface VariantMatrixRowForm {
+  size: string;
+  color: string;
+  skuSuffix: string;
+  barcode: string;
+  price: string;
+  isActive: boolean;
+}
+
+const splitVariantTokens = (value: string): string[] =>
+  Array.from(
+    new Set(
+      String(value || '')
+        .split(',')
+        .map((token) => token.trim())
+        .filter(Boolean)
+    )
+  );
+
+const buildVariantMatrixRows = (
+  sizesRaw: string,
+  colorsRaw: string,
+  basePrice: string,
+  existing: VariantMatrixRowForm[]
+): VariantMatrixRowForm[] => {
+  const sizes = splitVariantTokens(sizesRaw);
+  const colors = splitVariantTokens(colorsRaw);
+  const price = String(basePrice || '').trim();
+  const nextRows: VariantMatrixRowForm[] = [];
+  const existingMap = new Map(
+    existing.map((row) => [`${String(row.size || '').toLowerCase()}::${String(row.color || '').toLowerCase()}`, row])
+  );
+
+  if (!sizes.length && !colors.length) return existing;
+
+  if (sizes.length && colors.length) {
+    sizes.forEach((size) => {
+      colors.forEach((color) => {
+        const key = `${size.toLowerCase()}::${color.toLowerCase()}`;
+        const prior = existingMap.get(key);
+        nextRows.push(
+          prior || {
+            size,
+            color,
+            skuSuffix: `${size}-${color}`.replace(/\s+/g, '-').toUpperCase(),
+            barcode: '',
+            price,
+            isActive: true,
+          }
+        );
+      });
+    });
+    return nextRows;
+  }
+
+  const singles = sizes.length ? sizes : colors;
+  const singleField = sizes.length ? 'size' : 'color';
+  singles.forEach((token) => {
+    const key = sizes.length ? `${token.toLowerCase()}::` : `::${token.toLowerCase()}`;
+    const prior = existingMap.get(key);
+    nextRows.push(
+      prior || {
+        size: singleField === 'size' ? token : '',
+        color: singleField === 'color' ? token : '',
+        skuSuffix: token.replace(/\s+/g, '-').toUpperCase(),
+        barcode: '',
+        price,
+        isActive: true,
+      }
+    );
+  });
+  return nextRows;
+};
+
 export const EditProduct: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -27,7 +101,12 @@ export const EditProduct: React.FC = () => {
     cost: '',
     hsnCode: '',
     gstRate: '18',
+    cgstRate: '9',
+    sgstRate: '9',
+    igstRate: '0',
     stock: '',
+    openingStockValue: '',
+    stockLedgerAccountId: '',
     minStock: '5',
     autoReorder: false,
     reorderQuantity: '0',
@@ -39,6 +118,7 @@ export const EditProduct: React.FC = () => {
     allowNegativeStock: false,
     variantSize: '',
     variantColor: '',
+    variantMatrix: [] as VariantMatrixRowForm[],
     priceTiers: [] as Array<{ tierName: string; minQuantity: string; unitPrice: string }>,
   });
 
@@ -75,7 +155,12 @@ export const EditProduct: React.FC = () => {
           cost: String(product?.cost ?? ''),
           hsnCode: String(product?.hsnCode || ''),
           gstRate: String(product?.gstRate ?? 18),
+          cgstRate: String(product?.cgstRate ?? 0),
+          sgstRate: String(product?.sgstRate ?? 0),
+          igstRate: String(product?.igstRate ?? 0),
           stock: String(product?.stock ?? 0),
+          openingStockValue: String(product?.openingStockValue ?? 0),
+          stockLedgerAccountId: String(product?.stockLedgerAccountId || ''),
           minStock: String(product?.minStock ?? 5),
           autoReorder: Boolean(product?.autoReorder),
           reorderQuantity: String(product?.reorderQuantity ?? 0),
@@ -87,6 +172,16 @@ export const EditProduct: React.FC = () => {
           allowNegativeStock: Boolean(product?.allowNegativeStock),
           variantSize: String(product?.variantSize || ''),
           variantColor: String(product?.variantColor || ''),
+          variantMatrix: Array.isArray(product?.variantMatrix)
+            ? product.variantMatrix.map((row: any) => ({
+              size: String(row?.size || ''),
+              color: String(row?.color || ''),
+              skuSuffix: String(row?.skuSuffix || ''),
+              barcode: String(row?.barcode || ''),
+              price: String(row?.price ?? ''),
+              isActive: row?.isActive !== false,
+            }))
+            : [],
           priceTiers: Array.isArray(product?.priceTiers)
             ? product.priceTiers.map((row: any) => ({
               tierName: String(row?.tierName || ''),
@@ -135,6 +230,39 @@ export const EditProduct: React.FC = () => {
     }));
   };
 
+  const updateVariantMatrixRow = (index: number, field: keyof VariantMatrixRowForm, value: string | boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      variantMatrix: prev.variantMatrix.map((row, rowIndex) => (
+        rowIndex === index ? { ...row, [field]: value } : row
+      )),
+    }));
+  };
+
+  const addVariantMatrixRow = () => {
+    setFormData((prev) => ({
+      ...prev,
+      variantMatrix: [
+        ...prev.variantMatrix,
+        { size: '', color: '', skuSuffix: '', barcode: '', price: prev.price || '', isActive: true },
+      ],
+    }));
+  };
+
+  const removeVariantMatrixRow = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      variantMatrix: prev.variantMatrix.filter((_, rowIndex) => rowIndex !== index),
+    }));
+  };
+
+  const generateVariantMatrix = () => {
+    setFormData((prev) => ({
+      ...prev,
+      variantMatrix: buildVariantMatrixRows(prev.variantSize, prev.variantColor, prev.price, prev.variantMatrix),
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -160,6 +288,11 @@ export const EditProduct: React.FC = () => {
           minStock: Number(formData.minStock),
           reorderQuantity: Number(formData.reorderQuantity || 0),
           gstRate: Number(formData.gstRate),
+          cgstRate: Number(formData.cgstRate || 0),
+          sgstRate: Number(formData.sgstRate || 0),
+          igstRate: Number(formData.igstRate || 0),
+          openingStockValue: Number(formData.openingStockValue || 0),
+          stockLedgerAccountId: formData.stockLedgerAccountId.trim() || undefined,
           priceTiers: formData.priceTiers
             .map((row) => ({
               tierName: row.tierName.trim(),
@@ -167,6 +300,16 @@ export const EditProduct: React.FC = () => {
               unitPrice: Number(row.unitPrice || 0),
             }))
             .filter((row) => row.unitPrice > 0),
+          variantMatrix: formData.variantMatrix
+            .map((row) => ({
+              size: row.size.trim(),
+              color: row.color.trim(),
+              skuSuffix: row.skuSuffix.trim().toUpperCase(),
+              barcode: row.barcode.trim().toUpperCase(),
+              price: Number(row.price || 0),
+              isActive: row.isActive !== false,
+            }))
+            .filter((row) => row.size || row.color || row.skuSuffix || row.barcode || row.price > 0),
         }),
       });
 
@@ -299,6 +442,21 @@ export const EditProduct: React.FC = () => {
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">CGST %</label>
+                <input type="number" name="cgstRate" value={formData.cgstRate} onChange={handleChange} min="0" step="0.01" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">SGST %</label>
+                <input type="number" name="sgstRate" value={formData.sgstRate} onChange={handleChange} min="0" step="0.01" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">IGST %</label>
+                <input type="number" name="igstRate" value={formData.igstRate} onChange={handleChange} min="0" step="0.01" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium leading-6 text-white">Stock</label>
@@ -307,6 +465,17 @@ export const EditProduct: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium leading-6 text-white">Min Stock Alert</label>
                 <input type="number" name="minStock" value={formData.minStock} onChange={handleChange} required min="0" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">Opening Stock Value</label>
+                <input type="number" name="openingStockValue" value={formData.openingStockValue} onChange={handleChange} min="0" step="0.01" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium leading-6 text-white">Stock Ledger Account ID</label>
+                <input type="text" name="stockLedgerAccountId" value={formData.stockLedgerAccountId} onChange={handleChange} placeholder="Optional Chart Account ID" className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
               </div>
             </div>
 
@@ -334,6 +503,42 @@ export const EditProduct: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium leading-6 text-white">Variant Color</label>
                 <input type="text" name="variantColor" value={formData.variantColor} onChange={handleChange} className="block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6" />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-white">Size / Color Matrix</p>
+                  <p className="text-xs text-gray-400">Generate editable size-color combinations and keep variant barcode or price overrides in one product record.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={generateVariantMatrix} className="rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-400">
+                    Generate Matrix
+                  </button>
+                  <button type="button" onClick={addVariantMatrixRow} className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-400">
+                    Add Row
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {formData.variantMatrix.map((row, index) => (
+                  <div key={`${row.size}-${row.color}-${index}`} className="grid grid-cols-[0.9fr_0.9fr_0.9fr_1fr_0.8fr_auto_auto] gap-2">
+                    <input value={row.size} onChange={(e) => updateVariantMatrixRow(index, 'size', e.target.value)} placeholder="Size" className="rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15" />
+                    <input value={row.color} onChange={(e) => updateVariantMatrixRow(index, 'color', e.target.value)} placeholder="Color" className="rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15" />
+                    <input value={row.skuSuffix} onChange={(e) => updateVariantMatrixRow(index, 'skuSuffix', e.target.value)} placeholder="SKU suffix" className="rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15" />
+                    <input value={row.barcode} onChange={(e) => updateVariantMatrixRow(index, 'barcode', e.target.value)} placeholder="Variant barcode" className="rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15" />
+                    <input type="number" min="0" step="0.01" value={row.price} onChange={(e) => updateVariantMatrixRow(index, 'price', e.target.value)} placeholder="Price" className="rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15" />
+                    <label className="flex items-center gap-2 rounded-md bg-black/20 px-2 py-1 text-xs text-gray-200">
+                      <input type="checkbox" checked={row.isActive} onChange={(e) => updateVariantMatrixRow(index, 'isActive', e.target.checked)} />
+                      Active
+                    </label>
+                    <button type="button" onClick={() => removeVariantMatrixRow(index)} className="rounded-md bg-rose-500/20 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/30">
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {!formData.variantMatrix.length && <p className="text-xs text-gray-400">No variant matrix configured.</p>}
               </div>
             </div>
 

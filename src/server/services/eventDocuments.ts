@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { AppSetting } from '../models/AppSetting.js';
+import { resolveImageValueToDataUrl } from './assetStorage.js';
 
 const GENERAL_SETTINGS_KEYS = ['general_settings', 'pos_general_settings_v1', 'pos_settings'];
 const PAGE_MARGIN = 12;
@@ -302,17 +303,17 @@ const drawBadge = (doc: jsPDF, x: number, y: number, text: string) => {
   return width;
 };
 
-const drawDocumentHeader = (
+const drawDocumentHeader = async (
   doc: jsPDF,
   business: BusinessProfile,
   title: string,
   documentNumber: string,
   generatedAt: Date | string
-): number => {
+): Promise<number> => {
   const y = PAGE_TOP;
   const bannerHeight = 34;
   const rightEdge = PAGE_MARGIN + CONTENT_WIDTH - 6;
-  const logo = businessLogoDataUrl(business);
+  const logo = await resolveImageValueToDataUrl(businessLogoDataUrl(business));
   const logoFormat = imageFormatFromDataUrl(logo);
 
   setFillColor(doc, palette.titleBg);
@@ -645,19 +646,19 @@ const drawDocumentFooter = (doc: jsPDF, y: number, business: BusinessProfile, no
   return nextY + 12;
 };
 
-const createPdfBuffer = (
-  render: (doc: jsPDF, business: BusinessProfile) => void,
+const createPdfBuffer = async (
+  render: (doc: jsPDF, business: BusinessProfile) => Promise<void> | void,
   business: BusinessProfile
-): Buffer => {
+): Promise<Buffer> => {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  render(doc, business);
+  await render(doc, business);
   return Buffer.from(doc.output('arraybuffer'));
 };
 
 export const buildEventConfirmationDocument = async (input: EventConfirmationDocumentInput) => {
   const business = await loadBusinessProfile();
-  const pdfBuffer = createPdfBuffer((doc, currentBusiness) => {
-    let y = drawDocumentHeader(
+  const pdfBuffer = await createPdfBuffer(async (doc, currentBusiness) => {
+    let y = await drawDocumentHeader(
       doc,
       currentBusiness,
       'Event Booking Confirmation',
@@ -791,8 +792,8 @@ export const buildEventConfirmationDocument = async (input: EventConfirmationDoc
 
 export const buildEventPaymentReceiptDocument = async (input: EventPaymentReceiptDocumentInput) => {
   const business = await loadBusinessProfile();
-  const pdfBuffer = createPdfBuffer((doc, currentBusiness) => {
-    let y = drawDocumentHeader(
+  const pdfBuffer = await createPdfBuffer(async (doc, currentBusiness) => {
+    let y = await drawDocumentHeader(
       doc,
       currentBusiness,
       'Event Payment Receipt',
@@ -927,8 +928,8 @@ export const buildEventPaymentReceiptDocument = async (input: EventPaymentReceip
 
 export const buildEventQuotationDocument = async (input: EventQuotationDocumentInput) => {
   const business = await loadBusinessProfile();
-  const pdfBuffer = createPdfBuffer((doc, currentBusiness) => {
-    let y = drawDocumentHeader(
+  const pdfBuffer = await createPdfBuffer(async (doc, currentBusiness) => {
+    let y = await drawDocumentHeader(
       doc,
       currentBusiness,
       'Event Quotation',

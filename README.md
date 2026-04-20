@@ -37,7 +37,8 @@ Key project docs:
 ### Finance and administration
 - accounting workspace
 - receipt and credit note settlement workflows
-- reporting dashboards
+- reporting dashboards with sales tax summary, accounting statements, recent activity, and export workflows
+- GST and TDS compliance workspaces for India-focused accounting controls, including sports-complex TDS presets plus statutory, payable, reconciliation, challan, audit, certificate, and tax-audit TDS reports
 - settings and branding
 - user management and role permissions
 

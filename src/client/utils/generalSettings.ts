@@ -1,4 +1,4 @@
-import { apiUrl, fetchApiJson } from './api';
+import { apiUrl, fetchApiJson, resolveAppAssetUrl } from './api';
 
 export type PrintProfile = 'a4' | 'thermal80' | 'thermal58';
 
@@ -268,7 +268,7 @@ export const resolveGeneralSettingsAssetUrl = (value?: string): string => {
   if (!raw) return '';
   if (raw.startsWith('data:')) return raw;
   if (/^https?:\/\//i.test(raw)) return raw;
-  return apiUrl(raw.startsWith('/') ? raw : `/${raw}`);
+  return resolveAppAssetUrl(raw);
 };
 
 export const formatCustomInvoiceNumber = (prefix: string, nextNumber: number): string => {

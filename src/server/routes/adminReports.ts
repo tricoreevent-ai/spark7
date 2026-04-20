@@ -790,75 +790,19 @@ router.post('/cleanup', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ success: false, error: 'Only super admin can delete old logs' });
     }
 
-    const storedSettings = await loadAdminReportSettings(req);
-    const keepLatestRows = clampNumber(
-      req.body?.keepLatestRows,
-      storedSettings.warningRowLimit,
-      MIN_WARNING_ROW_LIMIT,
-      MAX_WARNING_ROW_LIMIT
-    );
-
-    let totalBefore = await AuditLog.countDocuments({ storeKey: viewer.storeKey });
-    let deletedCount = 0;
-    const batchSize = 1000;
-    const maxDeletePerRun = 25000;
-
-    while (totalBefore - deletedCount > keepLatestRows && deletedCount < maxDeletePerRun) {
-      const rowsToDelete = await AuditLog.find({ storeKey: viewer.storeKey })
-        .sort({ createdAt: -1, _id: -1 })
-        .skip(keepLatestRows)
-        .limit(batchSize)
-        .select('_id')
-        .lean<Array<{ _id: Types.ObjectId }>>();
-
-      if (!rowsToDelete.length) break;
-
-      const ids = rowsToDelete.map((row) => row._id);
-      const deleteFilter: Record<string, any> = {
-        _id: { $in: ids },
-        storeKey: viewer.storeKey,
-      };
-      if (req.tenantId) {
-        deleteFilter.tenantId = req.tenantId;
-      }
-
-      const result = await AuditLog.collection.deleteMany(deleteFilter);
-      const removed = Number(result.deletedCount || 0);
-      deletedCount += removed;
-
-      if (!removed || removed < rowsToDelete.length) {
-        break;
-      }
-    }
-
-    const totalAfter = await AuditLog.countDocuments({ storeKey: viewer.storeKey });
-    const warningFlag = await syncWarningFlag(req, viewer, totalAfter, keepLatestRows);
-
     await writeAuditLog({
       module: 'admin_reports',
-      action: 'audit_logs_cleaned',
+      action: 'audit_log_cleanup_blocked',
       entityType: 'audit_log',
       userId: viewer.userId,
       metadata: {
-        deletedCount,
-        keepLatestRows,
-        totalBefore,
-        totalAfter,
+        reason: 'Audit logs are immutable. Cleanup deletion endpoint is disabled; archival must preserve read-only history.',
       },
     });
 
-    res.json({
-      success: true,
-      message: deletedCount
-        ? `Deleted ${deletedCount} old log rows.`
-        : 'No old log rows needed deletion.',
-      data: {
-        deletedCount,
-        keepLatestRows,
-        totalBefore,
-        totalAfter,
-        warningResolved: !warningFlag,
-      },
+    res.status(410).json({
+      success: false,
+      error: 'Audit log deletion is disabled. Use read-only archival instead of purge/cleanup.',
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to delete old logs' });
@@ -900,6 +844,26 @@ router.get('/export/:reportType', async (req: AuthenticatedRequest, res: Respons
       .sort({ createdAt: -1, _id: -1 })
       .limit(MAX_EXPORT_ROWS)
       .lean<AuditLogLean[]>();
+
+    await writeAuditLog({
+      module: 'admin_reports',
+      action: 'report_exported',
+      entityType: 'admin_report',
+      referenceNo: reportType,
+      userId: viewer.userId,
+      metadata: {
+        reportType,
+        filters: {
+          startDate: start,
+          endDate: end,
+          search,
+          module,
+          action,
+        },
+        rowCount: rows.length,
+        truncated: rows.length >= MAX_EXPORT_ROWS,
+      },
+    });
 
     res.json({
       success: true,

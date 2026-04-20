@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomerCampaignManager } from './CustomerCampaignManager';
 import { CustomerDirectoryTable } from './CustomerDirectoryTable';
+import { FloatingField } from './FloatingField';
 import { ManualHelpLink } from './ManualHelpLink';
 import { CustomerCrmDirectoryFilters } from './customerCrmShared';
 import { formatCurrency } from '../config';
@@ -195,7 +196,7 @@ interface HistoryPayload {
   }>;
 }
 
-type CustomerCrmTab = 'profiles' | 'enquiries' | 'campaigns' | 'reports';
+type CustomerCrmTab = 'directory' | 'profiles' | 'enquiries' | 'campaigns' | 'reports';
 
 const normalizePhone = (value: string): string => String(value || '').replace(/\D+/g, '').slice(-10);
 const inputClass = 'w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-500';
@@ -203,6 +204,50 @@ const buttonClass = 'rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold te
 const panelClass = 'rounded-xl border border-white/10 bg-white/5 p-5';
 const sectionTitleClass = 'text-sm font-semibold uppercase tracking-[0.28em] text-cyan-200';
 const CUSTOMER_BATCH_SIZE = 50;
+const customerCategoryOptions = [
+  { value: 'individual', label: 'Individual' },
+  { value: 'group_team', label: 'Group / Team' },
+  { value: 'corporate', label: 'Corporate' },
+  { value: 'regular_member', label: 'Regular Member' },
+  { value: 'walk_in', label: 'Walk In' },
+];
+const accountTypeOptions = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'credit', label: 'Credit' },
+];
+const contactVisibilityOptions = [
+  { value: 'billing', label: 'Billing' },
+  { value: 'operational', label: 'Operational' },
+  { value: 'c_level', label: 'C-Level' },
+  { value: 'general', label: 'General' },
+];
+const activityTypeOptions = [
+  { value: 'note', label: 'General Note' },
+  { value: 'call', label: 'Call' },
+  { value: 'email', label: 'Email' },
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'payment_reminder', label: 'Payment Reminder' },
+  { value: 'dispute', label: 'Complaint / Dispute' },
+];
+const enquiryRequestKindOptions = [
+  { value: 'facility_booking', label: 'Facility Booking' },
+  { value: 'event_booking', label: 'Event Booking' },
+  { value: 'membership', label: 'Membership' },
+  { value: 'shop_purchase', label: 'Shop Purchase' },
+  { value: 'general', label: 'General' },
+];
+const enquirySourceOptions = [
+  { value: 'walk_in', label: 'Walk In' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'website', label: 'Website' },
+  { value: 'social_media', label: 'Social Media' },
+];
+const enquiryStatusOptions = [
+  { value: 'new', label: 'New' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'converted', label: 'Converted' },
+  { value: 'lost', label: 'Lost' },
+];
 
 const readFileAsDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -234,6 +279,7 @@ const categoryLabel = (value?: string) =>
 const relativeDate = (value?: string) => (value ? new Date(value).toLocaleString('en-IN') : '-');
 
 const customerCrmTabPath = (tab: CustomerCrmTab): string => {
+  if (tab === 'directory') return '/customers/directory';
   if (tab === 'enquiries') return '/customers/enquiries';
   if (tab === 'campaigns') return '/customers/campaigns';
   if (tab === 'reports') return '/customers/reports';
@@ -247,7 +293,7 @@ const CRM_CAPABILITY_CARDS = [
     sourceLabel: 'Single source',
     sourceValue: 'Customer Profiles + CRM Enquiries',
     actionLabel: 'Open CRM',
-    path: '/customers/profiles',
+    path: '/customers/directory',
   },
   {
     title: 'Scheduling And Booking',
@@ -283,9 +329,10 @@ const CRM_CAPABILITY_CARDS = [
   },
 ] as const;
 
-export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ initialTab = 'profiles' }) => {
+export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ initialTab = 'directory' }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<CustomerCrmTab>(initialTab);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [rows, setRows] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMoreRows, setLoadingMoreRows] = useState(false);
@@ -531,6 +578,22 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
     setHistory(null);
   };
 
+  const closeProfileDialog = () => {
+    setProfileDialogOpen(false);
+    resetCustomerForm();
+  };
+
+  useEffect(() => {
+    if (!profileDialogOpen) return undefined;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeProfileDialog();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [profileDialogOpen]);
+
   const resetEnquiryForm = () => {
     setEnquiryForm({
       id: '',
@@ -556,8 +619,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
     });
   };
 
-  const editCustomer = (row: CustomerRow) => {
-    openTab('profiles');
+  const populateCustomerForm = (row: CustomerRow) => {
     setForm({
       id: row._id,
       name: row.name || '',
@@ -588,6 +650,11 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         }))
         : [],
     });
+  };
+
+  const editCustomer = (row: CustomerRow) => {
+    populateCustomerForm(row);
+    setProfileDialogOpen(true);
   };
 
   const saveCustomer = async (e: React.FormEvent) => {
@@ -652,7 +719,9 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         setMessage('Customer profile created');
       }
 
+      const shouldCloseDialog = profileDialogOpen;
       resetCustomerForm();
+      if (shouldCloseDialog) setProfileDialogOpen(false);
       await Promise.all([loadCustomers(search, true), loadDashboard(), loadDunning()]);
     } catch (saveError: any) {
       setError(saveError?.message || 'Failed to save customer');
@@ -942,6 +1011,152 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
     }
   };
 
+  const renderCustomerProfileForm = (options?: { inDialog?: boolean }) => {
+    const inDialog = Boolean(options?.inDialog);
+
+    return (
+      <form onSubmit={saveCustomer} className={inDialog ? 'space-y-4' : `${panelClass} space-y-4`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className={sectionTitleClass}>{form.id ? 'Edit Profile' : 'New Profile'}</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">{form.id ? 'Update customer profile' : 'Create customer profile'}</h2>
+            <p className="mt-1 text-sm text-gray-400">Keep identity, preferences, contact roles, and notes in one record.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+              {form.profilePhotoUrl ? (
+                <img src={form.profilePhotoUrl} alt={form.name || 'Customer'} className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-lg font-semibold text-cyan-100">{(form.name || 'C').slice(0, 1).toUpperCase()}</span>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label className="inline-flex cursor-pointer items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
+                Upload Photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handlePhotoUpload(e.target.files?.[0]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              {form.profilePhotoUrl && (
+                <button type="button" onClick={() => setForm((prev) => ({ ...prev, profilePhotoUrl: '' }))} className="block rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300">
+                  Remove Photo
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FloatingField label="Customer Name" value={form.name} onChange={(value) => setForm((prev) => ({ ...prev, name: value }))} />
+          <FloatingField label="Phone" value={form.phone} onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))} />
+          <FloatingField label="Email" type="email" value={form.email} onChange={(value) => setForm((prev) => ({ ...prev, email: value }))} />
+          <FloatingField label="GSTIN" value={form.gstin} onChange={(value) => setForm((prev) => ({ ...prev, gstin: value.toUpperCase() }))} />
+          <FloatingField
+            label="Customer Category"
+            value={form.customerCategory}
+            onChange={(value) => setForm((prev) => ({ ...prev, customerCategory: value as CustomerCategory }))}
+            options={customerCategoryOptions}
+          />
+          <FloatingField
+            label="Account Type"
+            value={form.accountType}
+            onChange={(value) => setForm((prev) => ({ ...prev, accountType: value as 'cash' | 'credit' }))}
+            options={accountTypeOptions}
+          />
+          <FloatingField label="Pricing Tier" value={form.pricingTier} onChange={(value) => setForm((prev) => ({ ...prev, pricingTier: value }))} />
+          <FloatingField label="Credit Limit" type="number" min="0" step="0.01" value={form.creditLimit} onChange={(value) => setForm((prev) => ({ ...prev, creditLimit: value }))} />
+          <FloatingField label="Credit Days" type="number" min="0" step="1" value={form.creditDays} onChange={(value) => setForm((prev) => ({ ...prev, creditDays: value }))} />
+        </div>
+
+        <FloatingField label="Address" rows={3} value={form.address} onChange={(value) => setForm((prev) => ({ ...prev, address: value }))} />
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FloatingField label="Preferred Sport" value={form.preferredSport} onChange={(value) => setForm((prev) => ({ ...prev, preferredSport: value }))} />
+          <FloatingField
+            label="Preferred Facility"
+            value={form.preferredFacilityId}
+            onChange={(value) => setForm((prev) => ({ ...prev, preferredFacilityId: value }))}
+            options={[
+              { value: '', label: 'Preferred facility' },
+              ...facilities.map((facility) => ({ value: facility._id, label: facility.name })),
+            ]}
+          />
+          <FloatingField label="Preferred Time Slot" value={form.preferredTimeSlot} onChange={(value) => setForm((prev) => ({ ...prev, preferredTimeSlot: value }))} />
+          <FloatingField label="Preferred Shop Items" value={form.preferredShopItems} onChange={(value) => setForm((prev) => ({ ...prev, preferredShopItems: value }))} />
+        </div>
+
+        <FloatingField
+          label="Notes, Complaints, Feedback, Or Special Requests"
+          rows={3}
+          value={form.notes}
+          onChange={(value) => setForm((prev) => ({ ...prev, notes: value }))}
+        />
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <p className={sectionTitleClass}>Contact Roles</p>
+              <p className="mt-1 text-xs text-gray-400">Add billing, operational, or decision-maker contacts under the same customer.</p>
+            </div>
+            <button type="button" onClick={addContact} className="rounded-md bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100">
+              Add Contact
+            </button>
+          </div>
+          <div className="space-y-3">
+            {form.contacts.map((contact, index) => (
+              <div key={`contact-${index}`} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <FloatingField label="Contact Name" value={contact.name} onChange={(value) => updateContact(index, 'name', value)} />
+                  <FloatingField label="Role" value={contact.role} onChange={(value) => updateContact(index, 'role', value)} />
+                  <FloatingField label="Phone" value={contact.phone} onChange={(value) => updateContact(index, 'phone', value)} />
+                  <FloatingField label="Email" type="email" value={contact.email} onChange={(value) => updateContact(index, 'email', value)} />
+                  <FloatingField
+                    label="Visibility"
+                    value={contact.visibility}
+                    onChange={(value) => updateContact(index, 'visibility', value)}
+                    options={contactVisibilityOptions}
+                  />
+                  <label className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200">
+                    <input type="checkbox" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
+                    Primary contact
+                  </label>
+                </div>
+                <FloatingField className="mt-3" label="Contact Notes" rows={2} value={contact.notes} onChange={(value) => updateContact(index, 'notes', value)} />
+                <div className="mt-3 flex justify-end">
+                  <button type="button" onClick={() => removeContact(index)} className="rounded-md bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-100">
+                    Remove Contact
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!form.contacts.length && <p className="text-sm text-gray-400">No additional contacts added yet.</p>}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button disabled={savingCustomer} className={buttonClass}>
+            {savingCustomer ? 'Saving...' : form.id ? 'Update Profile' : 'Create Profile'}
+          </button>
+          {inDialog ? (
+            <button type="button" onClick={closeProfileDialog} className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-gray-200">
+              Cancel
+            </button>
+          ) : (
+            <button type="button" onClick={resetCustomerForm} className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-gray-200">
+              Clear Form
+            </button>
+          )}
+        </div>
+      </form>
+    );
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -956,9 +1171,20 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         </div>
         <div className="flex flex-wrap gap-2">
           <ManualHelpLink anchor="customers" />
-          {activeTab === 'profiles' && (
+          {activeTab === 'directory' && (
             <button onClick={exportCustomerCsv} className="rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100">
               Export Customers CSV
+            </button>
+          )}
+          {activeTab === 'directory' && (
+            <button
+              onClick={() => {
+                resetCustomerForm();
+                openTab('profiles');
+              }}
+              className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
+            >
+              New Profile
             </button>
           )}
           {activeTab === 'enquiries' && (
@@ -974,6 +1200,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
 
       <div className={`${panelClass} flex flex-wrap gap-2 p-3`}>
         {[
+          ['directory', 'Customer Directory'],
           ['profiles', 'Customer Profiles'],
           ['enquiries', 'Lead And Enquiries'],
           ['campaigns', 'Campaign Management'],
@@ -991,133 +1218,26 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         ))}
       </div>
 
+      {activeTab === 'directory' && (
+        <CustomerDirectoryTable
+          rows={rows}
+          loading={loading}
+          query={search}
+          selectedIds={directorySelectedIds}
+          onQueryChange={setSearch}
+          onSelectedIdsChange={setDirectorySelectedIds}
+          onFilteredRowsChange={setDirectoryFilteredRows}
+          onFilterPayloadChange={setDirectoryFilters}
+          onEditCustomer={editCustomer}
+          onToggleBlock={toggleBlock}
+          onOpenCampaigns={() => openTab('campaigns')}
+        />
+      )}
+
       {activeTab === 'profiles' && (
         <>
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-            <form onSubmit={saveCustomer} className={`${panelClass} space-y-4`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className={sectionTitleClass}>{form.id ? 'Edit Profile' : 'New Profile'}</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">{form.id ? 'Update customer profile' : 'Create customer profile'}</h2>
-                  <p className="mt-1 text-sm text-gray-400">Keep identity, preferences, contact roles, and notes in one record.</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-                    {form.profilePhotoUrl ? (
-                      <img src={form.profilePhotoUrl} alt={form.name || 'Customer'} className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="text-lg font-semibold text-cyan-100">{(form.name || 'C').slice(0, 1).toUpperCase()}</span>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <label className="inline-flex cursor-pointer items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10">
-                      Upload Photo
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          void handlePhotoUpload(e.target.files?.[0]);
-                          e.currentTarget.value = '';
-                        }}
-                      />
-                    </label>
-                    {form.profilePhotoUrl && (
-                      <button type="button" onClick={() => setForm((prev) => ({ ...prev, profilePhotoUrl: '' }))} className="block rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300">
-                        Remove Photo
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input className={inputClass} placeholder="Customer name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-                <input className={inputClass} placeholder="Phone" value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
-                <input className={inputClass} type="email" placeholder="Email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
-                <input className={inputClass} placeholder="GSTIN" value={form.gstin} onChange={(e) => setForm((prev) => ({ ...prev, gstin: e.target.value.toUpperCase() }))} />
-                <select className={inputClass} value={form.customerCategory} onChange={(e) => setForm((prev) => ({ ...prev, customerCategory: e.target.value as CustomerCategory }))}>
-                  <option value="individual">Individual</option>
-                  <option value="group_team">Group / Team</option>
-                  <option value="corporate">Corporate</option>
-                  <option value="regular_member">Regular Member</option>
-                  <option value="walk_in">Walk In</option>
-                </select>
-                <select className={inputClass} value={form.accountType} onChange={(e) => setForm((prev) => ({ ...prev, accountType: e.target.value as 'cash' | 'credit' }))}>
-                  <option value="cash">Cash</option>
-                  <option value="credit">Credit</option>
-                </select>
-                <input className={inputClass} placeholder="Pricing tier" value={form.pricingTier} onChange={(e) => setForm((prev) => ({ ...prev, pricingTier: e.target.value }))} />
-                <input className={inputClass} type="number" min="0" step="0.01" placeholder="Credit limit" value={form.creditLimit} onChange={(e) => setForm((prev) => ({ ...prev, creditLimit: e.target.value }))} />
-                <input className={inputClass} type="number" min="0" step="1" placeholder="Credit days" value={form.creditDays} onChange={(e) => setForm((prev) => ({ ...prev, creditDays: e.target.value }))} />
-              </div>
-
-              <textarea className={`${inputClass} min-h-[72px]`} placeholder="Address" value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input className={inputClass} placeholder="Preferred sport" value={form.preferredSport} onChange={(e) => setForm((prev) => ({ ...prev, preferredSport: e.target.value }))} />
-                <select className={inputClass} value={form.preferredFacilityId} onChange={(e) => setForm((prev) => ({ ...prev, preferredFacilityId: e.target.value }))}>
-                  <option value="">Preferred facility</option>
-                  {facilities.map((facility) => (
-                    <option key={facility._id} value={facility._id}>{facility.name}</option>
-                  ))}
-                </select>
-                <input className={inputClass} placeholder="Preferred time slot" value={form.preferredTimeSlot} onChange={(e) => setForm((prev) => ({ ...prev, preferredTimeSlot: e.target.value }))} />
-                <input className={inputClass} placeholder="Preferred shop items" value={form.preferredShopItems} onChange={(e) => setForm((prev) => ({ ...prev, preferredShopItems: e.target.value }))} />
-              </div>
-
-              <textarea className={`${inputClass} min-h-[72px]`} placeholder="Notes, complaints, feedback, or special requests" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <p className={sectionTitleClass}>Contact Roles</p>
-                    <p className="mt-1 text-xs text-gray-400">Add billing, operational, or decision-maker contacts under the same customer.</p>
-                  </div>
-                  <button type="button" onClick={addContact} className="rounded-md bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100">
-                    Add Contact
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {form.contacts.map((contact, index) => (
-                    <div key={`contact-${index}`} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <input className={inputClass} placeholder="Contact name" value={contact.name} onChange={(e) => updateContact(index, 'name', e.target.value)} />
-                        <input className={inputClass} placeholder="Role" value={contact.role} onChange={(e) => updateContact(index, 'role', e.target.value)} />
-                        <input className={inputClass} placeholder="Phone" value={contact.phone} onChange={(e) => updateContact(index, 'phone', e.target.value)} />
-                        <input className={inputClass} placeholder="Email" value={contact.email} onChange={(e) => updateContact(index, 'email', e.target.value)} />
-                        <select className={inputClass} value={contact.visibility} onChange={(e) => updateContact(index, 'visibility', e.target.value)}>
-                          <option value="general">General</option>
-                          <option value="billing">Billing</option>
-                          <option value="operational">Operational</option>
-                          <option value="c_level">C-Level</option>
-                        </select>
-                        <label className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200">
-                          <input type="checkbox" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
-                          Primary contact
-                        </label>
-                      </div>
-                      <textarea className={`${inputClass} mt-3 min-h-[56px]`} placeholder="Contact notes" value={contact.notes} onChange={(e) => updateContact(index, 'notes', e.target.value)} />
-                      <div className="mt-3 flex justify-end">
-                        <button type="button" onClick={() => removeContact(index)} className="rounded-md bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-100">
-                          Remove Contact
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {!form.contacts.length && <p className="text-sm text-gray-400">No additional contacts added yet.</p>}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button disabled={savingCustomer} className={buttonClass}>
-                  {savingCustomer ? 'Saving...' : form.id ? 'Update Profile' : 'Create Profile'}
-                </button>
-                <button type="button" onClick={resetCustomerForm} className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-gray-200">
-                  Clear Form
-                </button>
-              </div>
-            </form>
+            {renderCustomerProfileForm()}
 
             <div className="space-y-5">
               <div className={panelClass}>
@@ -1249,18 +1369,21 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
                 <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                   <p className={sectionTitleClass}>Notes And Follow-Up</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <select className={inputClass} value={activityForm.activityType} onChange={(e) => setActivityForm((prev) => ({ ...prev, activityType: e.target.value as 'call' | 'email' | 'meeting' | 'payment_reminder' | 'note' | 'dispute' }))}>
-                      <option value="note">General Note</option>
-                      <option value="call">Call</option>
-                      <option value="email">Email</option>
-                      <option value="meeting">Meeting</option>
-                      <option value="payment_reminder">Payment Reminder</option>
-                      <option value="dispute">Complaint / Dispute</option>
-                    </select>
-                    <input className={inputClass} type="date" value={activityForm.nextFollowUpDate} onChange={(e) => setActivityForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
+                    <FloatingField
+                      label="Activity Type"
+                      value={activityForm.activityType}
+                      onChange={(value) => setActivityForm((prev) => ({ ...prev, activityType: value as 'call' | 'email' | 'meeting' | 'payment_reminder' | 'note' | 'dispute' }))}
+                      options={activityTypeOptions}
+                    />
+                    <FloatingField
+                      label="Next Follow-Up Date"
+                      type="date"
+                      value={activityForm.nextFollowUpDate}
+                      onChange={(value) => setActivityForm((prev) => ({ ...prev, nextFollowUpDate: value }))}
+                    />
                   </div>
-                  <input className={`${inputClass} mt-3`} placeholder="Short summary" value={activityForm.summary} onChange={(e) => setActivityForm((prev) => ({ ...prev, summary: e.target.value }))} />
-                  <textarea className={`${inputClass} mt-3 min-h-[80px]`} placeholder="Full details" value={activityForm.details} onChange={(e) => setActivityForm((prev) => ({ ...prev, details: e.target.value }))} />
+                  <FloatingField className="mt-3" label="Short Summary" value={activityForm.summary} onChange={(value) => setActivityForm((prev) => ({ ...prev, summary: value }))} />
+                  <FloatingField className="mt-3" label="Full Details" rows={3} value={activityForm.details} onChange={(value) => setActivityForm((prev) => ({ ...prev, details: value }))} />
                   <div className="mt-3">
                     <button type="button" onClick={() => void logActivity()} className={buttonClass}>Save Note</button>
                   </div>
@@ -1359,19 +1482,6 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
             </div>
           )}
 
-          <CustomerDirectoryTable
-            rows={rows}
-            loading={loading}
-            query={search}
-            selectedIds={directorySelectedIds}
-            onQueryChange={setSearch}
-            onSelectedIdsChange={setDirectorySelectedIds}
-            onFilteredRowsChange={setDirectoryFilteredRows}
-            onFilterPayloadChange={setDirectoryFilters}
-            onEditCustomer={editCustomer}
-            onToggleBlock={toggleBlock}
-            onOpenCampaigns={() => openTab('campaigns')}
-          />
         </>
       )}
 
@@ -1395,61 +1505,65 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <input className={inputClass} placeholder="Customer name" value={enquiryForm.customerName} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, customerName: e.target.value }))} />
-              <input className={inputClass} placeholder="Phone" value={enquiryForm.contactPhone} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, contactPhone: e.target.value }))} />
-              <input className={inputClass} type="email" placeholder="Email" value={enquiryForm.contactEmail} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, contactEmail: e.target.value }))} />
-              <select className={inputClass} value={enquiryForm.customerCategory} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, customerCategory: e.target.value as CustomerCategory }))}>
-                <option value="individual">Individual</option>
-                <option value="group_team">Group / Team</option>
-                <option value="corporate">Corporate</option>
-                <option value="regular_member">Regular Member</option>
-                <option value="walk_in">Walk In</option>
-              </select>
-              <select className={inputClass} value={enquiryForm.requestKind} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, requestKind: e.target.value as EnquiryRequestKind }))}>
-                <option value="facility_booking">Facility Booking</option>
-                <option value="event_booking">Event Booking</option>
-                <option value="membership">Membership</option>
-                <option value="shop_purchase">Shop Purchase</option>
-                <option value="general">General</option>
-              </select>
-              <select className={inputClass} value={enquiryForm.source} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, source: e.target.value as EnquirySource }))}>
-                <option value="walk_in">Walk In</option>
-                <option value="phone">Phone</option>
-                <option value="website">Website</option>
-                <option value="social_media">Social Media</option>
-              </select>
-              <select className={inputClass} value={enquiryForm.status} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, status: e.target.value as EnquiryStatus }))}>
-                <option value="new">New</option>
-                <option value="contacted">Contacted</option>
-                <option value="converted">Converted</option>
-                <option value="lost">Lost</option>
-              </select>
-              <select className={inputClass} value={enquiryForm.assignedToUserId} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, assignedToUserId: e.target.value }))}>
-                <option value="">Not assigned</option>
-                {staffOptions.map((staff) => (
-                  <option key={staff._id} value={staff._id}>{staff.name}</option>
-                ))}
-              </select>
-              <select className={inputClass} value={enquiryForm.requestedFacilityId} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, requestedFacilityId: e.target.value }))}>
-                <option value="">Requested facility</option>
-                {facilities.map((facility) => (
-                  <option key={facility._id} value={facility._id}>{facility.name}</option>
-                ))}
-              </select>
-              <input className={inputClass} placeholder="Preferred sport" value={enquiryForm.preferredSport} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, preferredSport: e.target.value }))} />
-              <input className={inputClass} type="date" value={enquiryForm.requestedDate} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, requestedDate: e.target.value }))} />
-              <input className={inputClass} type="time" value={enquiryForm.requestedStartTime} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, requestedStartTime: e.target.value }))} />
-              <input className={inputClass} type="number" min="0" step="0.5" placeholder="Duration (hours)" value={enquiryForm.durationHours} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, durationHours: e.target.value }))} />
-              <input className={inputClass} type="number" min="0" step="1" placeholder="Participants" value={enquiryForm.participantsCount} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, participantsCount: e.target.value }))} />
-              <input className={inputClass} type="number" min="0" step="0.01" placeholder="Estimated amount" value={enquiryForm.estimatedAmount} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, estimatedAmount: e.target.value }))} />
-              <input className={inputClass} type="date" value={enquiryForm.followUpDate} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
+              <FloatingField label="Customer Name" value={enquiryForm.customerName} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, customerName: value }))} />
+              <FloatingField label="Phone" value={enquiryForm.contactPhone} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, contactPhone: value }))} />
+              <FloatingField label="Email" type="email" value={enquiryForm.contactEmail} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, contactEmail: value }))} />
+              <FloatingField
+                label="Customer Category"
+                value={enquiryForm.customerCategory}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, customerCategory: value as CustomerCategory }))}
+                options={customerCategoryOptions}
+              />
+              <FloatingField
+                label="Request Kind"
+                value={enquiryForm.requestKind}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, requestKind: value as EnquiryRequestKind }))}
+                options={enquiryRequestKindOptions}
+              />
+              <FloatingField
+                label="Source"
+                value={enquiryForm.source}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, source: value as EnquirySource }))}
+                options={enquirySourceOptions}
+              />
+              <FloatingField
+                label="Status"
+                value={enquiryForm.status}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, status: value as EnquiryStatus }))}
+                options={enquiryStatusOptions}
+              />
+              <FloatingField
+                label="Assigned To"
+                value={enquiryForm.assignedToUserId}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, assignedToUserId: value }))}
+                options={[
+                  { value: '', label: 'Not assigned' },
+                  ...staffOptions.map((staff) => ({ value: staff._id, label: staff.name })),
+                ]}
+              />
+              <FloatingField
+                label="Requested Facility"
+                value={enquiryForm.requestedFacilityId}
+                onChange={(value) => setEnquiryForm((prev) => ({ ...prev, requestedFacilityId: value }))}
+                options={[
+                  { value: '', label: 'Requested facility' },
+                  ...facilities.map((facility) => ({ value: facility._id, label: facility.name })),
+                ]}
+              />
+              <FloatingField label="Preferred Sport" value={enquiryForm.preferredSport} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, preferredSport: value }))} />
+              <FloatingField label="Requested Date" type="date" value={enquiryForm.requestedDate} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, requestedDate: value }))} />
+              <FloatingField label="Requested Start Time" type="time" value={enquiryForm.requestedStartTime} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, requestedStartTime: value }))} />
+              <FloatingField label="Duration (hours)" type="number" min="0" step="0.5" value={enquiryForm.durationHours} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, durationHours: value }))} />
+              <FloatingField label="Participants" type="number" min="0" step="1" value={enquiryForm.participantsCount} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, participantsCount: value }))} />
+              <FloatingField label="Estimated Amount" type="number" min="0" step="0.01" value={enquiryForm.estimatedAmount} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, estimatedAmount: value }))} />
+              <FloatingField label="Follow-Up Date" type="date" value={enquiryForm.followUpDate} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, followUpDate: value }))} />
             </div>
 
             {enquiryForm.status === 'lost' && (
-              <input className={inputClass} placeholder="Lost reason" value={enquiryForm.lostReason} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, lostReason: e.target.value }))} />
+              <FloatingField label="Lost Reason" value={enquiryForm.lostReason} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, lostReason: value }))} />
             )}
 
-            <textarea className={`${inputClass} min-h-[90px]`} placeholder="Notes" value={enquiryForm.notes} onChange={(e) => setEnquiryForm((prev) => ({ ...prev, notes: e.target.value }))} />
+            <FloatingField label="Notes" rows={4} value={enquiryForm.notes} onChange={(value) => setEnquiryForm((prev) => ({ ...prev, notes: value }))} />
 
             <div className="flex flex-wrap gap-2">
               <button disabled={savingEnquiry} className={buttonClass}>{savingEnquiry ? 'Saving...' : enquiryForm.id ? 'Update Enquiry' : 'Create Enquiry'}</button>
@@ -1632,6 +1746,36 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
               <div className={panelClass}><p className={sectionTitleClass}>Lost Lead Reasons</p><div className="mt-3 space-y-3">{(dashboard?.lostReasons || []).map((row) => <div key={row.reason} className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-gray-200"><span>{row.reason}</span><span className="font-semibold text-white">{row.count}</span></div>)}{!dashboard?.lostReasons?.length && <p className="text-sm text-gray-400">No lost lead reasons recorded yet.</p>}</div></div>
               <div className={panelClass}><p className={sectionTitleClass}>Open Collection Cases</p><div className="mt-3 space-y-3">{dunningRows.slice(0, 8).map((row, index) => <div key={`${row.customerId || row.customerCode || row.customerName}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-gray-200"><p className="font-semibold text-white">{row.customerName}</p><p className="mt-1 text-xs text-gray-400">{row.invoiceCount} invoice(s) • {row.maxDaysPastDue} days overdue</p><p className="mt-2 text-amber-200">{formatCurrency(Number(row.totalOutstanding || 0))}</p><p className="mt-1 text-xs text-gray-400">{row.recommendedAction}</p></div>)}{!dunningRows.length && <p className="text-sm text-gray-400">No open collection alerts right now.</p>}</div></div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {profileDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit customer profile"
+          onClick={closeProfileDialog}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className={sectionTitleClass}>Customer Profile</p>
+                <h2 className="mt-2 text-xl font-semibold text-white">Edit customer profile in dialog</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeProfileDialog}
+                className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-gray-200 hover:bg-white/5"
+              >
+                Close
+              </button>
+            </div>
+            {renderCustomerProfileForm({ inDialog: true })}
           </div>
         </div>
       )}

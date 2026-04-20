@@ -4,10 +4,15 @@ export interface ISaleItem {
   productId: string;
   productName: string;
   sku?: string;
+  category?: string;
+  subcategory?: string;
   itemType?: 'inventory' | 'service' | 'non_inventory';
   hsnCode?: string;
   batchNo?: string;
   expiryDate?: Date | string;
+  serialNumbers?: string[];
+  variantSize?: string;
+  variantColor?: string;
   quantity: number;
   unitPrice: number;
   listPrice?: number;
@@ -18,6 +23,17 @@ export interface ISaleItem {
   gstAmount?: number;
   cgstAmount?: number;
   sgstAmount?: number;
+  batchAllocations?: Array<{
+    batchId?: string;
+    batchNumber?: string;
+    locationId?: string;
+    locationCode?: string;
+    expiryDate?: Date | string;
+    quantity: number;
+    unitCost: number;
+    valueOut?: number;
+  }>;
+  cogsAmount?: number;
   taxType?: 'gst' | 'vat';
   vatAmount?: number;
   lineTotal?: number; // quantity * unitPrice + gstAmount
@@ -118,10 +134,15 @@ const SaleSchema = new Schema<ISale>(
         productId: String,
         productName: String,
         sku: String,
+        category: String,
+        subcategory: String,
         itemType: { type: String, enum: ['inventory', 'service', 'non_inventory'], default: 'inventory' },
         hsnCode: String,
         batchNo: String,
         expiryDate: Date,
+        serialNumbers: { type: [String], default: [] },
+        variantSize: String,
+        variantColor: String,
         quantity: { type: Number, required: true },
         unitPrice: { type: Number, required: true },
         listPrice: Number,
@@ -132,6 +153,20 @@ const SaleSchema = new Schema<ISale>(
         gstAmount: Number,
         cgstAmount: Number,
         sgstAmount: Number,
+        batchAllocations: {
+          type: [{
+            batchId: String,
+            batchNumber: String,
+            locationId: String,
+            locationCode: String,
+            expiryDate: Date,
+            quantity: { type: Number, default: 0, min: 0 },
+            unitCost: { type: Number, default: 0, min: 0 },
+            valueOut: { type: Number, default: 0, min: 0 },
+          }],
+          default: [],
+        },
+        cogsAmount: { type: Number, default: 0, min: 0 },
         taxType: { type: String, enum: ['gst', 'vat'], default: 'gst' },
         vatAmount: Number,
         lineTotal: Number,

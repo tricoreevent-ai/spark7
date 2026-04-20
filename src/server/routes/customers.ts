@@ -6,6 +6,11 @@ import { Sale } from '../models/Sale.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
+import {
+  persistManagedImageValue,
+  removeManagedStoredFile,
+  resolveManagedStoragePath,
+} from '../services/assetStorage.js';
 import { validateGstinLocally } from '../services/gstCompliance.js';
 
 const router = Router();
@@ -153,7 +158,7 @@ router.get('/search-unified', authMiddleware, async (req: AuthenticatedRequest, 
 
     const [customers, members] = await Promise.all([
       Customer.find(customerFilter)
-        .select('_id customerCode name phone email accountType isBlocked')
+        .select('_id customerCode name phone email address accountType isBlocked')
         .sort({ updatedAt: -1, name: 1 })
         .limit(10),
       MemberSubscription.find(memberFilter)
@@ -177,6 +182,7 @@ router.get('/search-unified', authMiddleware, async (req: AuthenticatedRequest, 
         name: customer.name,
         phone: customer.phone,
         email: customer.email,
+        address: customer.address,
         accountType: customer.accountType,
         isBlocked: customer.isBlocked,
         source: 'customer',
@@ -219,6 +225,7 @@ router.get('/by-phone/:phone', authMiddleware, async (req: AuthenticatedRequest,
 });
 
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenPhotoStoragePath = '';
   try {
     const {
       customerCode,
@@ -274,12 +281,21 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(409).json({ success: false, error: 'Customer code already exists' });
     }
 
+    const persistedPhoto = await persistManagedImageValue({
+      imageValue: String(profilePhotoUrl || '').trim(),
+      tenantId: req.tenantId,
+      directorySegments: ['customers', 'profile-photos'],
+      fileBaseName: String(name || 'customer-photo'),
+    });
+    writtenPhotoStoragePath = String(persistedPhoto.storagePath || '');
+
     const customer = await Customer.create({
       customerCode: finalCode,
       name,
       phone: normalizedPhone || undefined,
       email: normalizedEmail || undefined,
-      profilePhotoUrl: String(profilePhotoUrl || '').trim(),
+      profilePhotoUrl: persistedPhoto.url,
+      profilePhotoStoragePath: persistedPhoto.storagePath || '',
       customerCategory: normalizeCustomerCategory(customerCategory),
       gstin: normalizedGstin || undefined,
       address,
@@ -295,6 +311,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       preferences: normalizePreferences(preferences),
       createdBy: req.userId,
     });
+    writtenPhotoStoragePath = '';
 
     if (Number(openingBalance || 0) !== 0) {
       await CustomerLedgerEntry.create({
@@ -318,9 +335,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       userId: req.userId,
       after: customer.toObject(),
     });
-
     res.status(201).json({ success: true, data: customer, message: 'Customer created' });
   } catch (error: any) {
+    if (writtenPhotoStoragePath) {
+      await removeManagedStoredFile(writtenPhotoStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to create customer' });
   }
 });
@@ -511,6 +530,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
 });
 
 router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  let writtenPhotoStoragePath = '';
   try {
     const current = await Customer.findById(req.params.id);
     if (!current) return res.status(404).json({ success: false, error: 'Customer not found' });
@@ -540,24 +560,54 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       }
     }
 
-    const updates = {
-      ...req.body,
-      customerCode: req.body.customerCode ? String(req.body.customerCode).toUpperCase() : current.customerCode,
-      phone: normalizedPhone || undefined,
-      email: normalizedEmail || undefined,
-      profilePhotoUrl: req.body.profilePhotoUrl !== undefined ? String(req.body.profilePhotoUrl || '').trim() : current.profilePhotoUrl,
-      customerCategory: req.body.customerCategory !== undefined ? normalizeCustomerCategory(req.body.customerCategory) : current.customerCategory,
-      gstin: normalizedGstin || undefined,
-      accountType: req.body.accountType === 'credit' ? 'credit' : req.body.accountType === 'cash' ? 'cash' : current.accountType,
-      creditLimit: req.body.creditLimit !== undefined ? Number(req.body.creditLimit) : current.creditLimit,
-      creditDays: req.body.creditDays !== undefined ? Number(req.body.creditDays) : current.creditDays,
-      priceOverrides: Array.isArray(req.body.priceOverrides) ? req.body.priceOverrides : current.priceOverrides,
-      pricingTier: req.body.pricingTier !== undefined ? String(req.body.pricingTier || '').trim() : current.pricingTier,
-      contacts: req.body.contacts !== undefined ? normalizeContacts(req.body.contacts) : current.contacts,
-      preferences: req.body.preferences !== undefined ? normalizePreferences(req.body.preferences) : current.preferences,
-    };
+    const previousStoragePath = resolveManagedStoragePath(current.profilePhotoUrl, current.profilePhotoStoragePath);
 
-    const customer = await Customer.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    current.customerCode = req.body.customerCode ? String(req.body.customerCode).toUpperCase() : current.customerCode;
+    current.name = req.body.name !== undefined ? String(req.body.name || '').trim() || current.name : current.name;
+    current.phone = normalizedPhone || undefined;
+    current.email = normalizedEmail || undefined;
+    current.address = req.body.address !== undefined ? String(req.body.address || '').trim() : current.address;
+    current.customerCategory = req.body.customerCategory !== undefined
+      ? normalizeCustomerCategory(req.body.customerCategory)
+      : current.customerCategory;
+    current.gstin = normalizedGstin || undefined;
+    current.accountType = req.body.accountType === 'credit'
+      ? 'credit'
+      : req.body.accountType === 'cash'
+        ? 'cash'
+        : current.accountType;
+    current.creditLimit = req.body.creditLimit !== undefined ? Number(req.body.creditLimit) : current.creditLimit;
+    current.creditDays = req.body.creditDays !== undefined ? Number(req.body.creditDays) : current.creditDays;
+    current.priceOverrides = Array.isArray(req.body.priceOverrides) ? req.body.priceOverrides : current.priceOverrides;
+    current.pricingTier = req.body.pricingTier !== undefined ? String(req.body.pricingTier || '').trim() : current.pricingTier;
+    current.contacts = req.body.contacts !== undefined ? normalizeContacts(req.body.contacts) as any : current.contacts;
+    current.preferences = req.body.preferences !== undefined ? normalizePreferences(req.body.preferences) as any : current.preferences;
+    current.notes = req.body.notes !== undefined ? String(req.body.notes || '').trim() : current.notes;
+
+    if (req.body.profilePhotoUrl !== undefined) {
+      const incomingPhotoValue = String(req.body.profilePhotoUrl || '').trim();
+      if (!incomingPhotoValue) {
+        current.profilePhotoUrl = '';
+        current.profilePhotoStoragePath = '';
+      } else {
+        const persistedPhoto = await persistManagedImageValue({
+          imageValue: incomingPhotoValue,
+          tenantId: req.tenantId,
+          directorySegments: ['customers', 'profile-photos'],
+          fileBaseName: String(req.body.name || current.name || 'customer-photo'),
+        });
+        writtenPhotoStoragePath = String(persistedPhoto.storagePath || '');
+        current.profilePhotoUrl = persistedPhoto.url;
+        current.profilePhotoStoragePath = persistedPhoto.storagePath || '';
+      }
+    }
+
+    const customer = await current.save();
+    const nextStoragePath = resolveManagedStoragePath(customer.profilePhotoUrl, customer.profilePhotoStoragePath);
+    if (previousStoragePath && previousStoragePath !== nextStoragePath) {
+      await removeManagedStoredFile(previousStoragePath);
+    }
+    writtenPhotoStoragePath = '';
 
     await writeAuditLog({
       module: 'customer',
@@ -572,6 +622,9 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
 
     res.json({ success: true, data: customer, message: 'Customer updated' });
   } catch (error: any) {
+    if (writtenPhotoStoragePath) {
+      await removeManagedStoredFile(writtenPhotoStoragePath);
+    }
     res.status(500).json({ success: false, error: error.message || 'Failed to update customer' });
   }
 });

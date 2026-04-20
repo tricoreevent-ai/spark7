@@ -2,12 +2,24 @@ import { Router, Response } from 'express';
 import { Inventory } from '../models/Inventory.js';
 import { Product } from '../models/Product.js';
 import { InventoryTransfer } from '../models/InventoryTransfer.js';
+import { StockLocation } from '../models/StockLocation.js';
+import { InventoryValuationSetting } from '../models/InventoryValuationSetting.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { writeAuditLog } from '../services/audit.js';
+import { createJournalEntry } from '../services/accountingEngine.js';
+import {
+  buildBatchStockRows,
+  buildInventoryValuationRows,
+  consumeStockFefo,
+  recordPurchaseReceiptBatch,
+  setValuationMethodForPeriod,
+  transferStockBetweenLocations,
+} from '../services/inventoryCosting.js';
 
 const router = Router();
 
 const toNumber = (value: any): number => Number(value || 0);
+const roundTo2 = (value: number): number => Number(value.toFixed(2));
 
 type InventoryAction = 'set' | 'add' | 'subtract' | 'stock_in' | 'stock_out';
 type InventorySortField = 'name' | 'sku' | 'stock' | 'minStock' | 'category' | 'lastRestockDate';
@@ -227,6 +239,108 @@ const writeInventoryAudit = async (args: {
   });
 };
 
+const postStockAdjustmentJournal = async (args: {
+  req: AuthenticatedRequest;
+  product: any;
+  previousStock: number;
+  nextStock: number;
+  reason?: string;
+  stockLedgerAccountId?: string;
+  stockGainAccountId?: string;
+  stockLossAccountId?: string;
+}) => {
+  const quantityDelta = roundTo2(args.nextStock - args.previousStock);
+  if (quantityDelta === 0) return null;
+
+  const amount = roundTo2(Math.abs(quantityDelta) * toNumber(args.product.cost));
+  if (amount <= 0) return null;
+
+  const stockLine = args.stockLedgerAccountId
+    ? { accountId: args.stockLedgerAccountId }
+    : args.product.stockLedgerAccountId
+      ? { accountId: String(args.product.stockLedgerAccountId) }
+      : { accountKey: 'stock_in_hand' };
+
+  const gainLossLine = quantityDelta > 0
+    ? (args.stockGainAccountId ? { accountId: args.stockGainAccountId } : { accountKey: 'stock_gain' })
+    : (args.stockLossAccountId ? { accountId: args.stockLossAccountId } : { accountKey: 'stock_loss' });
+
+  const journal = await createJournalEntry({
+    entryDate: new Date(),
+    referenceType: 'inventory_adjustment',
+    referenceId: args.product._id.toString(),
+    referenceNo: args.product.sku,
+    description: `Stock ${quantityDelta > 0 ? 'gain' : 'loss'} adjustment - ${args.product.sku}`,
+    paymentMode: 'adjustment',
+    createdBy: args.req.userId,
+    metadata: {
+      productId: args.product._id.toString(),
+      sku: args.product.sku,
+      previousStock: args.previousStock,
+      nextStock: args.nextStock,
+      quantityDelta,
+      unitCost: toNumber(args.product.cost),
+      reason: args.reason || '',
+    },
+    lines: quantityDelta > 0
+      ? [
+        { ...stockLine, debit: amount, credit: 0, description: 'Stock in hand increase' },
+        { ...gainLossLine, debit: 0, credit: amount, description: 'Stock gain income' },
+      ]
+      : [
+        { ...gainLossLine, debit: amount, credit: 0, description: 'Stock loss expense' },
+        { ...stockLine, debit: 0, credit: amount, description: 'Stock in hand decrease' },
+      ],
+  });
+
+  return journal.entry;
+};
+
+const syncBatchLedgerForManualAdjustment = async (args: {
+  req: AuthenticatedRequest;
+  product: any;
+  previousStock: number;
+  nextStock: number;
+  batchNumber?: string;
+  expiryDate?: Date;
+  warehouseLocation?: string;
+  reason?: string;
+}) => {
+  const delta = roundTo2(args.nextStock - args.previousStock);
+  if (delta > 0) {
+    return recordPurchaseReceiptBatch({
+      productId: args.product._id.toString(),
+      quantity: delta,
+      unitCost: toNumber(args.product.cost),
+      previousProductStock: args.previousStock,
+      batchNumber: args.batchNumber || `ADJ-${Date.now()}`,
+      expiryDate: args.expiryDate,
+      warehouseLocation: args.warehouseLocation,
+      sourceId: args.product._id.toString(),
+      referenceNo: args.product.sku,
+      sourceType: 'adjustment',
+      transactionType: 'adjustment_gain',
+      referenceType: 'inventory_adjustment',
+      createdBy: args.req.userId,
+    });
+  }
+
+  if (delta < 0) {
+    return consumeStockFefo({
+      productId: args.product._id.toString(),
+      quantity: Math.abs(delta),
+      productStockAlreadyAdjusted: true,
+      transactionType: 'adjustment_loss',
+      referenceType: 'inventory_adjustment',
+      referenceId: args.product._id.toString(),
+      referenceNo: args.product.sku,
+      createdBy: args.req.userId,
+    });
+  }
+
+  return null;
+};
+
 // Get inventory for all products (source of truth: Product.stock)
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -304,6 +418,125 @@ router.get('/status/low-stock', async (req: AuthenticatedRequest, res: Response)
   }
 });
 
+router.get('/locations', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { includeInactive = false, q = '' } = req.query;
+    const filter: any = {};
+    if (!parseBoolean(includeInactive, false)) filter.isActive = true;
+    if (String(q || '').trim()) {
+      const regex = new RegExp(String(q).trim(), 'i');
+      filter.$or = [{ locationCode: regex }, { name: regex }, { locationType: regex }];
+    }
+
+    const rows = await StockLocation.find(filter).sort({ isDefault: -1, locationCode: 1 });
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch stock locations' });
+  }
+});
+
+router.post('/locations', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const locationCode = String(req.body?.locationCode || '').trim().toUpperCase().replace(/\s+/g, '-');
+    const name = String(req.body?.name || '').trim();
+    if (!locationCode || !name) {
+      return res.status(400).json({ success: false, error: 'locationCode and name are required' });
+    }
+
+    const isDefault = parseBoolean(req.body?.isDefault, false);
+    if (isDefault) {
+      await StockLocation.updateMany({ isDefault: true }, { $set: { isDefault: false } });
+    }
+
+    const row = await StockLocation.findOneAndUpdate(
+      { locationCode },
+      {
+        locationCode,
+        name,
+        locationType: ['warehouse', 'godown', 'store', 'branch'].includes(String(req.body?.locationType))
+          ? String(req.body.locationType)
+          : 'store',
+        address: String(req.body?.address || '').trim(),
+        isDefault,
+        isActive: parseBoolean(req.body?.isActive, true),
+        createdBy: req.userId,
+      },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(201).json({ success: true, message: 'Stock location saved', data: row });
+  } catch (error: any) {
+    const status = String(error.message || '').includes('duplicate') ? 409 : 500;
+    res.status(status).json({ success: false, error: error.message || 'Failed to save stock location' });
+  }
+});
+
+router.get('/batches', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await buildBatchStockRows({
+      productId: String(req.query.productId || '').trim() || undefined,
+      locationId: String(req.query.locationId || '').trim() || undefined,
+      includeExpired: parseBoolean(req.query.includeExpired, false),
+    });
+
+    res.json({
+      success: true,
+      data: rows,
+      summary: {
+        quantity: roundTo2(rows.reduce((sum: number, row: any) => sum + toNumber(row.quantity), 0)),
+        availableQuantity: roundTo2(rows.reduce((sum: number, row: any) => sum + toNumber(row.availableQuantity), 0)),
+        reservedQuantity: roundTo2(rows.reduce((sum: number, row: any) => sum + toNumber(row.reservedQuantity), 0)),
+        stockValue: roundTo2(rows.reduce((sum: number, row: any) => sum + toNumber(row.stockValue), 0)),
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch inventory batches' });
+  }
+});
+
+router.get('/valuation-settings', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await InventoryValuationSetting.find({}).sort({ periodKey: -1 });
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch valuation settings' });
+  }
+});
+
+router.put('/valuation-settings', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const method = String(req.body?.method || '').trim().toLowerCase();
+    if (!['fifo', 'weighted_average'].includes(method)) {
+      return res.status(400).json({ success: false, error: 'method must be fifo or weighted_average' });
+    }
+
+    const row = await setValuationMethodForPeriod({
+      periodKey: String(req.body?.periodKey || '').trim() || undefined,
+      method: method as any,
+      effectiveFrom: parseOptionalDate(req.body?.effectiveFrom),
+      createdBy: req.userId,
+    });
+
+    res.json({ success: true, message: 'Inventory valuation method saved', data: row });
+  } catch (error: any) {
+    const status = String(error.message || '').includes('changed only before') || String(error.message || '').includes('Invalid date value') ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message || 'Failed to save valuation method' });
+  }
+});
+
+router.get('/valuation', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await buildInventoryValuationRows({
+      locationId: String(req.query.locationId || '').trim() || undefined,
+      date: parseOptionalDate(req.query.date),
+    });
+    res.json({ success: true, data: rows });
+  } catch (error: any) {
+    const status = String(error.message || '').includes('Invalid date value') ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message || 'Failed to build inventory valuation' });
+  }
+});
+
 // Initialize inventory for product and sync Product.stock
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -375,10 +608,36 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       inventoryDoc: inventory,
     });
 
+    const journalEntry = await postStockAdjustmentJournal({
+      req,
+      product,
+      previousStock: current,
+      nextStock: qty,
+      reason: adjustmentReason,
+      stockLedgerAccountId: req.body?.stockLedgerAccountId,
+      stockGainAccountId: req.body?.stockGainAccountId,
+      stockLossAccountId: req.body?.stockLossAccountId,
+    });
+
+    await syncBatchLedgerForManualAdjustment({
+      req,
+      product,
+      previousStock: current,
+      nextStock: qty,
+      batchNumber,
+      expiryDate: parsedExpiry,
+      warehouseLocation,
+      reason: adjustmentReason,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Inventory initialized successfully',
-      data: buildInventoryRow(product, inventory),
+      data: {
+        ...buildInventoryRow(product, inventory),
+        adjustmentJournalEntryId: journalEntry?._id?.toString?.() || null,
+        adjustmentJournalEntryNumber: journalEntry?.entryNumber || '',
+      },
     });
   } catch (error: any) {
     console.error('Create inventory error:', error);
@@ -462,7 +721,33 @@ router.put('/bulk-update', authMiddleware, async (req: AuthenticatedRequest, res
           inventoryDoc: inventory,
         });
 
-        updatedRows.push(buildInventoryRow(product, inventory));
+        const journalEntry = await postStockAdjustmentJournal({
+          req,
+          product,
+          previousStock: current,
+          nextStock: next,
+          reason: row?.adjustmentReason,
+          stockLedgerAccountId: row?.stockLedgerAccountId,
+          stockGainAccountId: row?.stockGainAccountId,
+          stockLossAccountId: row?.stockLossAccountId,
+        });
+
+        await syncBatchLedgerForManualAdjustment({
+          req,
+          product,
+          previousStock: current,
+          nextStock: next,
+          batchNumber: row?.batchNumber,
+          expiryDate: parsedExpiry,
+          warehouseLocation: row?.warehouseLocation,
+          reason: row?.adjustmentReason,
+        });
+
+        updatedRows.push({
+          ...buildInventoryRow(product, inventory),
+          adjustmentJournalEntryId: journalEntry?._id?.toString?.() || null,
+          adjustmentJournalEntryNumber: journalEntry?.entryNumber || '',
+        });
       } catch (error: any) {
         failedRows.push({ productId, error: error.message || 'Failed to update row' });
       }
@@ -745,19 +1030,15 @@ router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: 
       return res.status(400).json({ success: false, error: 'Insufficient stock for transfer' });
     }
 
-    const inventoryDoc: any = await Inventory.findOneAndUpdate(
-      { productId: product._id },
-      {
-        productId: product._id,
-        quantity: toNumber(product.stock),
-        warehouseLocation: String(toWarehouseLocation || '').trim(),
-        storeLocation: String(toStoreLocation || '').trim(),
-        rackLocation: String(toRackLocation || '').trim(),
-        shelfLocation: String(toShelfLocation || '').trim(),
-        adjustmentReason: String(reason || '').trim() || 'Stock location transfer',
-      },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
-    );
+    const movement = await transferStockBetweenLocations({
+      productId: product._id.toString(),
+      quantity: transferQty,
+      fromWarehouseLocation: String(fromWarehouseLocation || '').trim(),
+      toWarehouseLocation: String(toWarehouseLocation || '').trim(),
+      reason: String(reason || '').trim(),
+      referenceNo: product.sku,
+      createdBy: req.userId,
+    });
 
     const transfer = await InventoryTransfer.create({
       productId: product._id,
@@ -774,6 +1055,20 @@ router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: 
       transferredBy: req.userId,
     });
 
+    const inventoryDoc: any = await Inventory.findOneAndUpdate(
+      { productId: product._id },
+      {
+        productId: product._id,
+        quantity: toNumber(product.stock),
+        warehouseLocation: String(toWarehouseLocation || '').trim(),
+        storeLocation: String(toStoreLocation || '').trim(),
+        rackLocation: String(toRackLocation || '').trim(),
+        shelfLocation: String(toShelfLocation || '').trim(),
+        adjustmentReason: String(reason || '').trim() || 'Stock location transfer',
+      },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+
     await writeAuditLog({
       module: 'inventory',
       action: 'stock_transfer',
@@ -785,6 +1080,7 @@ router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: 
         productId: product._id.toString(),
         sku: product.sku,
         quantity: transferQty,
+        batchAllocations: movement.allocations,
         fromWarehouseLocation: transfer.fromWarehouseLocation,
         toWarehouseLocation: transfer.toWarehouseLocation,
         reason: transfer.reason,
@@ -800,7 +1096,10 @@ router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: 
     res.status(201).json({
       success: true,
       message: 'Stock transferred successfully',
-      data: transfer,
+      data: {
+        ...transfer.toObject(),
+        allocations: movement.allocations,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to transfer stock' });
@@ -885,6 +1184,9 @@ router.put('/:productId', authMiddleware, async (req: AuthenticatedRequest, res:
       expiryDate,
       batchNumber,
       adjustmentReason,
+      stockLedgerAccountId,
+      stockGainAccountId,
+      stockLossAccountId,
     } = req.body;
 
     if (quantity === undefined) {
@@ -953,10 +1255,36 @@ router.put('/:productId', authMiddleware, async (req: AuthenticatedRequest, res:
       inventoryDoc: inventory,
     });
 
+    const journalEntry = await postStockAdjustmentJournal({
+      req,
+      product,
+      previousStock: current,
+      nextStock: next,
+      reason: adjustmentReason,
+      stockLedgerAccountId,
+      stockGainAccountId,
+      stockLossAccountId,
+    });
+
+    await syncBatchLedgerForManualAdjustment({
+      req,
+      product,
+      previousStock: current,
+      nextStock: next,
+      batchNumber,
+      expiryDate: parsedExpiry,
+      warehouseLocation,
+      reason: adjustmentReason,
+    });
+
     res.status(200).json({
       success: true,
       message: 'Inventory updated successfully',
-      data: buildInventoryRow(product, inventory),
+      data: {
+        ...buildInventoryRow(product, inventory),
+        adjustmentJournalEntryId: journalEntry?._id?.toString?.() || null,
+        adjustmentJournalEntryNumber: journalEntry?.entryNumber || '',
+      },
     });
   } catch (error: any) {
     console.error('Update inventory error:', error);

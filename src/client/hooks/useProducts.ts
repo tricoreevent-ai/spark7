@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
+export interface ProductVariantMatrixRow {
+  size?: string;
+  color?: string;
+  skuSuffix?: string;
+  barcode?: string;
+  price?: number;
+  isActive?: boolean;
+}
+
 export interface Product {
   _id: string;
   name: string;
@@ -25,6 +34,11 @@ export interface Product {
   reorderQuantity?: number;
   unit: string;
   gstRate: number;
+  cgstRate?: number;
+  sgstRate?: number;
+  igstRate?: number;
+  openingStockValue?: number;
+  stockLedgerAccountId?: string;
   description?: string;
   wholesalePrice?: number;
   taxType?: 'gst' | 'vat';
@@ -37,6 +51,7 @@ export interface Product {
   serialNumberTracking?: boolean;
   variantSize?: string;
   variantColor?: string;
+  variantMatrix?: ProductVariantMatrixRow[];
   imageUrl?: string;
   isActive?: boolean;
   createdAt?: string;

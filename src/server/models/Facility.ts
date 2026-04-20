@@ -16,6 +16,9 @@ export interface IFacility extends Document {
   capacity?: number;
   description?: string;
   imageUrl?: string;
+  imageStoragePath?: string;
+  imageFileName?: string;
+  imageSizeBytes?: number;
   active: boolean;
   createdBy?: string;
   createdAt?: Date;
@@ -35,6 +38,9 @@ const FacilitySchema = new Schema<IFacility>(
     capacity: { type: Number, min: 0, default: 0 },
     description: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
+    imageStoragePath: { type: String, trim: true },
+    imageFileName: { type: String, trim: true },
+    imageSizeBytes: { type: Number, min: 0 },
     active: { type: Boolean, default: true },
     createdBy: { type: String, index: true },
   },

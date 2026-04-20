@@ -12,6 +12,18 @@ const PriceTierSchema = new Schema(
   { _id: false }
 );
 
+const VariantMatrixSchema = new Schema(
+  {
+    size: { type: String, trim: true, default: '' },
+    color: { type: String, trim: true, default: '' },
+    skuSuffix: { type: String, trim: true, default: '' },
+    barcode: { type: String, trim: true, uppercase: true, default: '' },
+    price: { type: Number, min: 0, default: 0 },
+    isActive: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema<IProductDocument>(
   {
     name: {
@@ -90,6 +102,21 @@ const productSchema = new Schema<IProductDocument>(
       enum: [0, 5, 12, 18, 28],
       default: 18,
     },
+    cgstRate: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    sgstRate: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    igstRate: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     hsnCode: {
       type: String,
       default: '',
@@ -98,6 +125,16 @@ const productSchema = new Schema<IProductDocument>(
       type: Number,
       default: 0,
       min: 0,
+    },
+    openingStockValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    stockLedgerAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChartAccount',
+      index: true,
     },
     returnStock: {
       type: Number,
@@ -135,6 +172,10 @@ const productSchema = new Schema<IProductDocument>(
       default: '',
       trim: true,
     },
+    variantMatrix: {
+      type: [VariantMatrixSchema],
+      default: [],
+    },
     minStock: {
       type: Number,
       default: 10,
@@ -161,6 +202,18 @@ const productSchema = new Schema<IProductDocument>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    deletedAt: {
+      type: Date,
+    },
+    deletedBy: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+    deletionReason: {
+      type: String,
+      trim: true,
     },
   },
   { timestamps: true }
