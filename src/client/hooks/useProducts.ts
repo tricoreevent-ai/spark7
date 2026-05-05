@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { subscribeToProductsChanged } from '../utils/productCatalogEvents';
 
 export interface ProductVariantMatrixRow {
   size?: string;
@@ -112,6 +113,8 @@ export const useProducts = () => {
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+
+  useEffect(() => subscribeToProductsChanged(() => void fetchProducts()), [fetchProducts]);
 
   return { products, loading, error, refetch: fetchProducts };
 };

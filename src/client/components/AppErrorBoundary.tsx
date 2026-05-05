@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIconButton } from './ActionIconButton';
 
 type AppErrorBoundaryState = {
   hasError: boolean;
@@ -37,13 +38,7 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
             keeps causing this screen, please note what you clicked just before it happened.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400"
-            >
-              Refresh Application
-            </button>
+            <ActionIconButton kind="refresh" onClick={() => window.location.reload()} title="Refresh Application" />
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { formatCurrency } from '../config';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { apiUrl, fetchApiJson, resolveAppAssetUrl } from '../utils/api';
@@ -2367,7 +2368,7 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Member Profile And ID Card</h2>
           {selectedMemberId ? (
-            <button onClick={() => void loadMemberDetails(selectedMemberId)} className="rounded-md border border-white/20 px-3 py-1.5 text-xs text-gray-200">Refresh Details</button>
+            <ActionIconButton kind="refresh" onClick={() => void loadMemberDetails(selectedMemberId)} title="Refresh Details" className="h-8 w-8" />
           ) : null}
         </div>
         {memberDetailsLoading && <p className="text-sm text-gray-400">Loading member details...</p>}
@@ -2443,14 +2444,12 @@ export const Memberships: React.FC<MembershipsProps> = ({ mode = 'all' }) => {
                         >
                           {memberCardBusyAction === 'download' ? 'Preparing Download...' : 'Download PNG'}
                         </button>
-                        <button
-                          type="button"
+                        <ActionIconButton
+                          kind="downloadPdf"
                           onClick={() => void downloadMemberIdCardPdf()}
                           disabled={memberCardBusyAction === 'pdf' || !memberCardData}
-                          className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 disabled:opacity-70"
-                        >
-                          {memberCardBusyAction === 'pdf' ? 'Preparing PDF...' : 'Download PDF'}
-                        </button>
+                          title={memberCardBusyAction === 'pdf' ? 'Preparing PDF...' : 'Download PDF'}
+                        />
                       </div>
                     ) : (
                       <p className="text-xs text-amber-200">ID card print/download is available for admin and super admin.</p>

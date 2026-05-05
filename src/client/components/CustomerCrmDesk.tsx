@@ -4,6 +4,7 @@ import { CustomerCampaignManager } from './CustomerCampaignManager';
 import { CustomerDirectoryTable } from './CustomerDirectoryTable';
 import { FloatingField } from './FloatingField';
 import { ManualHelpLink } from './ManualHelpLink';
+import { ActionIconButton } from './ActionIconButton';
 import { CustomerCrmDirectoryFilters } from './customerCrmShared';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -1172,9 +1173,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
         <div className="flex flex-wrap gap-2">
           <ManualHelpLink anchor="customers" />
           {activeTab === 'directory' && (
-            <button onClick={exportCustomerCsv} className="rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100">
-              Export Customers CSV
-            </button>
+            <ActionIconButton kind="exportCsv" onClick={exportCustomerCsv} title="Export Customers CSV" />
           )}
           {activeTab === 'directory' && (
             <button
@@ -1188,9 +1187,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
             </button>
           )}
           {activeTab === 'enquiries' && (
-            <button onClick={exportEnquiryCsv} className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-100">
-              Export Enquiries CSV
-            </button>
+            <ActionIconButton kind="exportCsv" onClick={exportEnquiryCsv} title="Export Enquiries CSV" />
           )}
         </div>
       </div>
@@ -1272,9 +1269,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
                     <p className={sectionTitleClass}>Member Suggestions</p>
                     <p className="mt-1 text-sm text-gray-400">Search with phone or member code, then add the member into CRM.</p>
                   </div>
-                  <button onClick={() => void loadMemberSuggestions(search)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-gray-200">
-                    Refresh
-                  </button>
+                  <ActionIconButton kind="refresh" onClick={() => void loadMemberSuggestions(search)} title="Refresh" className="h-8 w-8" />
                 </div>
                 <div className="max-h-[220px] space-y-3 overflow-y-auto pr-1">
                   {memberSuggestions.map((row) => (
@@ -1721,7 +1716,7 @@ export const CustomerCrmDesk: React.FC<{ initialTab?: CustomerCrmTab }> = ({ ini
             <div className={panelClass}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><p className={sectionTitleClass}>Top Customers</p><p className="mt-1 text-sm text-gray-400">Highest spend and strongest repeat customers across bookings and sales.</p></div>
-                <button onClick={exportCustomerCsv} className="rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100">Export Customer List</button>
+                <ActionIconButton kind="exportCsv" onClick={exportCustomerCsv} title="Export Customer List" className="h-8 w-8" />
               </div>
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full divide-y divide-white/10 text-sm">

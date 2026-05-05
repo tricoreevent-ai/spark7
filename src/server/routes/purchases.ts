@@ -5,10 +5,13 @@ import { Supplier } from '../models/Supplier.js';
 import { Product } from '../models/Product.js';
 import { Inventory } from '../models/Inventory.js';
 import { PurchaseBill } from '../models/PurchaseBill.js';
+import { User } from '../models/User.js';
 import { generateNumber } from '../services/numbering.js';
 import { writeAuditLog } from '../services/audit.js';
 import { cancelJournalEntry, createJournalEntry } from '../services/accountingEngine.js';
 import { recordPurchaseReceiptBatch } from '../services/inventoryCosting.js';
+import { buildPurchaseBillTaxPostingPlan } from '../services/accountingRules.js';
+import { ensureAccountingVendorForSupplier } from '../services/procurementPayables.js';
 
 const router = Router();
 
@@ -57,6 +60,13 @@ const parseOptionalDate = (value: any): Date | undefined => {
     throw new Error('Invalid date value');
   }
   return parsed;
+};
+
+const loadStoreGstin = async (userId?: string): Promise<string> => {
+  const normalizedUserId = String(userId || '').trim();
+  if (!normalizedUserId) return '';
+  const user = await User.findById(normalizedUserId).select('gstin').lean();
+  return String(user?.gstin || '').trim().toUpperCase();
 };
 
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -293,7 +303,7 @@ router.put('/:id/receive', authMiddleware, async (req: AuthenticatedRequest, res
           adjustmentReason: `Stock received against ${po.purchaseNumber}`,
           lastRestockDate: new Date(),
         },
-        { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+        { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
       );
 
       await writeAuditLog({
@@ -376,7 +386,7 @@ router.put('/:id/return', authMiddleware, async (req: AuthenticatedRequest, res:
           adjustmentReason: `Purchase return against ${po.purchaseNumber}`,
           lastRestockDate: new Date(),
         },
-        { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+        { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
       );
 
       item.receivedQuantity = Math.max(0, toNumber(item.receivedQuantity) - returnQty);
@@ -414,7 +424,7 @@ router.put('/:id/return', authMiddleware, async (req: AuthenticatedRequest, res:
 
 router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const po: any = await PurchaseOrder.findById(req.params.id).populate('supplierId', 'supplierCode name');
+    const po: any = await PurchaseOrder.findById(req.params.id).populate('supplierId', 'supplierCode name gstin');
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
     const { lines, subtotal, taxAmount, totalAmount } = await buildReceivedBillLines(po);
@@ -428,6 +438,25 @@ router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: 
     const supplierName = typeof po.supplierId === 'string'
       ? ''
       : String(po.supplierId?.name || '');
+    const supplierGstin = typeof po.supplierId === 'string'
+      ? ''
+      : String(po.supplierId?.gstin || '').trim().toUpperCase();
+    const supplierDocument = typeof po.supplierId === 'string'
+      ? await Supplier.findById(po.supplierId)
+      : await Supplier.findById(po.supplierId?._id);
+    if (!supplierDocument) {
+      return res.status(404).json({ success: false, error: 'Supplier not found for purchase bill posting' });
+    }
+    const supplierAccounting = await ensureAccountingVendorForSupplier({
+      supplier: supplierDocument,
+      createdBy: req.userId,
+      metadata: {
+        source: 'purchase_bill',
+        purchaseOrderId: po._id.toString(),
+        purchaseNumber: po.purchaseNumber,
+      },
+    });
+    const storeGstin = await loadStoreGstin(req.userId);
 
     const existing: any = await PurchaseBill.findOne({
       purchaseOrderId: po._id,
@@ -447,19 +476,30 @@ router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: 
       });
     }
 
+    const taxPosting = buildPurchaseBillTaxPostingPlan({
+      taxableAmount: subtotal,
+      taxAmount,
+      totalAmount,
+      supplierGstin,
+      storeGstin,
+      payableDescription: `Supplier payable - ${supplierName || po.purchaseNumber}`,
+    });
+    const payableLine = {
+      accountId: supplierAccounting.payableLedgerAccountId,
+      debit: 0,
+      credit: taxPosting.gst.totalAmount,
+      description: `Supplier payable - ${supplierName || po.purchaseNumber}`,
+    };
+
     const journalLines = [
       ...lines.map((line) => ({
         ...(line.stockLedgerAccountId ? { accountId: line.stockLedgerAccountId } : { accountKey: 'stock_in_hand' }),
-        debit: toNumber(line.totalAmount),
+        debit: toNumber(line.taxableValue),
         credit: 0,
         description: `Inventory received - ${line.sku}`,
       })),
-      {
-        accountKey: 'accounts_payable',
-        debit: 0,
-        credit: totalAmount,
-        description: `Supplier payable - ${supplierName || po.purchaseNumber}`,
-      },
+      ...taxPosting.inputTaxLines,
+      payableLine,
     ];
 
     const journal = await createJournalEntry({
@@ -475,6 +515,14 @@ router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: 
         purchaseNumber: po.purchaseNumber,
         supplierId: String(po.supplierId?._id || po.supplierId || ''),
         supplierName,
+        supplierGstin,
+        accountingVendorId: supplierAccounting.vendor._id.toString(),
+        payableLedgerAccountId: supplierAccounting.payableLedgerAccountId,
+        storeGstin,
+        gstTreatment: taxPosting.gst.gstTreatment,
+        cgstAmount: taxPosting.gst.cgstAmount,
+        sgstAmount: taxPosting.gst.sgstAmount,
+        igstAmount: taxPosting.gst.igstAmount,
         generatedFromReceipt: true,
       },
       lines: journalLines,
@@ -485,6 +533,8 @@ router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: 
       purchaseNumber: po.purchaseNumber,
       supplierId: po.supplierId?._id || po.supplierId,
       supplierName: supplierName || 'Supplier',
+      accountingVendorId: supplierAccounting.vendor._id,
+      payableLedgerAccountId: supplierAccounting.vendor.ledgerAccountId,
       billDate: new Date(),
       status: 'posted' as const,
       lines: lines.map(({ stockLedgerAccountId, ...line }) => line),
@@ -497,7 +547,7 @@ router.post('/:id/bill', authMiddleware, async (req: AuthenticatedRequest, res: 
     };
 
     const bill = existing
-      ? await PurchaseBill.findByIdAndUpdate(existing._id, billPayload, { new: true, runValidators: true })
+      ? await PurchaseBill.findByIdAndUpdate(existing._id, billPayload, { returnDocument: 'after', runValidators: true })
       : await PurchaseBill.create({
         billNumber: await generateNumber('purchase_bill', { prefix: 'PB-', datePart: true, padTo: 5 }),
         ...billPayload,

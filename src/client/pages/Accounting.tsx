@@ -1,18 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Tooltip } from '@mui/material';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
-import { CardTabs } from '../components/CardTabs';
+import { CardTabs, cardTabsTooltipSlotProps } from '../components/CardTabs';
 import { FloatingField } from '../components/FloatingField';
 import { AccountingGstWorkspace } from '../components/AccountingGstWorkspace';
 import { AccountingTreasuryWorkspace } from '../components/AccountingTreasuryWorkspace';
 import { AccountingTdsWorkspace } from '../components/AccountingTdsWorkspace';
 import { ReportDataTable } from '../components/ReportDataTable';
+import { ActionIconButton } from '../components/ActionIconButton';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { formatCurrency } from '../config';
 import { apiUrl } from '../utils/api';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
 import { showConfirmDialog, showPromptDialog } from '../utils/appDialogs';
+import { downloadCsvRows, downloadExcelRows, downloadPdfRows } from '../utils/reportExports';
 
 type TabKey = 'dashboard' | 'invoices' | 'masters' | 'payments' | 'opening' | 'expenses' | 'vouchers' | 'books' | 'treasury' | 'ledger' | 'gst' | 'tds' | 'reports';
 type MastersTabKey = 'vendors' | 'assets' | 'periods';
@@ -25,11 +29,13 @@ type BooksTabKey = 'summary' | 'cash_entries' | 'bank_entries' | 'reconciliation
 type LedgerTabKey = 'groups' | 'ledgers' | 'create_account' | 'ledger_view';
 type ReportsTabKey =
   | 'overview'
+  | 'supplier_payables'
   | 'vendors'
   | 'assets'
   | 'periods'
   | 'invoices'
   | 'payments'
+  | 'journals'
   | 'vouchers'
   | 'salary'
   | 'contracts'
@@ -145,8 +151,48 @@ interface VoucherRow {
     receivedSign?: string;
     authorizedSign?: string;
   };
+  metadata?: {
+    entryMode?: 'receipt' | 'expense' | 'settlement';
+    debitAccountId?: string;
+    debitAccountCode?: string;
+    debitAccountName?: string;
+    linkedEntityType?: string;
+    linkedEntityId?: string;
+    linkedEntityNumber?: string;
+    treasuryAccountId?: string;
+    treasuryAccountName?: string;
+    paymentChannelLabel?: string;
+    processorName?: string;
+    transferDirection?: string;
+    fromTreasuryAccountId?: string;
+    toTreasuryAccountId?: string;
+  };
   isPrinted?: boolean;
   lines?: Array<{ accountId?: string; accountCode?: string; accountName: string; debit: number; credit: number; narration?: string }>;
+}
+
+interface JournalEditorLine {
+  accountId: string;
+  debit: string;
+  credit: string;
+  description: string;
+}
+
+interface JournalEntryConsoleDetail {
+  entry: any;
+  lines: Array<{
+    _id?: string;
+    accountId?: string;
+    accountCode?: string;
+    accountName?: string;
+    debitAmount?: number;
+    creditAmount?: number;
+    description?: string;
+  }>;
+  capabilities?: {
+    canEdit?: boolean;
+    canCancel?: boolean;
+  };
 }
 
 interface ChartAccount extends Record<string, any> {
@@ -177,6 +223,25 @@ interface AccountGroup extends Record<string, any> {
   parentGroupName?: string;
   isSystem?: boolean;
   isActive: boolean;
+}
+
+type TrialBalanceSection = 'Assets' | 'Liabilities' | 'Equity' | 'Income' | 'Expenses' | 'Diagnostics';
+
+interface TrialBalanceRow extends Record<string, any> {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  section: TrialBalanceSection;
+  reportHead: TrialBalanceSection;
+  reportGroup: string;
+  groupName?: string;
+  parentGroupName?: string;
+  ledgerLabel?: string;
+  normalBalanceSide?: 'debit' | 'credit';
+  abnormalBalance?: boolean;
+  isSubLedger?: boolean;
+  debitBalance: number;
+  creditBalance: number;
 }
 
 interface EmployeeMasterRow {
@@ -302,11 +367,13 @@ const reportsTabs: Array<{ key: ReportsTabKey; label: string }> = [
   { key: 'profit_loss', label: 'Profit & Loss' },
   { key: 'balance_sheet', label: 'Balance Sheet' },
   { key: 'tds', label: 'TDS Report' },
-  { key: 'vendors', label: 'Vendors' },
+  { key: 'supplier_payables', label: 'Supplier Payables' },
+  { key: 'vendors', label: 'Vendor Master' },
   { key: 'assets', label: 'Assets' },
   { key: 'periods', label: 'Periods' },
   { key: 'invoices', label: 'Invoices' },
   { key: 'payments', label: 'Payments' },
+  { key: 'journals', label: 'Journals' },
   { key: 'vouchers', label: 'Vouchers' },
   { key: 'salary', label: 'Salary' },
   { key: 'contracts', label: 'Contracts' },
@@ -335,6 +402,10 @@ interface AccountingLogicDefinition {
   summary: string;
   formulas: string[];
   dataSources: string[];
+  responsibleScreens?: string[];
+  backendApis?: string[];
+  serverLogic?: string[];
+  sourceRecords?: string[];
 }
 
 const dashboardLogic: AccountingLogicDefinition = {
@@ -342,10 +413,10 @@ const dashboardLogic: AccountingLogicDefinition = {
   manualAnchor: 'accounting-dashboard-logic',
   summary: 'The dashboard combines posted accounting movement for the selected date range with recent invoices, payments, journals, and compliance activity.',
   formulas: [
-    'Selected Revenue = posted sales/accounting income between the selected start and end dates.',
-    'Month-to-date Revenue = posted income from the first day of the selected end-date month through the selected end date.',
+    'Selected Income = all posted income between the selected start and end dates, including sales and small adjustments such as round-off income.',
+    'Month-to-date Income = all posted income from the first day of the selected end-date month through the selected end date.',
     'Expenses = posted expense ledger movement inside the selected date range.',
-    'Profit = Selected Revenue minus Expenses for the selected date range.',
+    'Profit = Selected Income minus Expenses for the selected date range.',
     'GST Payable = output GST payable less input/settled GST movement posted up to the selected end date.',
   ],
   dataSources: ['Account ledger entries', 'Accounting invoices', 'Accounting payments', 'Journal entries', 'TDS/GST workspaces'],
@@ -355,14 +426,40 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
   overview: {
     title: 'Accounting reports overview logic',
     manualAnchor: 'accounting-report-logic',
-    summary: 'The overview shows high-level income, expense, profit/loss, balance sheet status, TDS status, and recent accounting activity for the selected period.',
+    summary: 'The overview tab is a stitched accounting dashboard that combines range-based income, expense, profit, balance sheet, TDS, invoices, payments, vouchers, and journal activity into one review surface.',
     formulas: [
       'Total Income = income ledger credits minus income ledger debits, plus legacy POS/manual income fallback rows when needed.',
       'Total Expense = expense ledger debits minus expense ledger credits, plus legacy payroll/contract/manual expense fallback rows when needed.',
       'Net Profit/Loss = Total Income - Total Expense.',
       'Balance Sheet Difference = Assets - (Liabilities + Equity including retained earnings and diagnostic rows).',
     ],
-    dataSources: ['Profit & loss report API', 'Balance sheet report API', 'TDS report API', 'Recent invoices/payments/vouchers/journals'],
+    dataSources: ['Income, expense, Profit & Loss, and Balance Sheet report APIs', 'TDS bootstrap and TDS report APIs', 'Core invoices, payments, journals, vouchers, and recent TDS rows merged inside the client'],
+    backendApis: [
+      '/api/accounting/core/dashboard',
+      '/api/accounting/core/invoices',
+      '/api/accounting/core/payments',
+      '/api/accounting/core/journal-entries',
+      '/api/accounting/reports/income',
+      '/api/accounting/reports/expense',
+      '/api/accounting/reports/profit-loss',
+      '/api/accounting/reports/balance-sheet',
+      '/api/accounting/tds/bootstrap',
+      '/api/accounting/tds/reports',
+    ],
+    serverLogic: [
+      'buildDashboardSummary() aggregates JournalLine income, expense, and GST values for the selected period.',
+      'The overview cards reuse the same P&L, Balance Sheet, and TDS payloads used by their dedicated tabs.',
+      'Recent Accounting Activity is assembled in the client from invoices, payments, vouchers, journals, and TDS rows, then sorted by date descending.',
+    ],
+    sourceRecords: ['JournalLine', 'AccountingInvoice', 'AccountingPayment', 'AccountingVoucher', 'JournalEntry', 'TdsTransaction'],
+    responsibleScreens: [
+      'Accounts > Accounting > Accounting Reports',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Income & Expense Entry',
+      'Accounts > Accounting > Salary & Contract Entry',
+      'Accounts > Accounting > Vouchers',
+      'Sales > Orders / Sales Invoice',
+    ],
   },
   trial_balance: {
     title: 'Trial balance logic',
@@ -373,9 +470,25 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
       'Period Debit = sum of debit ledger entries inside the selected date range.',
       'Period Credit = sum of credit ledger entries inside the selected date range.',
       'Closing Balance = Opening Balance + Period Debit - Period Credit.',
-      'Debit Balance and Credit Balance are derived from the closing balance normal side.',
+      'The report displays standard closing Debit and Credit balances only; opening and period movement are used internally to compute them.',
+      'Account Head, subgroup, and sub-ledger tags come from the chart-of-accounts and account-group structure.',
     ],
-    dataSources: ['Chart accounts', 'Account ledger entries', 'Opening balance ledger entries', 'Legacy diagnostic rows'],
+    dataSources: ['Chart accounts', 'Account groups', 'Account ledger entries', 'Opening balance ledger entries', 'Legacy migration bridge rows'],
+    backendApis: ['/api/accounting/reports/trial-balance'],
+    serverLogic: [
+      'The route calls buildTrialBalanceReport() in src/server/services/accountingReports.ts.',
+      'The report loads active or historically-used chart accounts, group mapping, opening-ledger markers, pre-period sums, and current-period sums.',
+      'Synthetic rows are added for legacy income, legacy expense, legacy clearing, and opening-balance differences when needed.',
+    ],
+    sourceRecords: ['ChartAccount', 'AccountGroup', 'AccountLedgerEntry', 'Sale', 'Return', 'DayBookEntry', 'SalaryPayment', 'ContractPayment'],
+    responsibleScreens: [
+      'Accounts > Accounting > Chart & Ledger',
+      'Accounts > Accounting > Opening Balances',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Income & Expense Entry',
+      'Accounts > Accounting > Salary & Contract Entry',
+      'Accounts > Accounting > Vouchers',
+    ],
   },
   profit_loss: {
     title: 'Profit & loss logic',
@@ -387,7 +500,21 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
       'Legacy fallback income/expense is included only when source documents do not already have ledger postings.',
       'Net Profit/Loss = Total Income - Total Expense.',
     ],
-    dataSources: ['Income/expense ledger accounts', 'Sales fallback rows', 'Day book fallback rows', 'Salary and contract fallback rows'],
+    dataSources: ['Income and expense ledger accounts', 'Sales and sales-return fallback rows', 'Day book fallback rows', 'Salary and contract fallback rows', 'Purchase bills for inventory-capitalization diagnostics'],
+    backendApis: ['/api/accounting/reports/profit-loss', '/api/accounting/reports/income', '/api/accounting/reports/expense'],
+    serverLogic: [
+      'The route calls buildProfitLossStatement(), which internally calls buildIncomeExpenseReports() in src/server/services/accountingReports.ts.',
+      'Ledger movement comes from AccountLedgerEntry joined to ChartAccount, excluding opening vouchers.',
+      'Fallback sources are Sale, Return, DayBookEntry, SalaryPayment, and ContractPayment only when those documents are not already posted into ledger rows.',
+    ],
+    sourceRecords: ['AccountLedgerEntry', 'ChartAccount', 'Sale', 'Return', 'DayBookEntry', 'SalaryPayment', 'ContractPayment', 'PurchaseBill'],
+    responsibleScreens: [
+      'Accounts > Accounting > Income & Expense Entry',
+      'Accounts > Accounting > Salary & Contract Entry',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Vouchers',
+      'Sales > Orders / Sales Invoice',
+    ],
   },
   balance_sheet: {
     title: 'Balance sheet logic',
@@ -400,7 +527,22 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
       'Retained Earnings = profit/loss accumulated up to the selected as-on date.',
       'Difference = Assets - (Liabilities + Equity). It should be zero after diagnostics are resolved.',
     ],
-    dataSources: ['Chart accounts', 'Account ledger entries up to as-on date', 'Profit & loss retained earnings bridge'],
+    dataSources: ['Chart accounts', 'All ledger balances up to the selected as-on date', 'Profit & Loss retained-earnings bridge', 'Opening-balance ledger difference diagnostics'],
+    backendApis: ['/api/accounting/reports/balance-sheet'],
+    serverLogic: [
+      'The route calls buildBalanceSheetReport() in src/server/services/accountingReports.ts.',
+      'The report computes closing from chart opening plus cumulative AccountLedgerEntry debit-credit movement through the as-on date.',
+      'Receivable/payable control balances are reclassified into receivables, payables, customer advances, and vendor advances before equity and diagnostics are appended.',
+    ],
+    sourceRecords: ['ChartAccount', 'AccountLedgerEntry', 'Profit & Loss bridge data'],
+    responsibleScreens: [
+      'Accounts > Accounting > Opening Balances',
+      'Accounts > Accounting > Chart & Ledger',
+      'Accounts > Accounting > Treasury & Banks',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Vouchers',
+      'Sales > Orders / Sales Invoice',
+    ],
   },
   tds: {
     title: 'TDS report logic',
@@ -412,21 +554,85 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
       'Outstanding = deducted amount minus deposited/allocated amount.',
       'Mismatch rows compare books, challans, returns, and reconciliation imports where available.',
     ],
-    dataSources: ['TDS transactions', 'TDS challans', 'TDS returns', 'TDS certificates', 'TDS reconciliation records'],
+    dataSources: ['TDS transactions', 'TDS challans', 'TDS returns', 'TDS certificates', 'TDS reconciliation runs', 'Vendor statutory master and deductee profiles'],
+    backendApis: ['/api/accounting/tds/bootstrap', '/api/accounting/tds/reports'],
+    serverLogic: [
+      'The bootstrap route seeds default TDS sections and loads buildTdsDashboard() plus active vendor statutory data.',
+      'The report route calls buildTdsReports() in src/server/services/tds.ts and prepares summary, statutory, compliance, reconciliation, challan, payment-register, correction, and audit buckets.',
+      'Quarter, financial-year, payable, mismatch, and overdue logic all come from the TDS service layer rather than the client.',
+    ],
+    sourceRecords: ['TdsTransaction', 'TdsChallan', 'TdsReturn', 'TdsCertificate', 'TdsReconciliationRun', 'TdsSection', 'TdsDeducteeProfile', 'Vendor'],
+    responsibleScreens: [
+      'Accounts > Accounting > TDS Compliance',
+      'Accounts > Accounting > Vendors / Assets / Periods',
+      'Accounts > Accounting > Salary & Contract Entry',
+      'Accounts > Accounting > Invoices & Bills',
+    ],
+  },
+  supplier_payables: {
+    title: 'Supplier payables logic',
+    manualAnchor: 'accounting-supplier-payables-logic',
+    summary: 'This report shows procurement supplier bills, settlements, and pending payables with supplier-wise traceability.',
+    formulas: [
+      'Bill Amount = posted purchase bill total for the supplier.',
+      'Paid Amount = supplier settlements posted against that purchase bill.',
+      'Outstanding Amount = Bill Amount minus Paid Amount.',
+      'Ageing uses the bill date and shows only the still-unpaid amount in 0-30, 31-60, 61-90, and 90+ day buckets.',
+      'Supplier payable validation compares report outstanding with the linked supplier payable ledger balance.',
+    ],
+    dataSources: [
+      'Procurement purchase bills',
+      'Supplier-linked settlement vouchers and fallback payment journals',
+      'Supplier master to accounting vendor mapping',
+      'Supplier payable sub-ledger balances',
+    ],
+    backendApis: ['/api/accounting/core/supplier-payables'],
+    serverLogic: [
+      'The backend links procurement suppliers to accounting vendor ledgers and then summarizes bills, payments, outstanding, and ageing by supplier.',
+      'This report is separate from Vendor Master, which stays a setup screen for accounting party records.',
+    ],
+    sourceRecords: ['Supplier', 'PurchaseBill', 'AccountingVoucher', 'JournalEntry', 'ChartAccount', 'AccountLedgerEntry', 'Vendor'],
+    responsibleScreens: [
+      'Operations > Procurement / Purchases',
+      'Accounts > Accounting > Vouchers > Payment Voucher',
+      'Accounts > Accounting > Accounting Reports > Supplier Payables',
+    ],
   },
   vendors: {
     title: 'Vendor report logic',
     manualAnchor: 'accounting-master-report-logic',
-    summary: 'Vendor report lists vendor master balances and statutory details used by expense, TDS, and payable workflows.',
-    formulas: ['Balance = vendor opening balance and linked supplier ledger movement where available.', 'TDS flags come from vendor statutory setup.'],
-    dataSources: ['Vendor master', 'Linked chart accounts', 'TDS section setup'],
+    summary: 'This tab is a vendor master list for accounting setup, statutory details, opening balances, and linked ledgers. Procurement supplier bills and payments are reviewed in purchase, voucher, and payable reports instead.',
+    formulas: ['Opening balance comes from the vendor master setup.', 'Ledger link shows whether this accounting vendor is mapped to its own ledger.', 'TDS flags come from vendor statutory setup.'],
+    dataSources: ['Vendor master', 'Vendor opening balance setup', 'Linked vendor ledger mapping', 'TDS section setup'],
+    backendApis: ['/api/accounting/core/vendors'],
+    serverLogic: [
+      'The route loads active accounting Vendor rows and merges them with linked-ledger metadata from listVendorBalances().',
+      'Procurement suppliers are a separate master and do not become accounting vendor-ledger movement unless they are explicitly mapped to accounting vendor ledgers.',
+    ],
+    sourceRecords: ['Vendor', 'ChartAccount', 'AccountLedgerEntry'],
+    responsibleScreens: [
+      'Accounts > Accounting > Vendors / Assets / Periods',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > TDS Compliance',
+    ],
   },
   assets: {
     title: 'Fixed asset report logic',
     manualAnchor: 'accounting-master-report-logic',
     summary: 'Asset report lists active/disposed fixed assets and depreciation setup.',
     formulas: ['Book value = cost minus accumulated depreciation posted through asset workflows.'],
-    dataSources: ['Fixed asset master', 'Depreciation journals'],
+    dataSources: ['Fixed asset master', 'Depreciation posting workflow', 'Chart account mappings for fixed assets and accumulated depreciation'],
+    backendApis: ['/api/accounting/core/fixed-assets', '/api/accounting/core/fixed-assets/:id/depreciate'],
+    serverLogic: [
+      'The list route reads FixedAsset rows sorted by purchase date.',
+      'New assets are created through createFixedAsset(), which attaches the fixed-asset, depreciation-expense, and accumulated-depreciation accounts.',
+      'Depreciation is posted by runAssetDepreciation() in src/server/services/accountingEngine.ts.',
+    ],
+    sourceRecords: ['FixedAsset', 'JournalEntry', 'ChartAccount'],
+    responsibleScreens: [
+      'Accounts > Accounting > Vendors / Assets / Periods',
+      'Accounts > Accounting > Vouchers > Journal Voucher',
+    ],
   },
   periods: {
     title: 'Financial period report logic',
@@ -434,63 +640,289 @@ const reportLogicByTab: Record<ReportsTabKey, AccountingLogicDefinition> = {
     summary: 'Period report shows accounting periods and whether entry locks are active.',
     formulas: ['Closed/locked period status is used by validation checks to flag backdated postings.'],
     dataSources: ['Financial period master'],
+    backendApis: ['/api/accounting/core/periods', '/api/accounting/core/periods (POST for lock/unlock)'],
+    serverLogic: [
+      'The list route calls ensureFinancialPeriod() for all 12 months of the selected year and returns the saved rows.',
+      'Lock and unlock updates are handled by setFinancialPeriodLock() and audited in the backend.',
+    ],
+    sourceRecords: ['FinancialPeriod'],
+    responsibleScreens: [
+      'Accounts > Accounting > Vendors / Assets / Periods',
+      'All accounting entry screens that respect period locks',
+    ],
   },
   invoices: {
     title: 'Invoice report logic',
     manualAnchor: 'accounting-transaction-report-logic',
     summary: 'Invoice report lists accounting invoices generated manually or from sales/booking workflows.',
     formulas: ['Balance = invoice total amount minus paid amount.', 'Status is based on posted, partial, paid, draft, or cancelled state.'],
-    dataSources: ['Accounting invoices', 'Accounting payments', 'Journal entries'],
+    dataSources: ['Accounting invoice master', 'Invoice-linked payment rows', 'Invoice journal entries'],
+    backendApis: ['/api/accounting/core/invoices', '/api/accounting/core/invoices/:id/payments', '/api/accounting/core/invoices/:id/cancel'],
+    serverLogic: [
+      'Listing reads AccountingInvoice rows filtered by invoiceDate, status, referenceType, and search text.',
+      'Invoice creation goes through createInvoice() in src/server/services/accountingEngine.ts, which builds the posting plan, creates the invoice, posts the invoice journal, and may create an immediate or initial payment.',
+      'This report tab is read-only and reflects already-created accounting invoices.',
+    ],
+    sourceRecords: ['AccountingInvoice', 'AccountingPayment', 'JournalEntry'],
+    responsibleScreens: [
+      'Accounts > Accounting > Invoices & Bills > Invoice Entry',
+      'Sales > Orders / Sales Invoice',
+      'Service Desk > Generate Invoice',
+    ],
   },
   payments: {
     title: 'Payment report logic',
     manualAnchor: 'accounting-transaction-report-logic',
     summary: 'Payment report lists customer/vendor payments posted into books.',
     formulas: ['Payment amount is the saved posted amount by mode and party.', 'Cancelled payments are excluded from final summaries.'],
-    dataSources: ['Accounting payments', 'Ledger entries', 'Invoices'],
+    dataSources: ['Accounting payment master', 'Invoice balances', 'Payment journal entries'],
+    backendApis: ['/api/accounting/core/payments', '/api/accounting/core/invoices/:id/payments'],
+    serverLogic: [
+      'Listing reads AccountingPayment rows filtered by paymentDate and mode.',
+      'recordPayment() in src/server/services/accountingEngine.ts creates the journal, saves the payment row, and updates invoice paid, balance, and status fields.',
+    ],
+    sourceRecords: ['AccountingPayment', 'AccountingInvoice', 'JournalEntry'],
+    responsibleScreens: [
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Vouchers > Receipt Voucher',
+      'Accounts > Accounting > Vouchers > Payment Voucher',
+      'Sales > Orders / Sales Invoice',
+      'Accounts > Settlements',
+    ],
+  },
+  journals: {
+    title: 'Journal console logic',
+    manualAnchor: 'accounting-transaction-report-logic',
+    summary: 'Journal console shows posted journal entries, line details, and safe manual-journal revision history.',
+    formulas: [
+      'Journal total equals total debit and total credit for the entry.',
+      'Manual journal edit is implemented as reversal of the old entry plus creation of a replacement entry.',
+    ],
+    dataSources: ['Journal entry headers', 'Journal lines', 'Source workflow metadata carried into journal metadata'],
+    backendApis: [
+      '/api/accounting/core/journal-entries',
+      '/api/accounting/core/journal-entries/:id',
+      '/api/accounting/core/journal-entries/:id/cancel',
+      '/api/accounting/core/journal-entries/:id (PUT revision)',
+    ],
+    serverLogic: [
+      'Header list reads JournalEntry rows filtered by entryDate, referenceType, and status.',
+      'Detail view loads the JournalEntry plus JournalLine rows and edit/cancel capabilities.',
+      'Console revision reverses the original entry through cancelJournalEntry() and creates a replacement entry through createJournalEntry().',
+    ],
+    sourceRecords: ['JournalEntry', 'JournalLine', 'workflow metadata from invoices, payments, purchases, payroll, inventory, treasury, and manual journals'],
+    responsibleScreens: [
+      'Accounts > Accounting > Vouchers > Journal Voucher',
+      'Accounts > Accounting > Invoices & Bills',
+      'Accounts > Accounting > Salary & Contract Entry',
+      'Accounts > Accounting > Vouchers',
+      'Sales > Orders / Sales Invoice',
+      'Purchase / stock receipt and bill posting flows',
+    ],
   },
   vouchers: {
     title: 'Voucher report logic',
     manualAnchor: 'accounting-transaction-report-logic',
     summary: 'Voucher report lists receipt, payment, journal, and transfer vouchers.',
     formulas: ['Voucher total is the saved voucher amount.', 'Balanced vouchers must have equal debit and credit lines.'],
-    dataSources: ['Accounting vouchers', 'Voucher lines', 'Account ledger entries'],
+    dataSources: ['Accounting voucher master', 'Linked ledger postings', 'Voucher metadata such as print state and counterparty'],
+    backendApis: ['/api/accounting/vouchers', '/api/accounting/vouchers/:id'],
+    serverLogic: [
+      'Listing reads AccountingVoucher rows filtered by voucherDate and voucherType.',
+      'Voucher creation and edit flows use buildVoucherLedgerPayload() and voucher posting helpers in src/server/routes/accounting.ts.',
+      'This report shows voucher documents, not JournalEntry headers from the core journal engine.',
+    ],
+    sourceRecords: ['AccountingVoucher', 'AccountLedgerEntry'],
+    responsibleScreens: [
+      'Accounts > Accounting > Vouchers > Receipt Voucher',
+      'Accounts > Accounting > Vouchers > Payment Voucher',
+      'Accounts > Accounting > Vouchers > Journal Voucher',
+      'Accounts > Accounting > Vouchers > Cash-Bank Transfer',
+    ],
   },
   salary: {
     title: 'Salary report logic',
     manualAnchor: 'accounting-payroll-report-logic',
     summary: 'Salary report shows payroll payments including gross salary, deductions, net pay, employer contributions, and payroll cost.',
     formulas: ['Net Pay = Gross Salary - statutory deductions - voluntary deductions.', 'Total Payroll Cost = Gross Salary + employer payroll taxes + benefits expense.'],
-    dataSources: ['Salary payments', 'Employee master', 'Payroll statutory records'],
+    dataSources: ['Salary payment master', 'Employee/payroll source data', 'Salary ledger postings and treasury route selection'],
+    backendApis: ['/api/accounting/salary'],
+    serverLogic: [
+      'Listing reads SalaryPayment rows filtered by payDate and optionally month.',
+      'Create and update salary flows calculate payroll components, select the treasury route, and post salary component ledger rows through backend accounting helpers.',
+    ],
+    sourceRecords: ['SalaryPayment', 'AccountLedgerEntry', 'ChartAccount', 'treasury route metadata'],
+    responsibleScreens: [
+      'Accounts > Accounting > Salary & Contract Entry > Salary Entry',
+      'People > Employees / Payroll source data',
+    ],
   },
   contracts: {
     title: 'Contract report logic',
     manualAnchor: 'accounting-payroll-report-logic',
     summary: 'Contract report lists contractor payments and related TDS/accounting status.',
     formulas: ['Contract expense = posted contractor payment amount.', 'TDS is calculated from applicable section/rate where enabled.'],
-    dataSources: ['Contract payments', 'TDS transactions', 'Ledger entries'],
+    dataSources: ['Contract payment master', 'TDS settings and transactions', 'Ledger postings for contract payouts'],
+    backendApis: ['/api/accounting/contracts'],
+    serverLogic: [
+      'Listing reads ContractPayment rows filtered by paymentDate and status.',
+      'Create contract payment logic resolves gross, net, and TDS amounts, saves the contract row, and posts contract expense, bank/cash, and TDS payable ledger entries when status is paid or partial.',
+    ],
+    sourceRecords: ['ContractPayment', 'AccountLedgerEntry', 'ChartAccount', 'TDS configuration'],
+    responsibleScreens: [
+      'Accounts > Accounting > Salary & Contract Entry > Contract Entry',
+      'Accounts > Accounting > Vendors / Assets / Periods',
+      'Accounts > Accounting > TDS Compliance',
+    ],
   },
   daybook: {
     title: 'Day book report logic',
     manualAnchor: 'accounting-book-report-logic',
     summary: 'Day Book is the chronological register of manual income/expense entries and operational accounting movement.',
     formulas: ['Income entries increase income totals.', 'Expense entries increase expense totals.', 'Payment mode decides cash or bank book impact.'],
-    dataSources: ['Day book entries', 'Ledger entries'],
+    dataSources: ['Manual day-book entries with active status'],
+    backendApis: ['/api/accounting/day-book/entries'],
+    serverLogic: [
+      'Listing filters DayBookEntry by active status, entryType, category, paymentMethod, and entryDate.',
+      'Totals are computed in the route from the fetched result set before the response is returned.',
+      'This report tab does not use the separate consolidated /api/accounting/day-book endpoint.',
+    ],
+    sourceRecords: ['DayBookEntry'],
+    responsibleScreens: [
+      'Accounts > Accounting > Income & Expense Entry',
+      'Accounts > Accounting > Accounting Reports > Day Book',
+    ],
   },
   cash_entries: {
     title: 'Cash book report logic',
     manualAnchor: 'accounting-book-report-logic',
     summary: 'Cash book shows only entries that affect cash-in-hand accounts.',
     formulas: ['Cash closing = opening cash + cash inflows - cash outflows.'],
-    dataSources: ['Cash ledger accounts', 'Cash vouchers', 'Cash sales/receipts/expenses'],
+    dataSources: ['Cash-account ledger rows', 'Sales', 'Returns', 'Salary payments', 'Contract payments', 'Day-book entries', 'Receipt vouchers'],
+    backendApis: ['/api/accounting/books/cash'],
+    serverLogic: [
+      'The route calls buildBookReport("cash") in src/server/routes/accounting.ts.',
+      'buildBookReport() uses collectBookOpeningBalance() and collectBookEvents() to merge posted ledger movement with non-posted operational fallback rows while avoiding duplicates through posted reference tracking.',
+      'Rows linked to vouchers or journals expose managementType and managementId so the UI can open the source record.',
+    ],
+    sourceRecords: ['AccountLedgerEntry', 'ChartAccount', 'Sale', 'Return', 'SalaryPayment', 'ContractPayment', 'DayBookEntry', 'ReceiptVoucher'],
+    responsibleScreens: [
+      'Accounts > Accounting > Cash & Bank Book > Cash Entries',
+      'Accounts > Accounting > Vouchers > Receipt Voucher',
+      'Accounts > Accounting > Vouchers > Payment Voucher',
+      'Sales > Orders / Sales Invoice',
+      'Accounts > Accounting > Income & Expense Entry',
+    ],
   },
   bank_entries: {
     title: 'Bank book report logic',
     manualAnchor: 'accounting-book-report-logic',
     summary: 'Bank book shows only entries that affect bank accounts.',
     formulas: ['Bank closing = opening bank balance + bank inflows - bank outflows.'],
-    dataSources: ['Bank ledger accounts', 'Bank vouchers', 'Bank feed reconciliation'],
+    dataSources: ['Bank-account ledger rows', 'Sales', 'Returns', 'Salary payments', 'Contract payments', 'Day-book entries', 'Receipt vouchers', 'Bank reconciliation flags'],
+    backendApis: ['/api/accounting/books/bank'],
+    serverLogic: [
+      'The route calls buildBookReport("bank") and then separately queries unreconciled bank AccountLedgerEntry rows to populate reconciliationPending.',
+      'collectBookEvents() merges posted ledger movement with fallback operational rows while skipping duplicates based on voucher number, reference number, or source id.',
+    ],
+    sourceRecords: ['AccountLedgerEntry', 'ChartAccount', 'Sale', 'Return', 'SalaryPayment', 'ContractPayment', 'DayBookEntry', 'ReceiptVoucher'],
+    responsibleScreens: [
+      'Accounts > Accounting > Cash & Bank Book > Bank Entries',
+      'Accounts > Accounting > Treasury & Banks',
+      'Accounts > Accounting > Vouchers > Receipt Voucher',
+      'Accounts > Accounting > Vouchers > Payment Voucher',
+      'Accounts > Accounting > Vouchers > Cash-Bank Transfer',
+      'Sales > Orders / Sales Invoice',
+    ],
   },
+};
+
+const cleanTooltipTitle = (value: string): string => String(value || '').replace(/\s+logic$/i, '').trim();
+
+const uniqueTooltipItems = (items: string[] = []): string[] => {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const item of items) {
+    const text = String(item || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(text);
+  }
+  return next;
+};
+
+const buildLogicTooltip = (logic: AccountingLogicDefinition): React.ReactNode => {
+  const renderBulletList = (items: string[], tone: 'violet' | 'cyan' | 'amber') => (
+    <ul className="mt-2 space-y-1.5 text-[11.5px] leading-[18px] text-slate-100">
+      {items.map((item) => (
+        <li key={`${logic.title}-${item}`} className="flex items-start gap-2 rounded-xl border border-white/8 bg-slate-950/18 px-2.5 py-1.5">
+          <span
+            className={`mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${
+              tone === 'violet' ? 'bg-violet-300 shadow-[0_0_12px_rgba(196,181,253,0.65)]' :
+              tone === 'cyan' ? 'bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.65)]' :
+              'bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.65)]'
+            }`}
+          />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+
+  const tooltipTitle = cleanTooltipTitle(logic.title);
+  const formulas = uniqueTooltipItems(logic.formulas || []);
+  const dataSources = uniqueTooltipItems(logic.dataSources || []);
+  const responsibleScreens = uniqueTooltipItems(logic.responsibleScreens || []);
+
+  return (
+    <div className="max-h-[76vh] w-[min(760px,calc(100vw-24px))] overflow-y-auto rounded-[24px] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(8,15,40,0.98),rgba(15,23,42,0.96))] p-3 text-[12px] leading-5 text-slate-100 shadow-[0_28px_70px_rgba(7,12,30,0.58)]">
+      <div className="rounded-[20px] border border-cyan-300/18 bg-[linear-gradient(135deg,rgba(34,211,238,0.20),rgba(129,140,248,0.16),rgba(251,191,36,0.10))] px-3.5 py-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100/80">Quick Report Guide</p>
+            <h3 className="mt-1 text-base font-semibold text-white">{tooltipTitle}</h3>
+          </div>
+          <span className="rounded-full border border-white/12 bg-slate-950/30 px-3 py-1 text-[11px] font-semibold text-cyan-100">
+            Easy to read
+          </span>
+        </div>
+        <p className="mt-2.5 text-[12px] leading-5 text-slate-100/92">{logic.summary}</p>
+      </div>
+
+      <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+        <section className="rounded-[18px] border border-violet-300/20 bg-violet-400/10 p-3">
+          <p className="text-sm font-semibold text-white">What you can check here</p>
+          <p className="mt-1 text-[11px] leading-[17px] text-violet-100/80">Use this tab when you want to confirm these key numbers or balances.</p>
+          {renderBulletList(formulas, 'violet')}
+        </section>
+
+        <section className="rounded-[18px] border border-cyan-300/20 bg-cyan-400/10 p-3">
+          <p className="text-sm font-semibold text-white">Where the numbers come from</p>
+          <p className="mt-1 text-[11px] leading-[17px] text-cyan-100/80">The report checks these saved business records and totals.</p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {dataSources.map((item) => (
+              <span
+                key={`${logic.title}-data-${item}`}
+                className="rounded-full border border-cyan-200/18 bg-slate-950/24 px-2.5 py-1 text-[10.5px] font-medium leading-4 text-cyan-50"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {responsibleScreens.length ? (
+        <section className="mt-2.5 rounded-[18px] border border-amber-300/20 bg-amber-400/10 p-3">
+          <p className="text-sm font-semibold text-white">Which screens affect this report</p>
+          <p className="mt-1 text-[11px] leading-[17px] text-amber-100/80">If something looks wrong here, check these screens first.</p>
+          {renderBulletList(responsibleScreens, 'amber')}
+        </section>
+      ) : null}
+    </div>
+  );
 };
 
 const AccountingLogicHelpCard: React.FC<{
@@ -499,8 +931,11 @@ const AccountingLogicHelpCard: React.FC<{
   helpLabel?: string;
   variant?: 'inline' | 'drawer';
   triggerLabel?: string;
-}> = ({ compact = false, helpLabel = 'Open full help', logic, variant = 'inline', triggerLabel }) => {
+  showManualLink?: boolean;
+}> = ({ compact = false, helpLabel = 'Open full help', logic, variant = 'inline', triggerLabel, showManualLink = true }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  useEscapeKey(() => setIsDrawerOpen(false), { enabled: isDrawerOpen });
 
   if (variant === 'drawer') {
     return (
@@ -548,11 +983,13 @@ const AccountingLogicHelpCard: React.FC<{
                 <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4 text-cyan-50">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-white">How this section is calculated</p>
-                    <ManualHelpLink
-                      anchor={logic.manualAnchor}
-                      label={helpLabel}
-                      className="bg-slate-950/30 px-2.5 py-1 text-[11px]"
-                    />
+                    {showManualLink && (
+                      <ManualHelpLink
+                        anchor={logic.manualAnchor}
+                        label={helpLabel}
+                        className="bg-slate-950/30 px-2.5 py-1 text-[11px]"
+                      />
+                    )}
                   </div>
                   <p className="mt-3 text-cyan-50/85">{logic.summary}</p>
                 </div>
@@ -570,6 +1007,15 @@ const AccountingLogicHelpCard: React.FC<{
                     {logic.dataSources.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
+
+                {logic.responsibleScreens?.length ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Responsible Screens</p>
+                    <ul className="mt-3 space-y-2 text-gray-200">
+                      {logic.responsibleScreens.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             </aside>
           </div>
@@ -586,14 +1032,16 @@ const AccountingLogicHelpCard: React.FC<{
     >
       <summary className={`flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 ${compact ? 'text-sm font-semibold' : 'font-semibold'}`}>
         <span>{logic.title}</span>
-        <ManualHelpLink
-          anchor={logic.manualAnchor}
-          label={helpLabel}
-          className={compact ? 'bg-slate-950/30 px-2.5 py-1 text-[11px]' : 'bg-slate-950/30'}
-        />
+        {showManualLink && (
+          <ManualHelpLink
+            anchor={logic.manualAnchor}
+            label={helpLabel}
+            className={compact ? 'bg-slate-950/30 px-2.5 py-1 text-[11px]' : 'bg-slate-950/30'}
+          />
+        )}
       </summary>
       <p className="mt-3 text-cyan-50/85">{logic.summary}</p>
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      <div className={`mt-3 grid gap-3 ${logic.responsibleScreens?.length ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Formula / Logic</p>
           <ul className="mt-2 space-y-1 text-cyan-50/85">
@@ -606,6 +1054,14 @@ const AccountingLogicHelpCard: React.FC<{
             {logic.dataSources.map((item) => <li key={item}>{item}</li>)}
           </ul>
         </div>
+        {logic.responsibleScreens?.length ? (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/70">Responsible Screens</p>
+            <ul className="mt-2 space-y-1 text-cyan-50/85">
+              {logic.responsibleScreens.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </details>
   );
@@ -1001,6 +1457,7 @@ const createPaymentVoucherFormState = () => ({
   amount: '',
   voucherDate: new Date().toISOString().slice(0, 10),
   paymentMode: 'cash',
+  entryMode: 'expense',
   category: 'General Expense',
   referenceNo: '',
   accountName: '',
@@ -1008,6 +1465,10 @@ const createPaymentVoucherFormState = () => ({
   forPeriod: '',
   receivedBy: '',
   authorizedBy: '',
+  debitAccountId: '',
+  linkedEntityType: '',
+  linkedEntityId: '',
+  linkedEntityNumber: '',
 });
 
 const createJournalFormState = () => ({
@@ -1220,6 +1681,50 @@ const ExportIcon = () => (
   </IconBase>
 );
 
+const trialBalanceSectionOrder: TrialBalanceSection[] = ['Assets', 'Liabilities', 'Equity', 'Income', 'Expenses', 'Diagnostics'];
+
+const roundMoney = (value: unknown) => Number(Number(value || 0).toFixed(2));
+
+const normalizeSearchText = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+const inferTrialBalanceSection = (row: any): TrialBalanceSection => {
+  const normalizeSection = (value: unknown): TrialBalanceSection | null => {
+    const normalized = normalizeSearchText(value);
+    if (!normalized) return null;
+    if (normalized === 'asset' || normalized === 'assets') return 'Assets';
+    if (normalized === 'liability' || normalized === 'liabilities') return 'Liabilities';
+    if (normalized === 'equity' || normalized === 'capital') return 'Equity';
+    if (normalized === 'income' || normalized === 'revenue') return 'Income';
+    if (normalized === 'expense' || normalized === 'expenses') return 'Expenses';
+    if (normalized === 'diagnostic' || normalized === 'diagnostics') return 'Diagnostics';
+    return null;
+  };
+
+  const directSection = normalizeSection(row?.section) || normalizeSection(row?.reportHead);
+  if (directSection) return directSection;
+
+  const accountTypeSection = normalizeSection(row?.accountType) || normalizeSection(row?.under);
+  if (accountTypeSection) return accountTypeSection;
+
+  const hints = normalizeSearchText([
+    row?.reportGroup,
+    row?.groupName,
+    row?.parentGroupName,
+    row?.ledgerLabel,
+    row?.accountName,
+    row?.accountCode,
+  ].filter(Boolean).join(' '));
+
+  if (!hints) return 'Assets';
+  if (/diagnostic|difference|integrity|imbalance|warning/.test(hints)) return 'Diagnostics';
+  if (/equity|capital|retained earnings|opening balance equity|reserve/.test(hints)) return 'Equity';
+  if (/income|revenue|sales|booking|service|other income/.test(hints)) return 'Income';
+  if (/expense|expenses|cogs|cost of goods|salary|contract|payroll|depreciation|stock loss|adjustment/.test(hints)) return 'Expenses';
+  if (/liabilit|payable|creditor|loan|duties|tax payable|gst payable|vendor/.test(hints)) return 'Liabilities';
+  if (/asset|cash|bank|stock|inventory|receivable|debtor|deposit|advance|fixed asset|current asset|input gst/.test(hints)) return 'Assets';
+  return 'Assets';
+};
+
 export const Accounting: React.FC = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
@@ -1247,6 +1752,14 @@ export const Accounting: React.FC = () => {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<{ id: string; type: Exclude<VouchersTabKey, 'list'> } | null>(null);
+  const [editingJournalEntryId, setEditingJournalEntryId] = useState<string | null>(null);
+  const [journalEntryDetail, setJournalEntryDetail] = useState<JournalEntryConsoleDetail | null>(null);
+  const [journalEditorForm, setJournalEditorForm] = useState({
+    entryDate: new Date().toISOString().slice(0, 10),
+    referenceNo: '',
+    description: '',
+  });
+  const [journalEditorLines, setJournalEditorLines] = useState<JournalEditorLine[]>([]);
 
   const [salaryList, setSalaryList] = useState<SalaryPayment[]>([]);
   const [contractList, setContractList] = useState<ContractPayment[]>([]);
@@ -1267,6 +1780,11 @@ export const Accounting: React.FC = () => {
   const [expenseReport, setExpenseReport] = useState<any>(null);
   const [incomeReport, setIncomeReport] = useState<any>(null);
   const [trialBalance, setTrialBalance] = useState<any>(null);
+  const [trialBalanceSearch, setTrialBalanceSearch] = useState('');
+  const [trialBalanceSectionFilter, setTrialBalanceSectionFilter] = useState<'all' | TrialBalanceSection>('all');
+  const [trialBalanceGroupFilter, setTrialBalanceGroupFilter] = useState('all');
+  const [trialBalanceAbnormalOnly, setTrialBalanceAbnormalOnly] = useState(false);
+  const [showAccountingDiagnostics, setShowAccountingDiagnostics] = useState(false);
   const [profitLoss, setProfitLoss] = useState<any>(null);
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
   const [tdsReport, setTdsReport] = useState<any>(null);
@@ -1275,11 +1793,13 @@ export const Accounting: React.FC = () => {
   const [coreInvoices, setCoreInvoices] = useState<any[]>([]);
   const [corePayments, setCorePayments] = useState<any[]>([]);
   const [coreJournals, setCoreJournals] = useState<any[]>([]);
+  const [supplierPayablesReport, setSupplierPayablesReport] = useState<any>(null);
   const [vendors, setVendors] = useState<any[]>([]);
   const [periods, setPeriods] = useState<any[]>([]);
   const [fixedAssets, setFixedAssets] = useState<any[]>([]);
   const [bankCsvText, setBankCsvText] = useState('');
   const [bankImportResult, setBankImportResult] = useState<any>(null);
+  const [trialBalanceExporting, setTrialBalanceExporting] = useState<'' | 'csv' | 'xlsx' | 'pdf'>('');
   const [periodYear, setPeriodYear] = useState(new Date().getFullYear());
   const [treasuryRefreshKey, setTreasuryRefreshKey] = useState(0);
   const isSuperAdmin = currentUserRole === 'super_admin';
@@ -1383,7 +1903,153 @@ export const Accounting: React.FC = () => {
   const cashEntries = cashBook?.entries || [];
   const bankEntries = bankBook?.entries || [];
   const reconciliationPending = bankBook?.reconciliationPending || [];
-  const trialBalanceRows = trialBalance?.rows || [];
+  const trialBalanceRows = useMemo<TrialBalanceRow[]>(
+    () => (Array.isArray(trialBalance?.rows) ? trialBalance.rows : []).map((row: any, index: number) => {
+      const resolvedSection = inferTrialBalanceSection(row);
+      const resolvedReportHead = inferTrialBalanceSection({ ...row, section: row?.reportHead || row?.section });
+      return {
+        accountId: String(row?.accountId || `tb-row-${index}`),
+        accountCode: String(row?.accountCode || ''),
+        accountName: String(row?.accountName || 'Unnamed Account'),
+        section: resolvedSection,
+        reportHead: resolvedReportHead,
+        reportGroup: String(row?.reportGroup || row?.parentGroupName || row?.groupName || row?.reportHead || 'Ungrouped'),
+        groupName: String(row?.groupName || ''),
+        parentGroupName: String(row?.parentGroupName || ''),
+        ledgerLabel: String(row?.ledgerLabel || ''),
+        normalBalanceSide: row?.normalBalanceSide === 'credit' ? 'credit' : 'debit',
+        abnormalBalance: Boolean(row?.abnormalBalance),
+        isSubLedger: Boolean(row?.isSubLedger),
+        debitBalance: roundMoney(row?.debitBalance || 0),
+        creditBalance: roundMoney(row?.creditBalance || 0),
+      };
+    }),
+    [trialBalance]
+  );
+  const trialBalanceSectionOptions = useMemo(() => {
+    const preferred: TrialBalanceSection[] = ['Assets', 'Liabilities', 'Equity', 'Income', 'Expenses'];
+    if (trialBalanceRows.some((row) => row.section === 'Diagnostics')) preferred.push('Diagnostics');
+    return preferred.filter((section, index) => preferred.indexOf(section) === index);
+  }, [trialBalanceRows]);
+  const trialBalanceGroupOptions = useMemo(() => {
+    const baseRows = trialBalanceSectionFilter === 'all'
+      ? trialBalanceRows
+      : trialBalanceRows.filter((row) => row.section === trialBalanceSectionFilter);
+    return Array.from(
+      new Set(
+        baseRows
+          .map((row) => String(row.reportGroup || row.parentGroupName || row.groupName || '').trim())
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [trialBalanceRows, trialBalanceSectionFilter]);
+  const trialBalanceFilteredRows = useMemo(() => {
+    const query = normalizeSearchText(trialBalanceSearch);
+    return trialBalanceRows.filter((row) => {
+      if (trialBalanceSectionFilter !== 'all' && row.section !== trialBalanceSectionFilter) return false;
+      if (trialBalanceGroupFilter !== 'all') {
+        const groupValue = String(row.reportGroup || row.parentGroupName || row.groupName || '').trim();
+        if (groupValue !== trialBalanceGroupFilter) return false;
+      }
+      if (trialBalanceAbnormalOnly && !row.abnormalBalance) return false;
+      if (!query) return true;
+      const searchable = [
+        row.accountCode,
+        row.accountName,
+        row.section,
+        row.reportGroup,
+        row.groupName,
+        row.parentGroupName,
+        row.ledgerLabel,
+      ].join(' ');
+      return normalizeSearchText(searchable).includes(query);
+    });
+  }, [trialBalanceAbnormalOnly, trialBalanceGroupFilter, trialBalanceRows, trialBalanceSearch, trialBalanceSectionFilter]);
+  const trialBalanceFilteredTotals = useMemo(
+    () => ({
+      debit: roundMoney(trialBalanceFilteredRows.reduce((sum, row) => sum + Number(row.debitBalance || 0), 0)),
+      credit: roundMoney(trialBalanceFilteredRows.reduce((sum, row) => sum + Number(row.creditBalance || 0), 0)),
+    }),
+    [trialBalanceFilteredRows]
+  );
+  const trialBalanceExportRows = useMemo(
+    () => trialBalanceFilteredRows.map((row) => ({
+      Code: row.accountCode,
+      Account: row.accountName,
+      Section: row.section,
+      Group: row.reportGroup,
+      Ledger: row.groupName || '',
+      'Ledger Class': row.ledgerLabel || '',
+      Debit: row.debitBalance,
+      Credit: row.creditBalance,
+      'Normal Side': String(row.normalBalanceSide || '').toUpperCase(),
+      'Abnormal Balance': row.abnormalBalance ? 'Yes' : 'No',
+    })),
+    [trialBalanceFilteredRows]
+  );
+  const trialBalanceSections = useMemo(() => {
+    const sectionMap = new Map<string, TrialBalanceRow[]>();
+    for (const row of trialBalanceFilteredRows) {
+      const key = row.section || 'Assets';
+      const bucket = sectionMap.get(key) || [];
+      bucket.push(row);
+      sectionMap.set(key, bucket);
+    }
+
+    return Array.from(sectionMap.entries())
+      .sort(
+        ([left], [right]) =>
+          trialBalanceSectionOrder.indexOf(left as TrialBalanceSection) - trialBalanceSectionOrder.indexOf(right as TrialBalanceSection)
+      )
+      .map(([section, rows]) => {
+        const groupMap = new Map<string, TrialBalanceRow[]>();
+        for (const row of rows) {
+          const groupKey = String(row.reportGroup || row.parentGroupName || row.groupName || 'Ungrouped').trim() || 'Ungrouped';
+          const bucket = groupMap.get(groupKey) || [];
+          bucket.push(row);
+          groupMap.set(groupKey, bucket);
+        }
+
+        const groups = Array.from(groupMap.entries())
+          .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
+          .map(([groupName, groupRows]) => ({
+            groupName,
+            rows: [...groupRows].sort((left, right) => {
+              const leftGroup = String(left.groupName || '').trim();
+              const rightGroup = String(right.groupName || '').trim();
+              const groupCompare = leftGroup.localeCompare(rightGroup, undefined, { numeric: true, sensitivity: 'base' });
+              if (groupCompare !== 0) return groupCompare;
+              const nameCompare = left.accountName.localeCompare(right.accountName, undefined, { sensitivity: 'base' });
+              if (nameCompare !== 0) return nameCompare;
+              return left.accountCode.localeCompare(right.accountCode, undefined, { numeric: true, sensitivity: 'base' });
+            }),
+            totals: {
+              debit: roundMoney(groupRows.reduce((sum, row) => sum + Number(row.debitBalance || 0), 0)),
+              credit: roundMoney(groupRows.reduce((sum, row) => sum + Number(row.creditBalance || 0), 0)),
+            },
+          }));
+
+        return {
+          section,
+          rows,
+          groups,
+          totals: {
+            debit: roundMoney(rows.reduce((sum, row) => sum + Number(row.debitBalance || 0), 0)),
+            credit: roundMoney(rows.reduce((sum, row) => sum + Number(row.creditBalance || 0), 0)),
+          },
+        };
+      });
+  }, [trialBalanceFilteredRows, trialBalanceSectionOrder]);
+  const trialBalanceDuplicateNames = useMemo(
+    () => (Array.isArray(trialBalance?.diagnostics?.duplicateAccountNames) ? trialBalance.diagnostics.duplicateAccountNames : []),
+    [trialBalance]
+  );
+  const trialBalanceIntegrity = trialBalance?.integrity || null;
+  const trialBalanceHasFilters =
+    trialBalanceSectionFilter !== 'all'
+    || trialBalanceGroupFilter !== 'all'
+    || trialBalanceAbnormalOnly
+    || normalizeSearchText(trialBalanceSearch).length > 0;
   const vendorGroupOptions = accountGroups.filter((group) => group.isActive !== false && group.under === 'liability');
   const tdsTransactions = useMemo(() => {
     const start = startDate ? new Date(`${startDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
@@ -1457,6 +2123,7 @@ export const Accounting: React.FC = () => {
     ],
     [balanceSheet]
   );
+  const balanceSheetIntegrity = balanceSheet?.integrity || null;
   const recentAccountingActivity = useMemo(() => {
     const rows = [
       ...coreInvoices.map((row: any) => ({
@@ -1467,6 +2134,8 @@ export const Accounting: React.FC = () => {
         party: row.customerName || row.vendorName || 'N/A',
         amount: Number(row.totalAmount || 0),
         status: row.status || 'posted',
+        effect: deriveActivityEffect({ type: 'invoice', status: row.status }),
+        relatedReference: resolveRelatedReference(row.invoiceNumber, row.referenceNo, row.referenceId),
       })),
       ...corePayments.map((row: any) => ({
         _id: `payment-${row._id}`,
@@ -1476,6 +2145,8 @@ export const Accounting: React.FC = () => {
         party: row.customerName || row.vendorName || 'N/A',
         amount: Number(row.amount || 0),
         status: row.status || 'posted',
+        effect: deriveActivityEffect({ type: 'payment', status: row.status }),
+        relatedReference: resolveRelatedReference(row.paymentNumber || row.referenceNo, row.invoiceNumber, row.referenceId),
       })),
       ...voucherRows.map((row: any) => ({
         _id: `voucher-${row._id}`,
@@ -1485,6 +2156,8 @@ export const Accounting: React.FC = () => {
         party: row.counterpartyName || 'N/A',
         amount: Number(row.totalAmount || 0),
         status: row.isPrinted ? 'printed' : 'saved',
+        effect: deriveActivityEffect({ type: 'voucher', status: row.isPrinted ? 'printed' : 'saved' }),
+        relatedReference: resolveRelatedReference(row.voucherNumber || row.referenceNo, row.referenceNo, row?.metadata?.linkedEntityNumber),
       })),
       ...coreJournals.map((row: any) => ({
         _id: `journal-${row._id}`,
@@ -1494,6 +2167,8 @@ export const Accounting: React.FC = () => {
         party: row.description || row.referenceType || 'N/A',
         amount: Number(row.totalDebit || 0),
         status: row.status || 'posted',
+        effect: deriveJournalEffect(row),
+        relatedReference: resolveRelatedReference(row.entryNumber || row.referenceNo, row.referenceNo, row?.metadata?.reversalOf, row.referenceId),
       })),
       ...tdsTransactions.map((row: any) => ({
         _id: `tds-${row._id}`,
@@ -1503,12 +2178,23 @@ export const Accounting: React.FC = () => {
         party: row.deducteeName || 'Deductee',
         amount: Number(row.tdsAmount || 0),
         status: row.status || 'deducted',
+        effect: deriveActivityEffect({ type: 'tds', status: row.status }),
+        relatedReference: resolveRelatedReference(row.referenceNo || row.sectionCode, row.sectionCode),
       })),
     ];
     return rows
       .sort((left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime())
       .slice(0, 25);
   }, [coreInvoices, coreJournals, corePayments, tdsTransactions, voucherRows]);
+  const journalConsoleRows = useMemo(
+    () =>
+      coreJournals.map((row: any) => ({
+        ...row,
+        effect: deriveJournalEffect(row),
+        relatedReference: resolveRelatedReference(row.entryNumber || row.referenceNo, row.referenceNo, row?.metadata?.reversalOf, row.referenceId),
+      })),
+    [coreJournals]
+  );
 
   const daybookPagination = usePaginatedRows(daybookRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
   const voucherPagination = usePaginatedRows(voucherRows, { initialPageSize: 10, resetDeps: [startDate, endDate] });
@@ -1538,6 +2224,83 @@ export const Accounting: React.FC = () => {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '-';
     return date.toLocaleDateString('en-IN');
+  }
+
+  function normalizeConsoleLabel(value: unknown, fallback = '-') {
+    const text = String(value || '').trim();
+    if (!text) return fallback;
+    return text.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+  }
+
+  function resolveLinkedLedgerLabel(row: any) {
+    const ledger = row?.ledgerAccountId;
+    const code = typeof ledger === 'object' ? String(ledger?.accountCode || '').trim() : String(row?.ledgerAccountCode || '').trim();
+    const name = typeof ledger === 'object' ? String(ledger?.accountName || '').trim() : String(row?.ledgerAccountName || '').trim();
+    return [code, name].filter(Boolean).join(' - ') || 'Not linked';
+  }
+
+  function resolveRelatedReference(primary: unknown, ...candidates: unknown[]) {
+    const current = String(primary || '').trim();
+    for (const candidate of candidates) {
+      const text = String(candidate || '').trim();
+      if (text && text !== current) return text;
+    }
+    return '-';
+  }
+
+  function deriveJournalEffect(row: any) {
+    const status = String(row?.status || '').trim().toLowerCase();
+    const referenceType = String(row?.referenceType || '').trim().toLowerCase();
+    const description = String(row?.description || '').trim().toLowerCase();
+    if (status.includes('cancel')) return 'Cancelled';
+    if (referenceType === 'reversal' || description.startsWith('reversal of')) return 'Reversal';
+    if (status === 'draft' || status === 'saved') return 'Draft';
+    return 'Posted';
+  }
+
+  function deriveActivityEffect(row: any) {
+    const status = String(row?.status || '').trim().toLowerCase();
+    const type = String(row?.type || '').trim().toLowerCase();
+    const party = String(row?.party || '').trim().toLowerCase();
+    if (status.includes('cancel')) return 'Cancelled';
+    if (party.startsWith('reversal of') || type.includes('reversal')) return 'Reversal';
+    if (status === 'saved' || status === 'draft') return 'Draft';
+    if (status === 'printed') return 'Ready';
+    if (type === 'payment') return 'Settlement';
+    if (type === 'invoice' && status === 'paid') return 'Paid';
+    if (type === 'invoice' && status === 'posted') return 'Open';
+    return 'Posted';
+  }
+
+  function toneForBadge(label: unknown): 'neutral' | 'success' | 'warning' | 'danger' | 'info' {
+    const text = String(label || '').trim().toLowerCase();
+    if (!text) return 'neutral';
+    if (text.includes('cancel')) return 'danger';
+    if (text.includes('reverse')) return 'warning';
+    if (text.includes('draft') || text.includes('saved')) return 'warning';
+    if (text.includes('ready') || text.includes('open')) return 'info';
+    if (text.includes('paid') || text.includes('posted') || text.includes('settlement') || text.includes('printed')) return 'success';
+    return 'neutral';
+  }
+
+  function renderConsoleBadge(label: unknown, fallback = '-') {
+    const text = normalizeConsoleLabel(label, fallback);
+    const tone = toneForBadge(text);
+    const toneClass =
+      tone === 'danger'
+        ? 'border-rose-400/30 bg-rose-500/10 text-rose-200'
+        : tone === 'warning'
+          ? 'border-amber-400/30 bg-amber-500/10 text-amber-100'
+          : tone === 'success'
+            ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+            : tone === 'info'
+              ? 'border-cyan-400/30 bg-cyan-500/10 text-cyan-200'
+              : 'border-white/15 bg-white/5 text-gray-200';
+    return (
+      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide ${toneClass}`}>
+        {text}
+      </span>
+    );
   }
 
   const accountTypeToLabel = (value?: string) => {
@@ -1759,6 +2522,7 @@ export const Accounting: React.FC = () => {
     }
     if (tab === 'vouchers') {
       tasks.push({ label: 'Vouchers', run: refreshVouchers });
+      tasks.push({ label: 'Chart of accounts', run: refreshChart });
     }
     if (tab === 'books') {
       tasks.push({ label: 'Cash and bank book', run: refreshBooks });
@@ -1778,6 +2542,7 @@ export const Accounting: React.FC = () => {
       tasks.push({ label: 'Voucher list', run: refreshVouchers });
       tasks.push({ label: 'Cash and bank books', run: refreshBooks });
       tasks.push({ label: 'Salary, contract, and day-book entries', run: refreshPayments });
+      tasks.push({ label: 'Chart of accounts', run: refreshChart });
     }
 
     if (tasks.length === 0) return;
@@ -1865,15 +2630,17 @@ export const Accounting: React.FC = () => {
     setBankBook(bankData.data || null);
   };
 
-  const refreshReports = async () => {
-    const [expenseData, incomeData, trialData, pnlData, bsData, tdsData, tdsReportsData] = await Promise.all([
+  const refreshReports = async (includeDiagnostics = showAccountingDiagnostics) => {
+    const diagnosticsQuery = includeDiagnostics ? '&showDiagnostics=true' : '';
+    const [expenseData, incomeData, trialData, pnlData, bsData, tdsData, tdsReportsData, supplierPayablesData] = await Promise.all([
       apiJson(`/api/accounting/reports/expense?startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/reports/income?startDate=${startDate}&endDate=${endDate}`),
-      apiJson(`/api/accounting/reports/trial-balance?startDate=${startDate}&endDate=${endDate}`),
+      apiJson(`/api/accounting/reports/trial-balance?startDate=${startDate}&endDate=${endDate}${diagnosticsQuery}`),
       apiJson(`/api/accounting/reports/profit-loss?startDate=${startDate}&endDate=${endDate}`),
-      apiJson(`/api/accounting/reports/balance-sheet?asOnDate=${endDate}`),
+      apiJson(`/api/accounting/reports/balance-sheet?asOnDate=${endDate}${includeDiagnostics ? '&showDiagnostics=true' : ''}`),
       apiJson('/api/accounting/tds/bootstrap').catch(() => ({ data: null })),
       apiJson(`/api/accounting/tds/reports?startDate=${startDate}&endDate=${endDate}`).catch(() => ({ data: null })),
+      apiJson(`/api/accounting/core/supplier-payables?startDate=${startDate}&endDate=${endDate}`).catch(() => ({ data: null })),
     ]);
     setExpenseReport(expenseData.data || null);
     setIncomeReport(incomeData.data || null);
@@ -1882,6 +2649,7 @@ export const Accounting: React.FC = () => {
     setBalanceSheet(bsData.data || null);
     setTdsReport(tdsData.data || null);
     setTdsDetailedReports(tdsReportsData.data || null);
+    setSupplierPayablesReport(supplierPayablesData.data || null);
   };
 
   const refreshDashboard = async () => {
@@ -1889,7 +2657,7 @@ export const Accounting: React.FC = () => {
       apiJson(`/api/accounting/core/dashboard?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`),
       apiJson(`/api/accounting/core/invoices?limit=200&startDate=${startDate}&endDate=${endDate}`),
       apiJson(`/api/accounting/core/payments?limit=200&startDate=${startDate}&endDate=${endDate}`),
-      apiJson(`/api/accounting/core/journal-entries?limit=200&startDate=${startDate}&endDate=${endDate}`),
+      apiJson(`/api/accounting/core/journal-entries?limit=500&startDate=${startDate}&endDate=${endDate}`),
     ]);
     setDashboardSummary(dashboardData.data || null);
     setCoreInvoices(invoiceData.data || []);
@@ -1926,6 +2694,117 @@ export const Accounting: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const isEditableJournalConsoleEntry = (row: any) => {
+    const referenceType = String(row?.referenceType || '').trim().toLowerCase();
+    const status = String(row?.status || '').trim().toLowerCase();
+    const referenceNo = String(row?.referenceNo || '').trim().toUpperCase();
+    if (status !== 'posted') return false;
+    return referenceType === 'manual' || (referenceType === 'payment' && referenceNo.startsWith('PB-'));
+  };
+
+  const mapJournalLinesToEditor = (lines: JournalEntryConsoleDetail['lines'] = []): JournalEditorLine[] =>
+    (lines || []).map((line) => ({
+      accountId: normalizeId(line.accountId),
+      debit: String(Number(line.debitAmount || 0) || ''),
+      credit: String(Number(line.creditAmount || 0) || ''),
+      description: String(line.description || ''),
+    }));
+
+  const resetJournalConsoleEditor = () => {
+    setEditingJournalEntryId(null);
+    setJournalEditorForm({
+      entryDate: new Date().toISOString().slice(0, 10),
+      referenceNo: '',
+      description: '',
+    });
+    setJournalEditorLines([]);
+  };
+
+  const loadJournalConsoleEntry = async (journalId: string) => {
+    const response = await apiJson(`/api/accounting/core/journal-entries/${journalId}`);
+    const detail: JournalEntryConsoleDetail | null = response?.data || null;
+    setJournalEntryDetail(detail);
+    return detail;
+  };
+
+  const openJournalConsoleEntry = async (journalId: string, editMode = false) => {
+    const detail = await loadJournalConsoleEntry(journalId);
+    if (!detail?.entry) {
+      throw new Error('Journal entry details could not be loaded.');
+    }
+    if (editMode && !detail?.capabilities?.canEdit) {
+      throw new Error('This journal entry is generated by another workflow and cannot be edited directly.');
+    }
+
+    setReportsTab('journals');
+    setActiveTab('reports');
+
+    if (editMode) {
+      setEditingJournalEntryId(journalId);
+      setJournalEditorForm({
+        entryDate: String(detail.entry.entryDate || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+        referenceNo: String(detail.entry.referenceNo || ''),
+        description: String(detail.entry.description || ''),
+      });
+      setJournalEditorLines(mapJournalLinesToEditor(detail.lines));
+    } else {
+      resetJournalConsoleEditor();
+    }
+  };
+
+  const updateJournalEditorLine = (index: number, field: keyof JournalEditorLine, value: string) => {
+    setJournalEditorLines((previous) =>
+      previous.map((line, lineIndex) => (lineIndex === index ? { ...line, [field]: value } : line))
+    );
+  };
+
+  const addJournalEditorLine = () => {
+    setJournalEditorLines((previous) => [...previous, { accountId: '', debit: '', credit: '', description: '' }]);
+  };
+
+  const removeJournalEditorLine = (index: number) => {
+    setJournalEditorLines((previous) => previous.filter((_, lineIndex) => lineIndex !== index));
+  };
+
+  const resetTrialBalanceControls = () => {
+    setTrialBalanceSearch('');
+    setTrialBalanceSectionFilter('all');
+    setTrialBalanceGroupFilter('all');
+    setTrialBalanceAbnormalOnly(false);
+  };
+
+  const exportTrialBalanceRows = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    if (!trialBalanceExportRows.length || trialBalanceExporting) return;
+    setTrialBalanceExporting(format);
+    try {
+      const fileName = `trial-balance-${startDate}-${endDate}.csv`;
+      if (format === 'csv') {
+        downloadCsvRows(fileName, trialBalanceExportRows);
+        return;
+      }
+      if (format === 'xlsx') {
+        await downloadExcelRows(fileName, trialBalanceExportRows, 'Trial Balance');
+        return;
+      }
+      await downloadPdfRows({
+        fileName,
+        title: 'Trial Balance',
+        subtitle: `${formatShortDate(startDate)} to ${formatShortDate(endDate)}`,
+        rows: trialBalanceExportRows,
+      });
+    } finally {
+      setTrialBalanceExporting('');
+    }
+  };
+
+  const openLedgerFromTrialBalance = async (row: TrialBalanceRow) => {
+    if (!row.accountId || row.accountId.startsWith('synthetic-')) return;
+    setActiveTab('ledger');
+    setLedgerTab('ledger_view');
+    setSelectedAccountId(row.accountId);
+    await withLoading(() => refreshLedger(row.accountId));
   };
 
   useEffect(() => {
@@ -3004,11 +3883,13 @@ export const Accounting: React.FC = () => {
 
     if (row.voucherType === 'payment') {
       const documentFields = row.documentFields || {};
+      const metadata = row.metadata || {};
       setEditingVoucher({ id: voucherId, type: 'payment' });
       setPaymentForm({
         amount: String(Number(row.totalAmount || 0)),
         voucherDate,
         paymentMode: row.paymentMode || 'cash',
+        entryMode: metadata.entryMode === 'settlement' ? 'settlement' : 'expense',
         category: row.lines?.find((line) => Number(line.debit || 0) > 0)?.narration || 'General Expense',
         referenceNo: row.referenceNo || '',
         accountName: documentFields.accountName || row.counterpartyName || '',
@@ -3016,6 +3897,10 @@ export const Accounting: React.FC = () => {
         forPeriod: documentFields.forPeriod || '',
         receivedBy: documentFields.receivedBy || '',
         authorizedBy: documentFields.authorizedBy || '',
+        debitAccountId: metadata.debitAccountId || '',
+        linkedEntityType: metadata.linkedEntityType || '',
+        linkedEntityId: metadata.linkedEntityId || '',
+        linkedEntityNumber: metadata.linkedEntityNumber || '',
       });
       setVouchersTab('payment');
     }
@@ -3079,6 +3964,136 @@ export const Accounting: React.FC = () => {
     });
   };
 
+  const saveJournalConsoleRevision = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingJournalEntryId) {
+      setError('Select a manual journal entry before saving changes.');
+      return;
+    }
+
+    const normalizedLines = journalEditorLines
+      .map((line) => ({
+        accountId: normalizeId(line.accountId),
+        debit: Number(line.debit || 0),
+        credit: Number(line.credit || 0),
+        description: String(line.description || '').trim(),
+      }))
+      .filter((line) => line.accountId && (line.debit > 0 || line.credit > 0));
+    if (normalizedLines.length < 2) {
+      setError('Add at least two journal lines before saving.');
+      return;
+    }
+    const totalDebit = roundMoney(normalizedLines.reduce((sum, line) => sum + Number(line.debit || 0), 0));
+    const totalCredit = roundMoney(normalizedLines.reduce((sum, line) => sum + Number(line.credit || 0), 0));
+    if (totalDebit <= 0 || Math.abs(totalDebit - totalCredit) > 0.01) {
+      setError('Journal lines must stay balanced before saving.');
+      return;
+    }
+
+    const revisionReason = await showPromptDialog('Enter the reason for revising this journal entry.', {
+      title: 'Revision Reason',
+      label: 'Reason',
+      defaultValue: `Revised from accounting console for ${journalEntryDetail?.entry?.entryNumber || 'journal entry'}`,
+      confirmText: 'Save Revision',
+      inputType: 'textarea',
+      required: true,
+    });
+    if (!revisionReason) return;
+
+    await withLoading(async () => {
+      const response = await apiJson(`/api/accounting/core/journal-entries/${editingJournalEntryId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          entryDate: journalEditorForm.entryDate,
+          referenceNo: journalEditorForm.referenceNo,
+          description: journalEditorForm.description,
+          revisionReason,
+          lines: normalizedLines,
+        }),
+      });
+      const replacementId = String(response?.data?.replacement?._id || '').trim();
+      setMessage(String(response?.message || 'Journal entry revised successfully'));
+      resetJournalConsoleEditor();
+      await refreshDashboard();
+      await refreshBooks();
+      await refreshReports();
+      if (replacementId) {
+        await loadJournalConsoleEntry(replacementId);
+      }
+    });
+  };
+
+  const cancelJournalConsoleEdit = () => {
+    resetJournalConsoleEditor();
+    setMessage('Journal edit cancelled');
+  };
+
+  const cancelJournalConsoleEntry = async (row: any) => {
+    if (!isEditableJournalConsoleEntry(row)) {
+      setError('Only direct manual journals and legacy purchase-bill payment journals can be reversed directly from the console.');
+      return;
+    }
+    if (!(await showConfirmDialog(`Reverse journal entry ${row.entryNumber}?`, {
+      title: 'Reverse Journal Entry',
+      confirmText: 'Reverse Entry',
+      severity: 'warning',
+    }))) return;
+    const reason = await showPromptDialog('Enter the reason for reversing this journal entry.', {
+      title: 'Reversal Reason',
+      label: 'Reason',
+      defaultValue: `Reversed from accounting console for ${row.entryNumber}`,
+      confirmText: 'Reverse Entry',
+      inputType: 'textarea',
+      required: true,
+    });
+    if (!reason) return;
+
+    await withLoading(async () => {
+      const response = await apiJson(`/api/accounting/core/journal-entries/${row._id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      setMessage(String(response?.message || 'Journal entry reversed'));
+      if (String(journalEntryDetail?.entry?._id || '') === String(row._id || '')) {
+        await loadJournalConsoleEntry(String(row._id));
+      }
+      await refreshDashboard();
+      await refreshBooks();
+      await refreshReports();
+    });
+  };
+
+  const openVoucherManager = async (voucherId: string) => {
+    const response = await apiJson(`/api/accounting/vouchers/${voucherId}`);
+    const voucher = response?.data;
+    if (!voucher?._id) {
+      throw new Error('Voucher details could not be loaded.');
+    }
+    setActiveTab('vouchers');
+    editVoucher(voucher);
+  };
+
+  const openBookEntryManager = async (row: any) => {
+    const managementType = String(row?.managementType || '').trim().toLowerCase();
+    const managementId = String(row?.managementId || '').trim();
+    if (!managementType || !managementId) {
+      setError('This book entry is not linked to an editable source record.');
+      return;
+    }
+
+    await withLoading(async () => {
+      if (managementType === 'voucher') {
+        await openVoucherManager(managementId);
+        return;
+      }
+      if (managementType === 'journal') {
+        await openJournalConsoleEntry(managementId, false);
+        return;
+      }
+      throw new Error('Unsupported source record for this book entry.');
+    });
+  };
+
   const renderTablePagination = (pagination: any, itemLabel: string) => (
     <PaginationControls
       currentPage={pagination.currentPage}
@@ -3112,7 +4127,7 @@ export const Accounting: React.FC = () => {
             </button>
             <button className={buttonClass} onClick={() => withLoading(async () => downloadExport('vendors'))}>
               <ExportIcon />
-              Export Vendor Ledger CSV
+              Export Vendor Master CSV
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -3146,33 +4161,39 @@ export const Accounting: React.FC = () => {
               filters={[
                 { key: 'type', label: 'Type', getValue: (row: any) => String(row.type || 'Other') },
                 { key: 'status', label: 'Status', getValue: (row: any) => String(row.status || '').toUpperCase() || 'POSTED' },
+                { key: 'effect', label: 'Effect', getValue: (row: any) => String(row.effect || 'Posted') },
               ]}
               columns={[
                 { key: 'date', header: 'Date', render: (row: any) => formatShortDate(row.date), exportValue: (row: any) => String(row.date || '').slice(0, 10), sortValue: (row: any) => row.date },
                 { key: 'type', header: 'Type', accessor: 'type' },
                 { key: 'reference', header: 'Reference', accessor: 'reference' },
+                { key: 'relatedReference', header: 'Related', render: (row: any) => row.relatedReference || '-', exportValue: (row: any) => row.relatedReference || '-', sortValue: (row: any) => row.relatedReference || '' },
                 { key: 'party', header: 'Party / Description', accessor: 'party' },
                 { key: 'amount', header: 'Amount', render: (row: any) => formatCurrency(row.amount || 0), exportValue: (row: any) => Number(row.amount || 0), sortValue: (row: any) => Number(row.amount || 0), align: 'right' },
-                { key: 'statusValue', header: 'Status', render: (row: any) => String(row.status || '-').toUpperCase(), exportValue: (row: any) => String(row.status || '').toUpperCase() },
+                { key: 'effectValue', header: 'Effect', render: (row: any) => renderConsoleBadge(row.effect, 'POSTED'), exportValue: (row: any) => String(row.effect || '').toUpperCase() },
+                { key: 'statusValue', header: 'Status', render: (row: any) => renderConsoleBadge(row.status, 'POSTED'), exportValue: (row: any) => String(row.status || '').toUpperCase() },
               ]}
             />
             <ReportDataTable
               title="Recent Journal Entries"
-              data={coreJournals}
+              data={journalConsoleRows}
               itemLabel="journals"
               searchPlaceholder="Search journals by number, type, description, or reference"
               exportFileName={`accounting-journals-${startDate}-${endDate}.csv`}
               filters={[
                 { key: 'status', label: 'Status', getValue: (row: any) => String(row.status || '').toUpperCase() || 'POSTED' },
                 { key: 'type', label: 'Type', getValue: (row: any) => String(row.referenceType || '').toUpperCase() || 'MANUAL' },
+                { key: 'effect', label: 'Effect', getValue: (row: any) => String(row.effect || 'Posted') },
               ]}
               columns={[
                 { key: 'entryNumber', header: 'Entry No', accessor: 'entryNumber' },
                 { key: 'entryDate', header: 'Date', render: (row: any) => formatShortDate(row.entryDate), exportValue: (row: any) => String(row.entryDate || '').slice(0, 10), sortValue: (row: any) => row.entryDate },
                 { key: 'referenceType', header: 'Type', render: (row: any) => String(row.referenceType || '-').toUpperCase(), exportValue: (row: any) => String(row.referenceType || '').toUpperCase() },
+                { key: 'relatedReference', header: 'Against', render: (row: any) => row.relatedReference || '-', exportValue: (row: any) => row.relatedReference || '-', sortValue: (row: any) => row.relatedReference || '' },
                 { key: 'description', header: 'Description', accessor: 'description' },
                 { key: 'totalDebit', header: 'Amount', render: (row: any) => formatCurrency(row.totalDebit || 0), exportValue: (row: any) => Number(row.totalDebit || 0), sortValue: (row: any) => Number(row.totalDebit || 0), align: 'right' },
-                { key: 'statusValue', header: 'Status', render: (row: any) => String(row.status || '-').toUpperCase(), exportValue: (row: any) => String(row.status || '').toUpperCase() },
+                { key: 'effectValue', header: 'Effect', render: (row: any) => renderConsoleBadge(row.effect, 'POSTED'), exportValue: (row: any) => String(row.effect || '').toUpperCase() },
+                { key: 'statusValue', header: 'Status', render: (row: any) => renderConsoleBadge(row.status, 'POSTED'), exportValue: (row: any) => String(row.status || '').toUpperCase() },
               ]}
             />
           </div>
@@ -3181,47 +4202,298 @@ export const Accounting: React.FC = () => {
     }
 
     if (reportsTab === 'vendors') {
+      const normalizeVendorKey = (value: any) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const normalizeVendorPhone = (value: any) => String(value || '').replace(/\D/g, '').slice(-10);
+      const duplicateVendorBuckets = (vendors || []).reduce((map: Map<string, number>, row: any) => {
+        [
+          `name:${normalizeVendorKey(row.name)}`,
+          String(row.gstin || '').trim() ? `gstin:${String(row.gstin || '').trim().toUpperCase()}` : '',
+          String(row.pan || '').trim() ? `pan:${String(row.pan || '').trim().toUpperCase()}` : '',
+          normalizeVendorPhone(row.phone) ? `phone:${normalizeVendorPhone(row.phone)}` : '',
+          row.ledgerAccountId ? `ledger:${String(row.ledgerAccountId)}` : '',
+        ].filter(Boolean).forEach((key) => map.set(key, (map.get(key) || 0) + 1));
+        return map;
+      }, new Map<string, number>());
+      const duplicateVendorFlags = (row: any) => [
+        duplicateVendorBuckets.get(`name:${normalizeVendorKey(row.name)}`)! > 1 ? 'Duplicate name' : '',
+        String(row.gstin || '').trim() && duplicateVendorBuckets.get(`gstin:${String(row.gstin || '').trim().toUpperCase()}`)! > 1 ? 'Duplicate GSTIN' : '',
+        String(row.pan || '').trim() && duplicateVendorBuckets.get(`pan:${String(row.pan || '').trim().toUpperCase()}`)! > 1 ? 'Duplicate PAN' : '',
+        normalizeVendorPhone(row.phone) && duplicateVendorBuckets.get(`phone:${normalizeVendorPhone(row.phone)}`)! > 1 ? 'Duplicate phone' : '',
+        row.ledgerAccountId && duplicateVendorBuckets.get(`ledger:${String(row.ledgerAccountId)}`)! > 1 ? 'Duplicate ledger' : '',
+      ].filter(Boolean);
+      const vendorDataQualityFlags = (row: any) => [
+        !String(row.pan || '').trim() ? 'Missing PAN' : '',
+        !String(row.gstin || '').trim() ? 'Missing GSTIN' : '',
+        !String(row.groupName || '').trim() ? 'Missing group' : '',
+        !String(row.email || '').trim() ? 'Missing email' : '',
+        !String(row.phone || '').trim() ? 'Missing phone' : '',
+        row.isTdsApplicable && !String(row.pan || '').trim() ? 'TDS PAN missing' : '',
+        resolveLinkedLedgerLabel(row) === 'Not linked' ? 'Unlinked ledger' : '',
+        ...duplicateVendorFlags(row),
+      ].filter(Boolean);
       return (
-        <ReportDataTable
-          title="Vendor Master Report"
-          data={vendors}
-          itemLabel="vendors"
-          searchPlaceholder="Search vendors by name, group, contact, phone, PAN, GSTIN, TDS, email, or address"
-          exportFileName={`vendors-report-${endDate}.csv`}
-          filters={[
-            {
-              key: 'balance',
-              label: 'Balance',
-              getValue: (row: any) => Number(row.balance || 0) > 0 ? 'With Balance' : 'Settled',
-            },
-            {
-              key: 'group',
-              label: 'Group',
-              getValue: (row: any) => row.groupName || 'Ungrouped',
-            },
-            {
-              key: 'tds',
-              label: 'TDS',
-              getValue: (row: any) => row.isTdsApplicable ? 'TDS Applicable' : 'No TDS',
-            },
-          ]}
-          columns={[
-            { key: 'name', header: 'Vendor', accessor: 'name' },
-            { key: 'groupName', header: 'Group', render: (row: any) => row.groupName || '-', exportValue: (row: any) => row.groupName || '' },
-            { key: 'contact', header: 'Contact', render: (row: any) => row.contact || '-', exportValue: (row: any) => row.contact || '' },
-            { key: 'phone', header: 'Phone', render: (row: any) => row.phone || '-', exportValue: (row: any) => row.phone || '' },
-            { key: 'alternatePhone', header: 'Alt Phone', render: (row: any) => row.alternatePhone || '-', exportValue: (row: any) => row.alternatePhone || '' },
-            { key: 'pan', header: 'PAN', render: (row: any) => row.pan || '-', exportValue: (row: any) => row.pan || '' },
-            { key: 'gstin', header: 'GSTIN', render: (row: any) => row.gstin || '-', exportValue: (row: any) => row.gstin || '' },
-            { key: 'tdsStatus', header: 'TDS', render: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || '-'} @ ${Number(row.tdsRate || 0)}%` : 'No', exportValue: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || ''} @ ${Number(row.tdsRate || 0)}%` : 'No' },
-            { key: 'email', header: 'Email', render: (row: any) => row.email || '-', exportValue: (row: any) => row.email || '' },
-            { key: 'address', header: 'Address', render: (row: any) => row.address || '-', exportValue: (row: any) => row.address || '' },
-            { key: 'openingBalance', header: 'Opening', render: (row: any) => `${formatCurrency(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, exportValue: (row: any) => `${Number(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, sortValue: (row: any) => Number(row.openingBalance || 0), align: 'right' },
-            { key: 'totalPayable', header: 'Total Payable', render: (row: any) => formatCurrency(row.totalPayable || 0), exportValue: (row: any) => Number(row.totalPayable || 0), sortValue: (row: any) => Number(row.totalPayable || 0), align: 'right' },
-            { key: 'paid', header: 'Paid', render: (row: any) => formatCurrency(row.paid || 0), exportValue: (row: any) => Number(row.paid || 0), sortValue: (row: any) => Number(row.paid || 0), align: 'right' },
-            { key: 'balanceValue', header: 'Balance', render: (row: any) => formatCurrency(row.balance || 0), exportValue: (row: any) => Number(row.balance || 0), sortValue: (row: any) => Number(row.balance || 0), align: 'right' },
-          ]}
-        />
+        <div className="space-y-3">
+          <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3 text-sm text-cyan-100">
+            This tab is a vendor master list for accounting setup. Procurement supplier bills and supplier payments are reviewed in purchase bills, payment vouchers, and Accounts Payable reports, so those movements are not shown here unless a vendor is separately linked to its own ledger.
+          </div>
+          <ReportDataTable
+            title="Vendor Master List"
+            data={vendors}
+            itemLabel="vendor masters"
+            searchPlaceholder="Search vendor master records by name, group, contact, phone, PAN, GSTIN, TDS, email, address, or linked ledger"
+            exportFileName={`vendor-master-list-${endDate}.csv`}
+            filters={[
+              {
+                key: 'group',
+                label: 'Group',
+                getValue: (row: any) => row.groupName || 'Ungrouped',
+              },
+              {
+                key: 'tds',
+                label: 'TDS',
+                getValue: (row: any) => row.isTdsApplicable ? 'TDS Applicable' : 'No TDS',
+              },
+              {
+                key: 'ledgerLink',
+                label: 'Ledger Link',
+                getValue: (row: any) => resolveLinkedLedgerLabel(row) === 'Not linked' ? 'Not linked' : 'Linked',
+              },
+              {
+                key: 'quality',
+                label: 'Data Quality',
+                getValue: (row: any) => vendorDataQualityFlags(row).length ? 'Warnings' : 'Complete',
+              },
+              {
+                key: 'incomplete',
+                label: 'Completeness',
+                getValue: (row: any) => vendorDataQualityFlags(row).some((flag) => String(flag).startsWith('Missing') || String(flag).includes('Unlinked')) ? 'Show incomplete vendors' : 'Complete vendors',
+              },
+              {
+                key: 'duplicates',
+                label: 'Duplicates',
+                getValue: (row: any) => duplicateVendorFlags(row).length ? 'Show duplicates' : 'No duplicates',
+              },
+            ]}
+            columns={[
+              { key: 'name', header: 'Vendor', accessor: 'name' },
+              { key: 'dataQuality', header: 'Data Quality', render: (row: any) => {
+                const flags = vendorDataQualityFlags(row);
+                return flags.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {flags.slice(0, 3).map((flag) => (
+                      <span key={flag} className="rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-100">{flag}</span>
+                    ))}
+                    {flags.length > 3 && <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300">+{flags.length - 3}</span>}
+                  </div>
+                ) : (
+                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">Complete</span>
+                );
+              }, exportValue: (row: any) => vendorDataQualityFlags(row).join(', ') || 'Complete' },
+              { key: 'groupName', header: 'Group', render: (row: any) => row.groupName || '-', exportValue: (row: any) => row.groupName || '' },
+              { key: 'contact', header: 'Contact', render: (row: any) => row.contact || '-', exportValue: (row: any) => row.contact || '' },
+              { key: 'phone', header: 'Phone', render: (row: any) => row.phone || '-', exportValue: (row: any) => row.phone || '' },
+              { key: 'alternatePhone', header: 'Alt Phone', render: (row: any) => row.alternatePhone || '-', exportValue: (row: any) => row.alternatePhone || '' },
+              { key: 'pan', header: 'PAN', render: (row: any) => row.pan || '-', exportValue: (row: any) => row.pan || '' },
+              { key: 'gstin', header: 'GSTIN', render: (row: any) => row.gstin || '-', exportValue: (row: any) => row.gstin || '' },
+              { key: 'tdsStatus', header: 'TDS', render: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || '-'} @ ${Number(row.tdsRate || 0)}%` : 'No', exportValue: (row: any) => row.isTdsApplicable ? `${row.tdsSectionCode || ''} @ ${Number(row.tdsRate || 0)}%` : 'No' },
+              { key: 'email', header: 'Email', render: (row: any) => row.email || '-', exportValue: (row: any) => row.email || '' },
+              { key: 'address', header: 'Address', render: (row: any) => row.address || '-', exportValue: (row: any) => row.address || '' },
+              { key: 'openingBalance', header: 'Opening', render: (row: any) => `${formatCurrency(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, exportValue: (row: any) => `${Number(row.openingBalance || 0)} ${String(row.openingSide || 'credit').toUpperCase() === 'DEBIT' ? 'Dr' : 'Cr'}`, sortValue: (row: any) => Number(row.openingBalance || 0), align: 'right' },
+              { key: 'ledgerAccount', header: 'Linked Ledger', render: (row: any) => resolveLinkedLedgerLabel(row), exportValue: (row: any) => resolveLinkedLedgerLabel(row), sortValue: (row: any) => resolveLinkedLedgerLabel(row) },
+            ]}
+          />
+        </div>
+      );
+    }
+
+    if (reportsTab === 'supplier_payables') {
+      const payablesTotals = supplierPayablesReport?.totals || {};
+      const payablesValidation = supplierPayablesReport?.validation || {};
+      const payablesReconciliation = supplierPayablesReport?.reconciliation || {};
+      const payablesRows = supplierPayablesReport?.rows || [];
+      const payablesAgeingRows = supplierPayablesReport?.ageing || [];
+      const payablesReconciled = payablesValidation.apReconciled === true || payablesReconciliation.status === 'Reconciled';
+      const validationCards = [
+        {
+          label: 'Bills vs paid',
+          value: payablesValidation.totalsMatch ? 'PASS' : 'CHECK',
+          tone: payablesValidation.totalsMatch ? 'text-emerald-300 border-emerald-400/25 bg-emerald-500/10' : 'text-amber-300 border-amber-400/25 bg-amber-500/10',
+          helper: 'Bill amount should equal paid plus outstanding.',
+        },
+        {
+          label: 'Supplier Payables Reconciled',
+          value: payablesReconciled ? 'PASS' : 'CHECK',
+          tone: payablesReconciled ? 'text-emerald-300 border-emerald-400/25 bg-emerald-500/10' : 'text-amber-300 border-amber-400/25 bg-amber-500/10',
+          helper: 'AP can be non-zero. It passes when documents, ageing, and payable ledgers tie out.',
+        },
+        {
+          label: 'Supplier mapping',
+          value: payablesValidation.allSuppliersMapped ? 'PASS' : 'CHECK',
+          tone: payablesValidation.allSuppliersMapped ? 'text-emerald-300 border-emerald-400/25 bg-emerald-500/10' : 'text-amber-300 border-amber-400/25 bg-amber-500/10',
+          helper: 'Every supplier in this report should be linked to an accounting payable ledger.',
+        },
+      ];
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3 text-sm text-cyan-100">
+            This is the procurement supplier transaction report. It shows real supplier bills, settlements, outstanding balances, and ageing. Vendor Master remains a separate setup screen.
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Bills</p>
+              <p className="text-xl font-semibold text-white">{formatCurrency(payablesTotals.billAmount || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Total Paid</p>
+              <p className="text-xl font-semibold text-emerald-300">{formatCurrency(payablesTotals.paidAmount || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Outstanding</p>
+              <p className="text-xl font-semibold text-amber-300">{formatCurrency(payablesTotals.outstandingAmount || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Ledger Difference</p>
+              <p className="text-xl font-semibold text-cyan-200">{formatCurrency(payablesTotals.validationDifference || 0)}</p>
+            </div>
+          </div>
+          <div className={`rounded-xl border p-4 ${payablesReconciled ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-amber-400/25 bg-amber-500/10'}`}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">AP Reconciliation</p>
+                <p className="mt-1 text-xs text-gray-300">
+                  {payablesReconciliation.reason || 'Supplier documents, ageing, and payable ledger movement are compared for the selected range.'}
+                </p>
+              </div>
+              <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${payablesReconciled ? 'border-emerald-300/40 text-emerald-200' : 'border-amber-300/40 text-amber-200'}`}>
+                {payablesReconciliation.status || (payablesReconciled ? 'Reconciled' : 'Mismatch')}
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">AP Control</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(payablesReconciliation.payableControlDirectBalance || 0)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">Vendor Sub-ledgers</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(payablesReconciliation.payableSubLedgerBalance || 0)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">AP Portfolio</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(payablesReconciliation.payablePortfolioBalance || 0)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">Supplier Outstanding</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(payablesReconciliation.supplierOutstandingBalance || 0)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">Ageing Outstanding</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(payablesReconciliation.supplierAgeingOutstandingBalance || 0)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-xs text-gray-400">Difference</p>
+                <p className={`mt-1 text-sm font-semibold ${Math.abs(Number(payablesReconciliation.difference || 0)) <= 0.01 ? 'text-emerald-200' : 'text-amber-200'}`}>
+                  {formatCurrency(payablesReconciliation.difference || 0)}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {validationCards.map((card) => (
+              <div key={card.label} className={`rounded-xl border p-4 ${card.tone}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">{card.label}</p>
+                  <span className="rounded-full border border-current/30 px-2 py-1 text-xs font-semibold">{card.value}</span>
+                </div>
+                <p className="mt-2 text-xs text-current/80">{card.helper}</p>
+              </div>
+            ))}
+          </div>
+          <ReportDataTable
+            title="Supplier Ageing Summary"
+            data={payablesAgeingRows}
+            itemLabel="suppliers"
+            searchPlaceholder="Search supplier ageing by supplier name or linked ledger"
+            exportFileName={`supplier-ageing-${startDate}-${endDate}.csv`}
+            filters={[
+              {
+                key: 'mapping',
+                label: 'Mapping',
+                getValue: (row: any) => row.payableLedgerAccountId ? 'Mapped' : 'Unmapped',
+              },
+            ]}
+            columns={[
+              { key: 'supplierName', header: 'Supplier', accessor: 'supplierName' },
+              { key: 'payableLedger', header: 'Linked Ledger', render: (row: any) => row.payableLedgerAccountCode ? `${row.payableLedgerAccountCode} - ${row.payableLedgerAccountName || ''}`.trim() : 'Not linked', exportValue: (row: any) => row.payableLedgerAccountCode ? `${row.payableLedgerAccountCode} - ${row.payableLedgerAccountName || ''}`.trim() : 'Not linked', sortValue: (row: any) => row.payableLedgerAccountCode || row.payableLedgerAccountName || '' },
+              { key: 'totalOutstanding', header: 'Outstanding', render: (row: any) => formatCurrency(row.totalOutstanding || 0), exportValue: (row: any) => Number(row.totalOutstanding || 0), sortValue: (row: any) => Number(row.totalOutstanding || 0), align: 'right' },
+              { key: 'bucket0To30', header: '0-30 Days', render: (row: any) => formatCurrency(row.bucket0To30 || 0), exportValue: (row: any) => Number(row.bucket0To30 || 0), sortValue: (row: any) => Number(row.bucket0To30 || 0), align: 'right' },
+              { key: 'bucket31To60', header: '31-60 Days', render: (row: any) => formatCurrency(row.bucket31To60 || 0), exportValue: (row: any) => Number(row.bucket31To60 || 0), sortValue: (row: any) => Number(row.bucket31To60 || 0), align: 'right' },
+              { key: 'bucket61To90', header: '61-90 Days', render: (row: any) => formatCurrency(row.bucket61To90 || 0), exportValue: (row: any) => Number(row.bucket61To90 || 0), sortValue: (row: any) => Number(row.bucket61To90 || 0), align: 'right' },
+              { key: 'bucket90Plus', header: '90+ Days', render: (row: any) => formatCurrency(row.bucket90Plus || 0), exportValue: (row: any) => Number(row.bucket90Plus || 0), sortValue: (row: any) => Number(row.bucket90Plus || 0), align: 'right' },
+              { key: 'payableLedgerOutstanding', header: 'Ledger Outstanding', render: (row: any) => formatCurrency(row.payableLedgerOutstanding || 0), exportValue: (row: any) => Number(row.payableLedgerOutstanding || 0), sortValue: (row: any) => Number(row.payableLedgerOutstanding || 0), align: 'right' },
+              { key: 'validationDifference', header: 'Difference', render: (row: any) => formatCurrency(row.validationDifference || 0), exportValue: (row: any) => Number(row.validationDifference || 0), sortValue: (row: any) => Number(row.validationDifference || 0), align: 'right' },
+              { key: 'lastTransactionDate', header: 'Last Transaction', render: (row: any) => row.lastTransactionDate ? formatShortDate(row.lastTransactionDate) : '-', exportValue: (row: any) => row.lastTransactionDate ? String(row.lastTransactionDate).slice(0, 10) : '', sortValue: (row: any) => row.lastTransactionDate || '' },
+            ]}
+          />
+          <ReportDataTable
+            title="Supplier Ledger / Procurement Payables"
+            data={payablesRows}
+            itemLabel="supplier bill rows"
+            searchPlaceholder="Search supplier bills by supplier, bill, PO, payment reference, mode, or linked ledger"
+            exportFileName={`supplier-payables-${startDate}-${endDate}.csv`}
+            filters={[
+              { key: 'status', label: 'Status', getValue: (row: any) => String(row.status || 'Pending') },
+              { key: 'paymentMode', label: 'Payment Mode', getValue: (row: any) => String(row.paymentMode || 'Unpaid') || 'Unpaid' },
+            ]}
+            columns={[
+              { key: 'supplierName', header: 'Supplier', accessor: 'supplierName' },
+              { key: 'purchaseBillNo', header: 'Purchase Bill No', accessor: 'purchaseBillNo' },
+              { key: 'purchaseOrderNo', header: 'Purchase Order No', render: (row: any) => row.purchaseOrderNo || '-', exportValue: (row: any) => row.purchaseOrderNo || '' },
+              { key: 'billDate', header: 'Bill Date', render: (row: any) => formatShortDate(row.billDate), exportValue: (row: any) => String(row.billDate || '').slice(0, 10), sortValue: (row: any) => row.billDate },
+              { key: 'billAmount', header: 'Bill Amount', render: (row: any) => formatCurrency(row.billAmount || 0), exportValue: (row: any) => Number(row.billAmount || 0), sortValue: (row: any) => Number(row.billAmount || 0), align: 'right' },
+              { key: 'paidAmount', header: 'Paid Amount', render: (row: any) => formatCurrency(row.paidAmount || 0), exportValue: (row: any) => Number(row.paidAmount || 0), sortValue: (row: any) => Number(row.paidAmount || 0), align: 'right' },
+              { key: 'outstandingAmount', header: 'Outstanding', render: (row: any) => formatCurrency(row.outstandingAmount || 0), exportValue: (row: any) => Number(row.outstandingAmount || 0), sortValue: (row: any) => Number(row.outstandingAmount || 0), align: 'right' },
+              { key: 'paymentReference', header: 'Payment Reference', render: (row: any) => row.paymentReference || '-', exportValue: (row: any) => row.paymentReference || '' },
+              { key: 'paymentMode', header: 'Payment Mode', render: (row: any) => row.paymentMode || '-', exportValue: (row: any) => row.paymentMode || '' },
+              { key: 'statusValue', header: 'Status', render: (row: any) => renderConsoleBadge(row.status, 'Pending'), exportValue: (row: any) => String(row.status || '').toUpperCase() },
+              { key: 'lastTransactionDate', header: 'Last Transaction', render: (row: any) => formatShortDate(row.lastTransactionDate), exportValue: (row: any) => String(row.lastTransactionDate || '').slice(0, 10), sortValue: (row: any) => row.lastTransactionDate },
+              { key: 'trace', header: 'Trace', render: (row: any) => (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {row.billJournalEntryId && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-cyan-400/40 bg-cyan-500/10 px-2 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-500/20"
+                      onClick={() => void withLoading(async () => openJournalConsoleEntry(String(row.billJournalEntryId), false))}
+                    >
+                      Bill Journal
+                    </button>
+                  )}
+                  {row.paymentVoucherId && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20"
+                      onClick={() => void withLoading(async () => openVoucherManager(String(row.paymentVoucherId)))}
+                    >
+                      Payment Voucher
+                    </button>
+                  )}
+                  {!row.paymentVoucherId && row.paymentJournalEntryId && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-200 hover:bg-amber-500/20"
+                      onClick={() => void withLoading(async () => openJournalConsoleEntry(String(row.paymentJournalEntryId), false))}
+                    >
+                      Payment Journal
+                    </button>
+                  )}
+                  {!row.billJournalEntryId && !row.paymentVoucherId && !row.paymentJournalEntryId && (
+                    <span className="text-xs text-gray-500">Reference only</span>
+                  )}
+                </div>
+              ), exportValue: () => '', align: 'right' },
+            ]}
+          />
+        </div>
       );
     }
 
@@ -3450,34 +4722,493 @@ export const Accounting: React.FC = () => {
             { key: 'narration', header: 'Narration', accessor: 'narration' },
             { key: 'reference', header: 'Reference', accessor: 'reference' },
             { key: 'paymentMethod', header: 'Method', render: (row: any) => String(row.paymentMethod || '-').toUpperCase(), exportValue: (row: any) => String(row.paymentMethod || '').toUpperCase() },
+            {
+              key: 'manage',
+              header: 'Manage',
+              render: (row: any) => row.managementType && row.managementId ? (
+                <button
+                  type="button"
+                  className="rounded-md border border-cyan-400/40 bg-cyan-500/10 px-2 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-500/20"
+                  onClick={() => void openBookEntryManager(row)}
+                >
+                  Open
+                </button>
+              ) : (
+                <span className="text-xs text-gray-500">Report only</span>
+              ),
+              exportValue: () => '',
+              searchValue: (row: any) => row.managementType ? 'linked' : 'report only',
+            },
           ]}
         />
       );
     }
 
-    if (reportsTab === 'trial_balance') {
+    if (reportsTab === 'journals') {
       return (
-        <ReportDataTable
-          title="Trial Balance Report"
-          data={trialBalanceRows}
-          itemLabel="trial balance rows"
-          searchPlaceholder="Search trial balance by account code, name, or type"
-          exportFileName={`trial-balance-${startDate}-${endDate}.csv`}
-          filters={[
-            { key: 'accountType', label: 'Account Type', getValue: (row: any) => String(row.accountType || '').toUpperCase() || 'UNKNOWN' },
-          ]}
-          columns={[
-            { key: 'accountCode', header: 'Code', accessor: 'accountCode' },
-            { key: 'accountName', header: 'Account', accessor: 'accountName' },
-            { key: 'accountType', header: 'Type', render: (row: any) => String(row.accountType || '-').toUpperCase(), exportValue: (row: any) => String(row.accountType || '').toUpperCase() },
-            { key: 'openingBalance', header: 'Opening', render: (row: any) => formatCurrency(row.openingBalance || 0), exportValue: (row: any) => Number(row.openingBalance || 0), sortValue: (row: any) => Number(row.openingBalance || 0), align: 'right' },
-            { key: 'debit', header: 'Debit', render: (row: any) => formatCurrency(row.debit || 0), exportValue: (row: any) => Number(row.debit || 0), sortValue: (row: any) => Number(row.debit || 0), align: 'right' },
-            { key: 'credit', header: 'Credit', render: (row: any) => formatCurrency(row.credit || 0), exportValue: (row: any) => Number(row.credit || 0), sortValue: (row: any) => Number(row.credit || 0), align: 'right' },
-            { key: 'closingBalance', header: 'Closing', render: (row: any) => formatCurrency(row.closingBalance || 0), exportValue: (row: any) => Number(row.closingBalance || 0), sortValue: (row: any) => Number(row.closingBalance || 0), align: 'right' },
-            { key: 'debitBalance', header: 'Dr Balance', render: (row: any) => formatCurrency(row.debitBalance || 0), exportValue: (row: any) => Number(row.debitBalance || 0), sortValue: (row: any) => Number(row.debitBalance || 0), align: 'right' },
-            { key: 'creditBalance', header: 'Cr Balance', render: (row: any) => formatCurrency(row.creditBalance || 0), exportValue: (row: any) => Number(row.creditBalance || 0), sortValue: (row: any) => Number(row.creditBalance || 0), align: 'right' },
-          ]}
-        />
+        <div className="space-y-4">
+          {journalEntryDetail?.entry && (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-semibold">
+                    {editingJournalEntryId ? `Edit Journal ${journalEntryDetail.entry.entryNumber}` : `Journal ${journalEntryDetail.entry.entryNumber}`}
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    {String(journalEntryDetail.entry.referenceType || 'manual').toUpperCase()} | {String(journalEntryDetail.entry.status || 'posted').toUpperCase()} | {formatShortDate(journalEntryDetail.entry.entryDate)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!editingJournalEntryId && journalEntryDetail.capabilities?.canEdit && (
+                    <button type="button" className={buttonClass} onClick={() => void openJournalConsoleEntry(String(journalEntryDetail.entry._id), true)}>
+                      <EditIcon />
+                      Edit Manual Journal
+                    </button>
+                  )}
+                  {!editingJournalEntryId && journalEntryDetail.capabilities?.canCancel && (
+                    <button type="button" className={secondaryButtonClass} onClick={() => void cancelJournalConsoleEntry(journalEntryDetail.entry)}>
+                      <CancelIcon />
+                      Reverse Entry
+                    </button>
+                  )}
+                  {editingJournalEntryId && (
+                    <button type="button" className={secondaryButtonClass} onClick={cancelJournalConsoleEdit}>
+                      <CancelIcon />
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {editingJournalEntryId ? (
+                <form onSubmit={saveJournalConsoleRevision} className="mt-4 space-y-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <FloatingField label="Entry Date" type="date" required value={journalEditorForm.entryDate} onChange={(value) => setJournalEditorForm((prev) => ({ ...prev, entryDate: value }))} />
+                    <FloatingField label="Reference No" value={journalEditorForm.referenceNo} onChange={(value) => setJournalEditorForm((prev) => ({ ...prev, referenceNo: value }))} />
+                    <FloatingField label="Description" required value={journalEditorForm.description} onChange={(value) => setJournalEditorForm((prev) => ({ ...prev, description: value }))} />
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-white/10">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/10 text-gray-300">
+                          <th className="px-2 py-2 text-left">Account</th>
+                          <th className="px-2 py-2 text-right">Debit</th>
+                          <th className="px-2 py-2 text-right">Credit</th>
+                          <th className="px-2 py-2 text-left">Description</th>
+                          <th className="px-2 py-2 text-left">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {journalEditorLines.map((line, index) => (
+                          <tr key={`journal-line-${index}`} className="border-t border-white/10">
+                            <td className="px-2 py-2 min-w-[260px]">
+                              <select
+                                value={line.accountId}
+                                onChange={(e) => updateJournalEditorLine(index, 'accountId', e.target.value)}
+                                className={inputClass}
+                              >
+                                <option value="" className="bg-gray-900">Select account</option>
+                                {chartAccounts.map((account) => (
+                                  <option key={account._id} value={account._id} className="bg-gray-900">
+                                    {account.accountCode} - {account.accountName}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-2 py-2 min-w-[120px]">
+                              <input value={line.debit} onChange={(e) => updateJournalEditorLine(index, 'debit', e.target.value)} type="number" min="0" step="0.01" className={inputClass} />
+                            </td>
+                            <td className="px-2 py-2 min-w-[120px]">
+                              <input value={line.credit} onChange={(e) => updateJournalEditorLine(index, 'credit', e.target.value)} type="number" min="0" step="0.01" className={inputClass} />
+                            </td>
+                            <td className="px-2 py-2 min-w-[240px]">
+                              <input value={line.description} onChange={(e) => updateJournalEditorLine(index, 'description', e.target.value)} className={inputClass} />
+                            </td>
+                            <td className="px-2 py-2">
+                              <button type="button" className="text-xs text-red-300 hover:text-red-200" onClick={() => removeJournalEditorLine(index)}>
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {journalEditorLines.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-2 py-3 text-center text-gray-400">
+                              No editable journal lines loaded.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className={secondaryButtonClass} onClick={addJournalEditorLine}>
+                      Add Line
+                    </button>
+                    <button className={buttonClass}>
+                      <SaveIcon />
+                      Save Revision
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10 text-gray-300">
+                        <th className="px-2 py-2 text-left">Account</th>
+                        <th className="px-2 py-2 text-right">Debit</th>
+                        <th className="px-2 py-2 text-right">Credit</th>
+                        <th className="px-2 py-2 text-left">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journalEntryDetail.lines.map((line, index) => (
+                        <tr key={line._id || `journal-view-line-${index}`} className="border-t border-white/10">
+                          <td className="px-2 py-2">{line.accountCode || '-'} - {line.accountName || '-'}</td>
+                          <td className="px-2 py-2 text-right">{formatCurrency(Number(line.debitAmount || 0))}</td>
+                          <td className="px-2 py-2 text-right">{formatCurrency(Number(line.creditAmount || 0))}</td>
+                          <td className="px-2 py-2 text-gray-300">{line.description || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <ReportDataTable
+            title="Journal Entries Console"
+            data={journalConsoleRows}
+            itemLabel="journal entries"
+            searchPlaceholder="Search journals by number, type, description, or reference"
+            exportFileName={`journal-console-${startDate}-${endDate}.csv`}
+            filters={[
+              { key: 'status', label: 'Status', getValue: (row: any) => String(row.status || '').toUpperCase() || 'POSTED' },
+              { key: 'type', label: 'Type', getValue: (row: any) => String(row.referenceType || '').toUpperCase() || 'MANUAL' },
+              { key: 'effect', label: 'Effect', getValue: (row: any) => String(row.effect || 'Posted') },
+            ]}
+            columns={[
+              { key: 'entryNumber', header: 'Entry No', accessor: 'entryNumber' },
+              { key: 'entryDate', header: 'Date', render: (row: any) => formatShortDate(row.entryDate), exportValue: (row: any) => String(row.entryDate || '').slice(0, 10), sortValue: (row: any) => row.entryDate },
+              { key: 'referenceType', header: 'Type', render: (row: any) => String(row.referenceType || '-').toUpperCase(), exportValue: (row: any) => String(row.referenceType || '').toUpperCase() },
+              { key: 'relatedReference', header: 'Against', render: (row: any) => row.relatedReference || '-', exportValue: (row: any) => row.relatedReference || '' },
+              { key: 'description', header: 'Description', accessor: 'description' },
+              { key: 'totalDebit', header: 'Amount', render: (row: any) => formatCurrency(row.totalDebit || 0), exportValue: (row: any) => Number(row.totalDebit || 0), sortValue: (row: any) => Number(row.totalDebit || 0), align: 'right' },
+              { key: 'effectValue', header: 'Effect', render: (row: any) => renderConsoleBadge(row.effect, 'POSTED'), exportValue: (row: any) => String(row.effect || '').toUpperCase() },
+              { key: 'statusValue', header: 'Status', render: (row: any) => renderConsoleBadge(row.status, 'POSTED'), exportValue: (row: any) => String(row.status || '').toUpperCase() },
+              {
+                key: 'manage',
+                header: 'Action',
+                render: (row: any) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className="text-cyan-300 hover:text-cyan-200" onClick={() => void withLoading(async () => { await openJournalConsoleEntry(String(row._id), false); })}>
+                      View
+                    </button>
+                    {isEditableJournalConsoleEntry(row) && (
+                      <>
+                        <button type="button" className="text-indigo-300 hover:text-indigo-200" onClick={() => void withLoading(async () => { await openJournalConsoleEntry(String(row._id), true); })}>
+                          Edit
+                        </button>
+                        <button type="button" className="text-red-300 hover:text-red-200" onClick={() => void cancelJournalConsoleEntry(row)}>
+                          Reverse
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ),
+                exportValue: () => '',
+                searchValue: (row: any) => isEditableJournalConsoleEntry(row) ? 'editable' : 'view only',
+              },
+            ]}
+          />
+        </div>
+      );
+    }
+
+    if (reportsTab === 'trial_balance') {
+      const overallDebit = roundMoney(trialBalance?.totals?.debitBalance || 0);
+      const overallCredit = roundMoney(trialBalance?.totals?.creditBalance || 0);
+      const overallDifference = roundMoney(trialBalance?.totals?.balanceDifference || 0);
+      const filteredDifference = roundMoney(trialBalanceFilteredTotals.debit - trialBalanceFilteredTotals.credit);
+      const hiddenZeroRows = Number(trialBalance?.diagnostics?.hiddenZeroBalanceRows || 0);
+      const duplicateCount = trialBalanceDuplicateNames.length;
+      const abnormalCount = trialBalanceRows.filter((row) => row.abnormalBalance).length;
+      const totalsLabel = trialBalanceHasFilters ? 'Filtered Total' : 'Total';
+
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Closing Debit</p>
+              <p className="text-xl font-semibold text-emerald-300">{formatCurrency(overallDebit)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Closing Credit</p>
+              <p className="text-xl font-semibold text-cyan-200">{formatCurrency(overallCredit)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Difference</p>
+              <p className={`text-xl font-semibold ${Math.abs(overallDifference) <= 0.01 ? 'text-emerald-300' : 'text-amber-200'}`}>
+                {formatCurrency(overallDifference)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm text-gray-300">Rows / Hidden Zero Rows</p>
+              <p className="text-xl font-semibold text-white">{trialBalanceRows.length} / {hiddenZeroRows}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs leading-relaxed text-cyan-100">
+            <p>Trial Balance now shows standard closing <span className="font-semibold">Debit</span> and <span className="font-semibold">Credit</span> columns only. Opening and period movement are still used internally to compute those balances.</p>
+            <p className="mt-1">Rows are grouped by account head and subgroup, customers/vendors are tagged as sub-ledgers, and zero-only ledgers are hidden from the table.</p>
+          </div>
+
+          {trialBalanceIntegrity?.status && trialBalanceIntegrity.status !== 'clean' && (
+            <div className={`rounded-xl border p-4 text-sm ${
+              trialBalanceIntegrity.status === 'imbalanced'
+                ? 'border-rose-300/30 bg-rose-500/10 text-rose-100'
+                : 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+            }`}>
+              <p className="font-semibold">
+                Trial Balance integrity: {trialBalanceIntegrity.status === 'imbalanced' ? 'imbalanced' : 'needs review'}
+              </p>
+              {trialBalanceIntegrity.status === 'imbalanced' ? (
+                <p className="mt-1">
+                  Closing debit and credit differ by {formatCurrency(trialBalanceIntegrity.difference || 0)}. This should be corrected before relying on the statement.
+                </p>
+              ) : (
+                <p className="mt-1">
+                  The statement is numerically balanced, but review is still required because diagnostic rows, duplicate ledger names, or abnormal balances are present.
+                </p>
+              )}
+            </div>
+          )}
+
+          {(duplicateCount > 0 || abnormalCount > 0) && (
+            <div className="rounded-xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">
+              {duplicateCount > 0 && (
+                <p>{duplicateCount} duplicate account name set{duplicateCount > 1 ? 's' : ''} detected in the chart of accounts. New duplicate names are now blocked, but existing ledgers should be merged or deactivated.</p>
+              )}
+              {abnormalCount > 0 && (
+                <p className={duplicateCount > 0 ? 'mt-1' : ''}>{abnormalCount} ledger row{abnormalCount > 1 ? 's show' : ' shows'} a balance on the abnormal side and are highlighted below.</p>
+              )}
+              {duplicateCount > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  {trialBalanceDuplicateNames.slice(0, 8).map((row: any) => (
+                    <span key={`${row.accountName}-${row.accountCodes?.join('-')}`} className="rounded-full border border-amber-200/30 bg-amber-950/20 px-2 py-1">
+                      {row.accountName}: {Array.isArray(row.accountCodes) ? row.accountCodes.join(', ') : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">Trial Balance Report</h3>
+                <p className="text-xs text-gray-400">Closing balances grouped by account head and subgroup for {formatShortDate(startDate)} to {formatShortDate(endDate)}.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <ActionIconButton
+                  kind="exportCsv"
+                  onClick={() => void exportTrialBalanceRows('csv')}
+                  disabled={trialBalanceExportRows.length === 0 || Boolean(trialBalanceExporting)}
+                  title={trialBalanceExporting === 'csv' ? 'Exporting CSV...' : 'Export CSV'}
+                />
+                <ActionIconButton
+                  kind="exportExcel"
+                  onClick={() => void exportTrialBalanceRows('xlsx')}
+                  disabled={trialBalanceExportRows.length === 0 || Boolean(trialBalanceExporting)}
+                  title={trialBalanceExporting === 'xlsx' ? 'Exporting Excel...' : 'Export Excel'}
+                />
+                <ActionIconButton
+                  kind="exportPdf"
+                  onClick={() => void exportTrialBalanceRows('pdf')}
+                  disabled={trialBalanceExportRows.length === 0 || Boolean(trialBalanceExporting)}
+                  title={trialBalanceExporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                value={trialBalanceSearch}
+                onChange={(e) => setTrialBalanceSearch(e.target.value)}
+                placeholder="Search code, account, group, or ledger class"
+                className="w-full max-w-sm rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500"
+              />
+              <select
+                value={trialBalanceSectionFilter}
+                onChange={(e) => {
+                  const value = e.target.value as 'all' | TrialBalanceSection;
+                  setTrialBalanceSectionFilter(value);
+                  setTrialBalanceGroupFilter('all');
+                }}
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+              >
+                <option value="all" className="bg-gray-900">All Account Heads</option>
+                {trialBalanceSectionOptions.map((option) => (
+                  <option key={option} value={option} className="bg-gray-900">{option}</option>
+                ))}
+              </select>
+              <select
+                value={trialBalanceGroupFilter}
+                onChange={(e) => setTrialBalanceGroupFilter(e.target.value)}
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+              >
+                <option value="all" className="bg-gray-900">All Groups</option>
+                {trialBalanceGroupOptions.map((option) => (
+                  <option key={option} value={option} className="bg-gray-900">{option}</option>
+                ))}
+              </select>
+              <label className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={trialBalanceAbnormalOnly}
+                  onChange={(e) => setTrialBalanceAbnormalOnly(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/20 bg-slate-900 text-amber-300"
+                />
+                Abnormal only
+              </label>
+              <label className="inline-flex items-center gap-2 rounded-md border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                <input
+                  type="checkbox"
+                  checked={showAccountingDiagnostics}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setShowAccountingDiagnostics(next);
+                    void withLoading(() => refreshReports(next));
+                  }}
+                  className="h-4 w-4 rounded border-white/20 bg-slate-900 text-amber-300"
+                />
+                Show diagnostic entries
+              </label>
+              <button
+                type="button"
+                className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-200 hover:bg-white/10"
+                onClick={resetTrialBalanceControls}
+              >
+                Reset
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/20 p-3 text-sm text-gray-300">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>{totalsLabel}: <span className="font-semibold text-white">Debit {formatCurrency(trialBalanceFilteredTotals.debit)}</span> | <span className="font-semibold text-white">Credit {formatCurrency(trialBalanceFilteredTotals.credit)}</span></p>
+                <p className={Math.abs(filteredDifference) <= 0.01 ? 'text-emerald-300' : 'text-amber-200'}>
+                  {Math.abs(filteredDifference) <= 0.01 ? 'Balanced' : `Difference ${formatCurrency(filteredDifference)}`}
+                </p>
+              </div>
+            </div>
+
+            {trialBalanceFilteredRows.length === 0 ? (
+              <div className="mt-4 rounded-lg border border-dashed border-white/10 px-4 py-8 text-center text-sm text-gray-400">
+                {trialBalanceRows.length === 0
+                  ? 'No transactions or opening balances were found for the selected period.'
+                  : 'No trial balance rows match the current search and filters.'}
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {trialBalanceSections.map((section) => (
+                  <section key={section.section} className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-base font-semibold text-white">{section.section}</h4>
+                        <p className="text-xs text-gray-400">{section.rows.length} ledgers across {section.groups.length} subgroup{section.groups.length > 1 ? 's' : ''}</p>
+                      </div>
+                      <div className="text-right text-xs text-gray-400">
+                        <p>Debit: <span className="font-semibold text-white">{formatCurrency(section.totals.debit)}</span></p>
+                        <p>Credit: <span className="font-semibold text-white">{formatCurrency(section.totals.credit)}</span></p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-3">
+                      {section.groups.map((group) => (
+                        <div key={`${section.section}-${group.groupName}`} className="overflow-x-auto rounded-lg border border-white/10">
+                          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 bg-white/5 px-3 py-2">
+                            <div>
+                              <p className="text-sm font-semibold text-white">{group.groupName}</p>
+                              <p className="text-xs text-gray-400">{group.rows.length} ledger row{group.rows.length > 1 ? 's' : ''}</p>
+                            </div>
+                            <div className="text-right text-xs text-gray-400">
+                              <p>Debit: <span className="font-semibold text-white">{formatCurrency(group.totals.debit)}</span></p>
+                              <p>Credit: <span className="font-semibold text-white">{formatCurrency(group.totals.credit)}</span></p>
+                            </div>
+                          </div>
+                          <table className="min-w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-white/10 text-gray-300">
+                                <th className="px-3 py-2 text-left font-medium">Code</th>
+                                <th className="px-3 py-2 text-left font-medium">Account</th>
+                                <th className="px-3 py-2 text-right font-medium">Debit</th>
+                                <th className="px-3 py-2 text-right font-medium">Credit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.rows.map((row) => (
+                                <tr key={row.accountId} className={`border-t border-white/10 ${row.abnormalBalance ? 'bg-amber-400/5' : ''}`}>
+                                  <td className="px-3 py-2 align-top text-gray-300">{row.accountCode || '-'}</td>
+                                  <td className="px-3 py-2 align-top text-gray-200">
+                                    <div className="flex flex-col gap-1">
+                                      {row.accountId.startsWith('synthetic-') ? (
+                                        <span className="font-medium text-white">{row.accountName}</span>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          className="w-fit text-left font-medium text-white underline decoration-dotted underline-offset-4 hover:text-cyan-200"
+                                          onClick={() => void openLedgerFromTrialBalance(row)}
+                                        >
+                                          {row.accountName}
+                                        </button>
+                                      )}
+                                      <div className="flex flex-wrap gap-2 text-xs text-gray-400">
+                                        {row.groupName && row.groupName !== group.groupName && (
+                                          <span className="rounded-full border border-white/10 px-2 py-0.5">{row.groupName}</span>
+                                        )}
+                                        {row.ledgerLabel && (
+                                          <span className="rounded-full border border-white/10 px-2 py-0.5">{row.ledgerLabel}</span>
+                                        )}
+                                        {row.isSubLedger && (
+                                          <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-0.5 text-cyan-100">Sub-ledger</span>
+                                        )}
+                                        {row.abnormalBalance && (
+                                          <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-amber-100">
+                                            Abnormal {row.normalBalanceSide === 'debit' ? 'credit' : 'debit'} balance
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className={`px-3 py-2 text-right align-top ${row.abnormalBalance && row.normalBalanceSide === 'credit' ? 'text-amber-200' : 'text-gray-200'}`}>
+                                    {formatCurrency(row.debitBalance || 0)}
+                                  </td>
+                                  <td className={`px-3 py-2 text-right align-top ${row.abnormalBalance && row.normalBalanceSide === 'debit' ? 'text-amber-200' : 'text-gray-200'}`}>
+                                    {formatCurrency(row.creditBalance || 0)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t border-white/10 bg-white/5 font-semibold text-white">
+                                <td colSpan={2} className="px-3 py-2 text-left">Group Total</td>
+                                <td className="px-3 py-2 text-right">{formatCurrency(group.totals.debit)}</td>
+                                <td className="px-3 py-2 text-right">{formatCurrency(group.totals.credit)}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       );
     }
 
@@ -3504,6 +5235,14 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs leading-relaxed text-cyan-100">
               <p><span className="font-semibold">Income:</span> {profitLoss.formula.income}</p>
               <p><span className="font-semibold">Expense:</span> {profitLoss.formula.expense}</p>
+              <p><span className="font-semibold">Round-off:</span> POS taxable sales remain sales revenue; GST remains tax payable. Round Off Income or Expense is shown separately, so accounting net profit can differ from store gross profit by the round-off amount.</p>
+            </div>
+          )}
+          {Array.isArray(profitLoss?.diagnosticNotes) && profitLoss.diagnosticNotes.length > 0 && (
+            <div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs leading-relaxed text-amber-100">
+              {profitLoss.diagnosticNotes.map((note: string, index: number) => (
+                <p key={`profit-loss-note-${index}`}>{note}</p>
+              ))}
             </div>
           )}
           <ReportDataTable
@@ -3535,6 +5274,21 @@ export const Accounting: React.FC = () => {
     if (reportsTab === 'balance_sheet') {
       return (
         <div className="space-y-4">
+          <div className="flex justify-end">
+            <label className="inline-flex items-center gap-2 rounded-md border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+              <input
+                type="checkbox"
+                checked={showAccountingDiagnostics}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setShowAccountingDiagnostics(next);
+                  void withLoading(() => refreshReports(next));
+                }}
+                className="h-4 w-4 rounded border-white/20 bg-slate-900 text-amber-300"
+              />
+              Show diagnostic entries
+            </label>
+          </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-sm text-gray-300">Total Assets</p>
@@ -3555,17 +5309,77 @@ export const Accounting: React.FC = () => {
               </p>
             </div>
           </div>
-          {(Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 || Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0) && (
-            <div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs leading-relaxed text-amber-100">
-              <p className="font-semibold">Balance Sheet diagnostics</p>
-              {Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 && (
-                <p>Opening balances are one-sided by {formatCurrency(balanceSheet.diagnostics.openingBalanceDifference)}. The report shows this under Opening Balance Equity / Suspense until opening balances are corrected.</p>
-              )}
-              {Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0 && (
-                <p>Legacy records not yet posted to ledger create a clearing adjustment of {formatCurrency(balanceSheet.diagnostics.legacyClearing)}. Migrate those records into ledger entries to remove this diagnostic row.</p>
-              )}
-            </div>
-          )}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.35fr)]">
+            {balanceSheetIntegrity?.status && balanceSheetIntegrity.status !== 'clean' && (
+              <section className={`rounded-xl border p-4 text-sm ${
+                balanceSheetIntegrity.status === 'imbalanced'
+                  ? 'border-rose-300/30 bg-rose-500/10 text-rose-100'
+                  : 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80">Integrity</p>
+                    <h3 className="mt-2 text-base font-semibold text-white">
+                      {balanceSheetIntegrity.status === 'imbalanced' ? 'Balance Sheet is imbalanced' : 'Balance Sheet needs review'}
+                    </h3>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                    balanceSheetIntegrity.status === 'imbalanced'
+                      ? 'border-rose-200/30 bg-rose-950/25 text-rose-100'
+                      : 'border-amber-200/30 bg-amber-950/25 text-amber-100'
+                  }`}>
+                    {balanceSheetIntegrity.status === 'imbalanced' ? 'Fix' : 'Review'}
+                  </span>
+                </div>
+                {balanceSheetIntegrity.status === 'imbalanced' ? (
+                  <p className="mt-3 leading-6">
+                    Assets and liabilities plus equity differ by <span className="font-semibold text-white">{formatCurrency(balanceSheetIntegrity.difference || 0)}</span>. Correct this before close-out.
+                  </p>
+                ) : (
+                  <p className="mt-3 leading-6">
+                    The Balance Sheet is mathematically aligned, but diagnostic clearing rows are still being used. Review opening balances and legacy ledger migrations before treating it as production-clean.
+                  </p>
+                )}
+              </section>
+            )}
+
+            {(Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 || Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0) && (
+              <section className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-amber-100">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-100/80">Diagnostics</p>
+                <h3 className="mt-2 text-base font-semibold text-white">Clearing and migration notes</h3>
+                <div className="mt-3 space-y-3 text-sm leading-6">
+                  {Number(balanceSheet?.diagnostics?.openingBalanceDifference || 0) !== 0 && (
+                    <p>Opening balances are one-sided by {formatCurrency(balanceSheet.diagnostics.openingBalanceDifference)}. The report shows this under Opening Balance Equity / Suspense until opening balances are corrected.</p>
+                  )}
+                  {Number(balanceSheet?.diagnostics?.legacyClearing || 0) !== 0 && (
+                    <p>Legacy records not yet posted to ledger create a clearing adjustment of {formatCurrency(balanceSheet.diagnostics.legacyClearing)}. Migrate those records into ledger entries to remove this diagnostic row.</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            <section className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4 text-sm text-cyan-100">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100/80">Explanation</p>
+              <h3 className="mt-2 text-base font-semibold text-white">Why this balances</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <div className="rounded-lg border border-cyan-300/15 bg-slate-950/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100/75">Assets</p>
+                  <p className="mt-2 leading-6 text-cyan-100/85">
+                    Cash, bank, receivables, inventory, tax inputs, and other debit balances.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-cyan-300/15 bg-slate-950/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100/75">Liabilities + Equity</p>
+                  <p className="mt-2 leading-6 text-cyan-100/85">
+                    Supplier payables, GST/TDS payable, customer advances, opening balance equity, and retained earnings/current profit.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 rounded-lg border border-cyan-300/15 bg-slate-950/20 p-3 leading-6 text-cyan-100/85">
+                The report is reconciled when <span className="font-semibold text-white">Assets - (Liabilities + Equity)</span> is zero.
+              </div>
+            </section>
+          </div>
           <ReportDataTable
             title={`Balance Sheet as on ${formatShortDate(balanceSheet?.asOnDate || endDate)}`}
             data={balanceSheetRows}
@@ -3661,6 +5475,12 @@ export const Accounting: React.FC = () => {
 
   const activeMenuGroup = accountingMenuGroups.find((group) => group.items.some((item) => item.key === activeTab));
   const activeMenuItem = activeMenuGroup?.items.find((item) => item.key === activeTab);
+  const reportTabItems = reportsTabs.map((item) => ({
+    ...item,
+    tooltip: buildLogicTooltip(reportLogicByTab[item.key]),
+    tooltipTrigger: 'icon' as const,
+    tooltipAriaLabel: `More information about ${item.label}`,
+  }));
   const toggleAccountingGroup = (title: string) => {
     setCollapsedAccountingGroups((prev) => {
       const next = new Set(prev);
@@ -3676,10 +5496,7 @@ export const Accounting: React.FC = () => {
         <div className="flex items-center gap-2">
           <input type="date" className={inputClass} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           <input type="date" className={inputClass} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          <button className={buttonClass} onClick={handleRefreshCurrentTab} disabled={loading}>
-            <RefreshIcon />
-            Refresh
-          </button>
+          <ActionIconButton kind="refresh" onClick={handleRefreshCurrentTab} disabled={loading} title="Refresh" />
         </div>
       </div>
 
@@ -3752,12 +5569,45 @@ export const Accounting: React.FC = () => {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-200">{activeMenuGroup.title}</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">{activeMenuItem.label}</h2>
-                  <p className="mt-1 text-sm text-gray-300">{activeMenuItem.description}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-semibold text-white">{activeMenuItem.label}</h2>
+                    {activeTab === 'reports' ? (
+                      <Tooltip
+                        arrow
+                        placement="bottom-start"
+                        title={buildLogicTooltip(reportLogicByTab[reportsTab])}
+                        slotProps={cardTabsTooltipSlotProps}
+                        enterDelay={120}
+                        leaveDelay={100}
+                        disableInteractive={false}
+                      >
+                        <button
+                          type="button"
+                          aria-label={`More information about ${activeMenuItem.label}`}
+                          data-disable-auto-tooltip="true"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-400/10 text-[11px] font-bold text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-400/16 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                        >
+                          i
+                        </button>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                  {activeTab !== 'reports' && activeMenuItem.description ? (
+                    <p className="mt-1 text-sm text-gray-300">{activeMenuItem.description}</p>
+                  ) : null}
                 </div>
-                <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold text-gray-300">
-                  {activeMenuGroup.helper}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {activeTab === 'reports' ? (
+                    <ManualHelpLink
+                      anchor={reportLogicByTab[reportsTab].manualAnchor}
+                      label="Open full help"
+                      className="bg-slate-950/30"
+                    />
+                  ) : null}
+                  <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold text-gray-300">
+                    {activeMenuGroup.helper}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -3776,7 +5626,7 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs text-gray-400">Selected Revenue</p>
+                  <p className="text-xs text-gray-400">Selected Income</p>
                   <p className="mt-1 text-[11px] text-gray-500">{dashboardRangeLabel}</p>
                 </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300">
@@ -3791,7 +5641,7 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs text-gray-400">Month-to-date Revenue</p>
+                  <p className="text-xs text-gray-400">Month-to-date Income</p>
                   <p className="mt-1 text-[11px] text-gray-500">{monthToDateLabel}</p>
                 </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-200">
@@ -3839,8 +5689,12 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs text-gray-400">GST Payable</p>
-                  <p className="mt-1 text-[11px] text-gray-500">As on {formatShortDate(endDate)}</p>
+                  <p className="text-xs text-gray-400">
+                    {Number(dashboardSummary?.gstReceivable || 0) > 0 ? 'GST Receivable' : 'GST Payable'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Output {formatCurrency(dashboardSummary?.gstOutputTax || 0)} | Input {formatCurrency(dashboardSummary?.gstInputTax || 0)}
+                  </p>
                 </div>
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -3850,7 +5704,10 @@ export const Accounting: React.FC = () => {
                   </svg>
                 </span>
               </div>
-              <p className="mt-2 text-xl font-semibold text-amber-300">{formatCurrency(dashboardSummary?.gstPayable || 0)}</p>
+              <p className="mt-2 text-xl font-semibold text-amber-300">
+                {formatCurrency(Number(dashboardSummary?.gstReceivable || 0) > 0 ? dashboardSummary?.gstReceivable : dashboardSummary?.gstPayable || 0)}
+              </p>
+              <p className="mt-1 text-[11px] text-gray-500">As on {formatShortDate(endDate)}</p>
             </div>
           </div>
 
@@ -3892,14 +5749,14 @@ export const Accounting: React.FC = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 overflow-x-auto">
               <h3 className="mb-2 text-white font-semibold">Recent Journals</h3>
               <table className="min-w-full text-sm">
-                <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Entry</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Status</th></tr></thead>
+                <thead><tr className="text-gray-300"><th className="px-2 py-1 text-left">Entry</th><th className="px-2 py-1 text-left">Type</th><th className="px-2 py-1 text-left">Amount</th><th className="px-2 py-1 text-left">Effect</th></tr></thead>
                 <tbody>
-                  {coreJournals.slice(0, 8).map((row) => (
+                  {journalConsoleRows.slice(0, 8).map((row) => (
                     <tr key={row._id} className="border-t border-white/10">
                       <td className="px-2 py-1">{row.entryNumber}</td>
                       <td className="px-2 py-1 uppercase text-gray-300">{row.referenceType}</td>
                       <td className="px-2 py-1">{formatCurrency(row.totalDebit || 0)}</td>
-                      <td className="px-2 py-1 uppercase text-gray-300">{row.status}</td>
+                      <td className="px-2 py-1">{renderConsoleBadge(row.effect, 'POSTED')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -4740,10 +6597,15 @@ export const Accounting: React.FC = () => {
                     amount: Number(paymentForm.amount || 0),
                     voucherDate: paymentForm.voucherDate,
                     paymentMode: paymentForm.paymentMode,
+                    entryMode: paymentForm.entryMode,
                     category: paymentForm.category,
                     referenceNo: paymentForm.referenceNo,
                     counterpartyName: paymentForm.accountName,
                     notes: paymentForm.beingPaymentOf,
+                    debitAccountId: paymentForm.entryMode === 'settlement' ? paymentForm.debitAccountId : undefined,
+                    linkedEntityType: paymentForm.entryMode === 'settlement' ? paymentForm.linkedEntityType : undefined,
+                    linkedEntityId: paymentForm.entryMode === 'settlement' ? paymentForm.linkedEntityId : undefined,
+                    linkedEntityNumber: paymentForm.entryMode === 'settlement' ? paymentForm.linkedEntityNumber : undefined,
                     documentFields: {
                       accountName: paymentForm.accountName,
                       beingPaymentOf: paymentForm.beingPaymentOf,
@@ -4768,20 +6630,49 @@ export const Accounting: React.FC = () => {
                 <FloatingField label="No. / Reference No" value={paymentForm.referenceNo} onChange={(value) => setPaymentForm({ ...paymentForm, referenceNo: value })} />
                 <FloatingField label="Voucher Date" type="date" required value={paymentForm.voucherDate} onChange={(value) => setPaymentForm({ ...paymentForm, voucherDate: value })} />
               </div>
-              <FloatingField label="Name of the account" required value={paymentForm.accountName} onChange={(value) => setPaymentForm({ ...paymentForm, accountName: value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <FloatingField
+                  label="Payment Purpose"
+                  value={paymentForm.entryMode}
+                  onChange={(value) => setPaymentForm({ ...paymentForm, entryMode: value })}
+                  options={[
+                    { value: 'expense', label: 'Expense Payment' },
+                    { value: 'settlement', label: 'Bill / Payable Settlement' },
+                  ]}
+                />
+                <FloatingField label={paymentForm.entryMode === 'settlement' ? 'Supplier / Payee Name' : 'Name of the account'} required value={paymentForm.accountName} onChange={(value) => setPaymentForm({ ...paymentForm, accountName: value })} />
+              </div>
               <FloatingField label="Being Payment of" rows={2} required value={paymentForm.beingPaymentOf} onChange={(value) => setPaymentForm({ ...paymentForm, beingPaymentOf: value })} />
               <FloatingField label="For the period" value={paymentForm.forPeriod} onChange={(value) => setPaymentForm({ ...paymentForm, forPeriod: value })} />
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <FloatingField label="Amount" type="number" min="0" step="0.01" required value={paymentForm.amount} onChange={(value) => setPaymentForm({ ...paymentForm, amount: value })} />
                 <FloatingField label="Payment Mode" value={paymentForm.paymentMode} onChange={(value) => setPaymentForm({ ...paymentForm, paymentMode: value })} options={paymentModeOptions} />
-                <FloatingField label="Expense category / account head" required value={paymentForm.category} onChange={(value) => setPaymentForm({ ...paymentForm, category: value })} />
+                <FloatingField label={paymentForm.entryMode === 'settlement' ? 'Settlement note / account head' : 'Expense category / account head'} required value={paymentForm.category} onChange={(value) => setPaymentForm({ ...paymentForm, category: value })} />
               </div>
+              {paymentForm.entryMode === 'settlement' && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FloatingField
+                    label="Payable / Liability Account"
+                    required
+                    value={paymentForm.debitAccountId}
+                    onChange={(value) => setPaymentForm({ ...paymentForm, debitAccountId: value })}
+                    options={[
+                      { value: '', label: 'Select Liability Account' },
+                      ...chartAccounts.map((row) => ({ value: row._id, label: `${row.accountCode} - ${row.accountName}` })),
+                    ]}
+                  />
+                  <FloatingField label="Linked Document Type" value={paymentForm.linkedEntityType} onChange={(value) => setPaymentForm({ ...paymentForm, linkedEntityType: value })} />
+                  <FloatingField label="Linked Document No." value={paymentForm.linkedEntityNumber} onChange={(value) => setPaymentForm({ ...paymentForm, linkedEntityNumber: value })} />
+                </div>
+              )}
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <FloatingField label="Received by" value={paymentForm.receivedBy} onChange={(value) => setPaymentForm({ ...paymentForm, receivedBy: value })} />
                   <FloatingField label="Authorized by" value={paymentForm.authorizedBy} onChange={(value) => setPaymentForm({ ...paymentForm, authorizedBy: value })} />
                 </div>
                 <p className="text-xs text-gray-400">
-                  Signature fields are kept out of the voucher form for physical signing. Printed signature lines can be turned on or off from General Settings &gt; Printing Preferences.
+                  {paymentForm.entryMode === 'settlement'
+                    ? 'Use settlement mode when the payment clears an existing payable like a supplier bill instead of creating a new expense.'
+                    : 'Signature fields are kept out of the voucher form for physical signing. Printed signature lines can be turned on or off from General Settings > Printing Preferences.'}
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                 <button className={buttonClass}>
@@ -5005,6 +6896,7 @@ export const Accounting: React.FC = () => {
                     <th className="px-2 py-1 text-left">Narration</th>
                     <th className="px-2 py-1 text-left">Reference</th>
                     <th className="px-2 py-1 text-left">Amount</th>
+                    <th className="px-2 py-1 text-left">Manage</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5018,11 +6910,20 @@ export const Accounting: React.FC = () => {
                       <td className="px-2 py-1 text-gray-300">{row.narration}</td>
                       <td className="px-2 py-1 text-gray-400">{row.reference || '-'}</td>
                       <td className="px-2 py-1">{formatCurrency(row.amount || 0)}</td>
+                      <td className="px-2 py-1">
+                        {row.managementType && row.managementId ? (
+                          <button type="button" className="text-cyan-300 hover:text-cyan-200" onClick={() => void openBookEntryManager(row)}>
+                            Open
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-500">Report only</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {cashBookPagination.paginatedRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-2 py-3 text-center text-gray-400">
+                      <td colSpan={7} className="px-2 py-3 text-center text-gray-400">
                         No cash book entries found for the selected range.
                       </td>
                     </tr>
@@ -5050,6 +6951,7 @@ export const Accounting: React.FC = () => {
                     <th className="px-2 py-1 text-left">Narration</th>
                     <th className="px-2 py-1 text-left">Reference</th>
                     <th className="px-2 py-1 text-left">Amount</th>
+                    <th className="px-2 py-1 text-left">Manage</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5063,11 +6965,20 @@ export const Accounting: React.FC = () => {
                       <td className="px-2 py-1 text-gray-300">{row.narration}</td>
                       <td className="px-2 py-1 text-gray-400">{row.reference || '-'}</td>
                       <td className="px-2 py-1">{formatCurrency(row.amount || 0)}</td>
+                      <td className="px-2 py-1">
+                        {row.managementType && row.managementId ? (
+                          <button type="button" className="text-cyan-300 hover:text-cyan-200" onClick={() => void openBookEntryManager(row)}>
+                            Open
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-500">Report only</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {bankBookPagination.paginatedRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-2 py-3 text-center text-gray-400">
+                      <td colSpan={7} className="px-2 py-3 text-center text-gray-400">
                         No bank book entries found for the selected range.
                       </td>
                     </tr>
@@ -5495,10 +7406,9 @@ export const Accounting: React.FC = () => {
 
       {activeTab === 'reports' && (
         <div className="space-y-4">
-          <AccountingLogicHelpCard logic={reportLogicByTab[reportsTab]} />
           <CardTabs
             ariaLabel="Reports section tabs"
-            items={reportsTabs}
+            items={reportTabItems}
             activeKey={reportsTab}
             onChange={setReportsTab}
             className="w-full"

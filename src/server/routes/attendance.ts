@@ -389,7 +389,7 @@ router.post('/mark', authMiddleware, async (req: AuthenticatedRequest, res: Resp
     const entry = await Attendance.findOneAndUpdate(
       { employeeId, dateKey },
       updateOps,
-      { upsert: true, new: true, runValidators: true }
+      { upsert: true, returnDocument: 'after', runValidators: true }
     );
 
     res.json({
@@ -773,7 +773,7 @@ router.post('/self/check-in', authMiddleware, async (req: AuthenticatedRequest, 
           notes: '',
         },
       },
-      { upsert: true, new: true, runValidators: true }
+      { upsert: true, returnDocument: 'after', runValidators: true }
     );
 
     res.json({

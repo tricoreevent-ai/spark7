@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { PageKey, PermissionMatrix } from '@shared/rbac';
 import { IUser } from '@shared/types';
 import { formatCurrency } from '../config';
+import { useProductSummary } from '../hooks/useProductSummary';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { DEFAULT_BRAND_LOGO_PATH } from '../utils/brandAssets';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
@@ -89,7 +90,7 @@ const modules: ModuleCard[] = [
 ];
 
 const categoryMeta = {
-  Sales: { badge: 'bg-emerald-500/15 text-emerald-100 ring-emerald-400/20', summary: 'Revenue, invoices, orders, and customer-facing workstreams.' },
+  Sales: { badge: 'bg-emerald-500/15 text-emerald-100 ring-emerald-400/20', summary: 'Net sales, invoices, orders, and customer-facing workstreams.' },
   Catalog: { badge: 'bg-sky-500/15 text-sky-100 ring-sky-400/20', summary: 'Catalog control, stock health, and procurement readiness.' },
   People: { badge: 'bg-amber-500/15 text-amber-100 ring-amber-400/20', summary: 'People operations across attendance, shifts, and payroll.' },
   Operations: { badge: 'bg-fuchsia-500/15 text-fuchsia-100 ring-fuchsia-400/20', summary: 'Facilities, events, plans, and active member journeys.' },
@@ -125,6 +126,7 @@ export const HomeDashboard: React.FC<{
   permissions: PermissionMatrix;
 }> = ({ user, todaySales, permissions }) => {
   const navigate = useNavigate();
+  const { summary: productSummary } = useProductSummary();
   const [now, setNow] = useState(new Date());
   const [brandName, setBrandName] = useState('Sarva');
   const [homeLogo, setHomeLogo] = useState(DEFAULT_BRAND_LOGO_PATH);
@@ -245,7 +247,7 @@ export const HomeDashboard: React.FC<{
           const rows = Array.isArray(response?.data) ? response.data : [];
           const totalsByKey = rows.reduce<Record<string, number>>((acc, row: any) => {
             const key = `${row?._id?.year || ''}-${String(row?._id?.month || '').padStart(2, '0')}-${String(row?._id?.day || '').padStart(2, '0')}`;
-            acc[key] = Number(row?.salesAmount || 0);
+            acc[key] = Number(row?.netSales ?? row?.salesAmount ?? 0);
             return acc;
           }, {});
 
@@ -270,7 +272,7 @@ export const HomeDashboard: React.FC<{
                 headers: { Authorization: `Bearer ${token}` },
               }
             );
-            return Number(response?.data?.summary?.totalSales || 0);
+            return Number(response?.data?.summary?.netSales ?? 0);
           })
         );
 
@@ -527,10 +529,15 @@ export const HomeDashboard: React.FC<{
               </div>
             </div>
             <div className="mt-5 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Revenue</p><p className="mt-2 text-lg font-semibold text-emerald-300">{todaySales !== null ? formatCurrency(todaySales) : 'Loading...'}</p></div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Today Net Sales</p><p className="mt-2 text-lg font-semibold text-emerald-300">{todaySales !== null ? formatCurrency(todaySales) : 'Loading...'}</p></div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Attention</p><p className="mt-2 text-lg font-semibold text-amber-300">{totalAttentionItems}</p></div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Pages</p><p className="mt-2 text-lg font-semibold text-cyan-200">{allowedPagesCount}</p></div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Modules</p><p className="mt-2 text-lg font-semibold text-indigo-200">{visibleModules.length}</p></div>
+            </div>
+            <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Total Worth of Products in Shop</p>
+              <p className="mt-2 text-lg font-semibold text-violet-200">{formatCurrency(Number(productSummary.totalShopProductWorth || 0))}</p>
+              <p className="mt-1 text-xs text-slate-400">Quantity in stock multiplied by wholesale purchase price.</p>
             </div>
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -544,7 +551,7 @@ export const HomeDashboard: React.FC<{
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-white/10 bg-black/10 p-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Collections</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Net Sales</p>
                   <p className="mt-2 text-sm font-semibold text-white">{todaySales !== null ? formatCurrency(todaySales) : 'Loading...'}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-black/10 p-3">

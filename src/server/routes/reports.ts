@@ -1,7 +1,10 @@
+import mongoose from 'mongoose';
 import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { Sale } from '../models/Sale.js';
 import { Return } from '../models/Return.js';
+import { AccountingInvoice } from '../models/AccountingInvoice.js';
+import { Customer } from '../models/Customer.js';
 import { Product } from '../models/Product.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { Attendance } from '../models/Attendance.js';
@@ -12,9 +15,13 @@ import { buildBatchStockRows, buildInventoryValuationRows } from '../services/in
 import {
   buildPosB2BvsB2CReport,
   buildPosBalanceSheetReport,
+  buildPosCustomerWiseSalesReport,
+  buildPosDailySalesSummary,
   buildPosGstHandoff,
+  getStoreGrossProfit,
   buildPosHsnSalesReport,
   buildPosInventoryMovement,
+  buildPosItemWiseSalesReport,
   buildPosMembershipSales,
   buildPosNoteRegister,
   buildPosPaymentReconciliation,
@@ -29,6 +36,8 @@ import {
 const router = Router();
 const toNumber = (value: any): number => Number(value || 0);
 const roundTo2 = (value: number): number => Number(value.toFixed(2));
+const validObjectIds = (values: string[]): string[] =>
+  Array.from(new Set(values.filter((value) => mongoose.isValidObjectId(value))));
 
 const parseDateParam = (raw: string | undefined, fallback: Date, endOfDay = false): Date => {
   const value = String(raw || '').trim();
@@ -87,25 +96,8 @@ router.get('/daily-sales-summary', authMiddleware, async (req: AuthenticatedRequ
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
-
-    const rows = await Sale.aggregate([
-      { $match: saleMatch(start, end) },
-      {
-        $group: {
-          _id: {
-            year: { $year: '$createdAt' },
-            month: { $month: '$createdAt' },
-            day: { $dayOfMonth: '$createdAt' },
-          },
-          invoices: { $sum: 1 },
-          salesAmount: { $sum: '$totalAmount' },
-          taxAmount: { $sum: '$totalGst' },
-          outstanding: { $sum: '$outstandingAmount' },
-        },
-      },
-      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
-    ]);
-
+    const storeGstin = await getStoreGstin(req);
+    const rows = await buildPosDailySalesSummary(start, end, storeGstin);
     res.json({ success: true, data: rows });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate daily sales summary' });
@@ -116,37 +108,9 @@ router.get('/item-wise-sales', authMiddleware, async (req: AuthenticatedRequest,
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
-
-    const rows = await Sale.aggregate([
-      { $match: saleMatch(start, end) },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: {
-            productId: '$items.productId',
-            variantSize: { $ifNull: ['$items.variantSize', ''] },
-            variantColor: { $ifNull: ['$items.variantColor', ''] },
-          },
-          productName: { $first: '$items.productName' },
-          sku: { $first: '$items.sku' },
-          category: { $first: '$items.category' },
-          subcategory: { $first: '$items.subcategory' },
-          variantSize: { $first: '$items.variantSize' },
-          variantColor: { $first: '$items.variantColor' },
-          quantity: { $sum: '$items.quantity' },
-          amount: { $sum: '$items.lineTotal' },
-          taxableValue: {
-            $sum: {
-              $ifNull: ['$items.taxableValue', { $multiply: ['$items.quantity', '$items.unitPrice'] }],
-            },
-          },
-          tax: { $sum: '$items.gstAmount' },
-        },
-      },
-      { $sort: { amount: -1 } },
-    ]);
-
-    res.json({ success: true, data: rows });
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosItemWiseSalesReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate item-wise sales report' });
   }
@@ -156,26 +120,9 @@ router.get('/customer-wise-sales', authMiddleware, async (req: AuthenticatedRequ
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
-
-    const rows = await Sale.aggregate([
-      { $match: saleMatch(start, end) },
-      {
-        $group: {
-          _id: {
-            customerId: '$customerId',
-            customerCode: '$customerCode',
-            customerName: '$customerName',
-            customerPhone: '$customerPhone',
-          },
-          invoices: { $sum: 1 },
-          amount: { $sum: '$totalAmount' },
-          outstanding: { $sum: '$outstandingAmount' },
-        },
-      },
-      { $sort: { amount: -1 } },
-    ]);
-
-    res.json({ success: true, data: rows });
+    const storeGstin = await getStoreGstin(req);
+    const report = await buildPosCustomerWiseSalesReport(start, end, storeGstin);
+    res.json({ success: true, data: report });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate customer-wise sales report' });
   }
@@ -211,38 +158,19 @@ router.get('/gross-profit', authMiddleware, async (req: AuthenticatedRequest, re
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
-    const sales = await Sale.find(saleMatch(start, end));
-
-    const productIds = Array.from(
-      new Set(
-        sales.flatMap((sale) => sale.items.map((item: any) => String(item.productId)))
-      )
-    );
-    const products = await Product.find({ _id: { $in: productIds } });
-    const costMap = new Map(products.map((p: any) => [String(p._id), Number(p.cost || 0)]));
-
-    let revenue = 0;
-    let costOfGoods = 0;
-
-    for (const sale of sales) {
-      revenue += Number(sale.totalAmount || 0);
-      for (const item of sale.items as any[]) {
-        const qty = Number(item.quantity || 0);
-        const unitCost = Number(item.costPrice ?? costMap.get(String(item.productId)) ?? 0);
-        costOfGoods += qty * unitCost;
-      }
-    }
-
-    const grossProfit = revenue - costOfGoods;
-    const marginPercent = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const summary = await getStoreGrossProfit(start, end);
 
     res.json({
       success: true,
       data: {
-        revenue: Number(revenue.toFixed(2)),
-        costOfGoods: Number(costOfGoods.toFixed(2)),
-        grossProfit: Number(grossProfit.toFixed(2)),
-        marginPercent: Number(marginPercent.toFixed(2)),
+        revenue: summary.netSales,
+        costOfGoods: summary.cogs,
+        grossProfit: summary.grossProfit,
+        marginPercent: summary.marginPercent,
+        invoices: summary.invoices,
+        validated: summary.isValid,
+        validationDifference: summary.validationDifference,
+        source: 'store_gross_profit',
       },
     });
   } catch (error: any) {
@@ -252,21 +180,81 @@ router.get('/gross-profit', authMiddleware, async (req: AuthenticatedRequest, re
 
 router.get('/outstanding-receivables', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, scope } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
+    const posOnly = String(scope || '').trim().toLowerCase() === 'pos';
 
-    const rows = await Sale.find({
-      createdAt: { $gte: start, $lte: end },
-      invoiceType: 'credit',
-      $or: [
-        { invoiceStatus: 'posted' },
-        { invoiceStatus: null },
-        { invoiceStatus: { $exists: false } },
-      ],
-      outstandingAmount: { $gt: 0 },
-    }).sort({ dueDate: 1, createdAt: 1 });
+    const [sales, invoices, openingCustomers] = await Promise.all([
+      Sale.find({
+        createdAt: { $gte: start, $lte: end },
+        invoiceType: 'credit',
+        $or: [
+          { invoiceStatus: 'posted' },
+          { invoiceStatus: null },
+          { invoiceStatus: { $exists: false } },
+        ],
+        outstandingAmount: { $gt: 0 },
+      }).sort({ dueDate: 1, createdAt: 1 }),
+      posOnly
+        ? Promise.resolve([])
+        : AccountingInvoice.find({
+            invoiceDate: { $gte: start, $lte: end },
+            status: { $in: ['posted', 'partial'] },
+            balanceAmount: { $gt: 0 },
+          }).sort({ dueDate: 1, invoiceDate: 1 }),
+      posOnly
+        ? Promise.resolve([])
+        : Customer.find({
+            openingBalance: { $gt: 0 },
+          }).sort({ name: 1 }),
+    ]);
 
-    const totalOutstanding = rows.reduce((sum, row: any) => sum + Number(row.outstandingAmount || 0), 0);
+    const saleRows = sales.map((row: any) => ({
+      ...(row.toObject?.() || row),
+      source: 'sale',
+      sourceId: row._id.toString(),
+      outstandingAmount: roundTo2(Number(row.outstandingAmount || 0)),
+    }));
+    const invoiceRows = invoices.map((row: any) => ({
+      _id: `accounting-invoice-${row._id.toString()}`,
+      source: 'accounting_invoice',
+      sourceId: row._id.toString(),
+      invoiceNumber: row.invoiceNumber,
+      saleNumber: row.invoiceNumber,
+      customerId: row.customerId,
+      customerName: row.customerName,
+      invoiceDate: row.invoiceDate,
+      dueDate: row.dueDate || row.invoiceDate,
+      totalAmount: roundTo2(Number(row.totalAmount || 0)),
+      paidAmount: roundTo2(Number(row.paidAmount || 0)),
+      outstandingAmount: roundTo2(Number(row.balanceAmount || 0)),
+      paymentStatus: row.status,
+      invoiceStatus: row.status,
+    }));
+    const openingRows = openingCustomers.map((row: any) => ({
+      _id: `customer-opening-${row._id.toString()}`,
+      source: 'customer_opening_balance',
+      sourceId: row._id.toString(),
+      invoiceNumber: 'Opening Balance',
+      saleNumber: 'Opening Balance',
+      customerId: row._id.toString(),
+      customerName: row.name,
+      dueDate: start,
+      totalAmount: roundTo2(Number(row.openingBalance || 0)),
+      paidAmount: 0,
+      outstandingAmount: roundTo2(Number(row.openingBalance || 0)),
+      paymentStatus: 'opening',
+      invoiceStatus: 'opening',
+    }));
+    const rows = [...saleRows, ...invoiceRows, ...openingRows]
+      .filter((row: any) => Number(row.outstandingAmount || 0) > 0)
+      .sort((left: any, right: any) => {
+        const leftDate = left.dueDate ? new Date(left.dueDate).getTime() : 0;
+        const rightDate = right.dueDate ? new Date(right.dueDate).getTime() : 0;
+        return leftDate - rightDate;
+      });
+
+    const totalOutstanding = roundTo2(rows.reduce((sum, row: any) => sum + Number(row.outstandingAmount || 0), 0));
     res.json({ success: true, data: { totalOutstanding, rows } });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate outstanding receivables report' });
@@ -505,10 +493,13 @@ router.get('/sales-register-detailed', authMiddleware, async (req: Authenticated
 
 router.get('/payment-reconciliation', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, scope } = req.query;
     const { start, end } = parseRange(startDate as string, endDate as string);
     const storeGstin = await getStoreGstin(req);
-    const report = await buildPosPaymentReconciliation(start, end, storeGstin);
+    const posOnly = String(scope || '').trim().toLowerCase() === 'pos';
+    const report = await buildPosPaymentReconciliation(start, end, storeGstin, {
+      includeAccountingCore: !posOnly,
+    });
     res.json({ success: true, data: report });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to generate payment reconciliation report' });

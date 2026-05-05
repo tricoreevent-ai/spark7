@@ -172,7 +172,7 @@ router.post('/validate/gstin', async (req: AuthenticatedRequest, res: Response) 
           },
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     await writeAuditLog({
@@ -358,7 +358,7 @@ router.post('/returns/save', gstSubmitRateLimit, async (req: AuthenticatedReques
         },
         $push: { statusHistory: historyEntry },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     await writeAuditLog({

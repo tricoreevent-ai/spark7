@@ -108,7 +108,7 @@ export const setValuationMethodForPeriod = async (input: {
       effectiveFrom: periodStart,
       createdBy: input.createdBy,
     },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 };
 
@@ -333,7 +333,7 @@ export const reserveStockFefo = async (input: {
     await Inventory.findOneAndUpdate(
       { productId: product._id },
       { $inc: { reservedQuantity: useQty }, productId: product._id },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
 
     await writeStockLedger({
@@ -411,7 +411,7 @@ export const dispatchReservedStock = async (input: {
     await Inventory.findOneAndUpdate(
       { productId: batch.productId },
       { $inc: { reservedQuantity: -moveQty }, productId: batch.productId },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
 
     await writeStockLedger({
@@ -540,7 +540,7 @@ export const consumeStockFefo = async (input: {
   await Inventory.findOneAndUpdate(
     { productId: product._id },
     { productId: product._id, quantity: product.stock, lastRestockDate: new Date() },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 
   return { allocations: consumed, cogsValue: round2(cogsValue), shortQuantity: round2(remaining) };
@@ -553,7 +553,7 @@ export const postCogsJournal = async (input: {
   referenceNo?: string;
   createdBy?: string;
   metadata?: Record<string, any>;
-}) => {
+}, options: { skipChartEnsure?: boolean } = {}) => {
   const amount = round2(toNumber(input.cogsValue));
   if (amount <= 0) return null;
   return createJournalEntry({
@@ -569,7 +569,7 @@ export const postCogsJournal = async (input: {
       { accountKey: 'cost_of_goods_sold', debit: amount, credit: 0, description: 'Cost of goods sold' },
       { accountKey: 'stock_in_hand', debit: 0, credit: amount, description: 'Inventory issue at cost' },
     ],
-  });
+  }, options.skipChartEnsure ? { skipChartEnsure: true } : {});
 };
 
 export const adjustBatchForStockChange = async (input: {
@@ -595,7 +595,7 @@ export const adjustBatchForStockChange = async (input: {
     await Inventory.findOneAndUpdate(
       { productId: product._id },
       { productId: product._id, quantity: product.stock, lastRestockDate: new Date() },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
 
     return recordPurchaseReceiptBatch({

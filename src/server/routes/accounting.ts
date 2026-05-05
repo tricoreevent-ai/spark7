@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Router, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { Sale } from '../models/Sale.js';
@@ -5,6 +6,8 @@ import { Return } from '../models/Return.js';
 import { SalaryPayment } from '../models/SalaryPayment.js';
 import { ContractPayment } from '../models/ContractPayment.js';
 import { DayBookEntry } from '../models/DayBookEntry.js';
+import { Customer } from '../models/Customer.js';
+import { Vendor } from '../models/Vendor.js';
 import { CreditNote } from '../models/CreditNote.js';
 import { ReceiptVoucher } from '../models/ReceiptVoucher.js';
 import { ChartAccount, AccountType, AccountSubType } from '../models/ChartAccount.js';
@@ -30,12 +33,18 @@ import {
   upsertTreasuryAccount,
 } from '../services/treasury.js';
 import {
+  addBookReferenceKey,
+  resolveFallbackSaleBookAmount,
+  shouldSkipReceiptVoucherBookEntry,
+} from '../services/bookReporting.js';
+import {
   buildBalanceSheetReport,
   buildIncomeExpenseReports,
   buildProfitLossStatement,
   buildRetainedEarningsUntil,
   buildTrialBalanceReport,
 } from '../services/accountingReports.js';
+import { ensureAccountingChart } from '../services/accountingEngine.js';
 
 const router = Router();
 const accountingReportRateLimit = createRateLimitMiddleware({
@@ -55,6 +64,7 @@ router.use('/', accountingCoreRoutes);
 type PaymentMode = 'cash' | 'bank' | 'card' | 'upi' | 'cheque' | 'online' | 'bank_transfer' | 'adjustment';
 type DayBookPaymentMode = 'cash' | 'card' | 'upi' | 'bank' | 'cheque' | 'online';
 type BookType = 'cash' | 'bank';
+type PaymentVoucherEntryMode = 'expense' | 'settlement';
 
 interface BookEvent {
   time: Date;
@@ -64,6 +74,8 @@ interface BookEvent {
   narration: string;
   reference: string;
   paymentMethod: string;
+  managementType?: 'voucher' | 'journal';
+  managementId?: string;
 }
 
 const toDateRange = (startDate?: string, endDate?: string) => {
@@ -74,6 +86,60 @@ const toDateRange = (startDate?: string, endDate?: string) => {
 };
 
 const round2 = (value: number) => Number(Number(value || 0).toFixed(2));
+const DAYBOOK_LEDGER_SOURCE = 'daybook_entry';
+const dayBookTaxBreakup = (body: any, taxableAmount: number) => {
+  const gstRate = Math.max(0, round2(Number(body?.gstRate ?? body?.gstPercent ?? body?.gst ?? 0)));
+  const explicitGstAmount = body?.gstAmount !== undefined || body?.taxAmount !== undefined;
+  const gstAmount = round2(
+    explicitGstAmount
+      ? Number(body?.gstAmount ?? body?.taxAmount ?? 0)
+      : taxableAmount > 0 && gstRate > 0
+        ? taxableAmount * gstRate / 100
+        : 0
+  );
+  const treatmentInput = String(body?.gstTreatment || body?.taxTreatment || '').trim().toLowerCase();
+  const gstTreatment = gstAmount > 0
+    ? (treatmentInput === 'interstate' || Number(body?.igstAmount || 0) > 0 ? 'interstate' : 'intrastate')
+    : 'none';
+  const igstAmount = gstTreatment === 'interstate' ? round2(Number(body?.igstAmount ?? gstAmount)) : 0;
+  const cgstAmount = gstTreatment === 'intrastate' ? round2(Number(body?.cgstAmount ?? gstAmount / 2)) : 0;
+  const sgstAmount = gstTreatment === 'intrastate' ? round2(Number(body?.sgstAmount ?? gstAmount / 2)) : 0;
+  return {
+    taxableAmount,
+    gstRate,
+    gstAmount,
+    cgstAmount,
+    sgstAmount,
+    igstAmount,
+    totalAmount: round2(taxableAmount + gstAmount),
+    gstTreatment,
+  };
+};
+const dayBookCashFlowAmount = (row: any): number =>
+  round2(Number(row?.totalAmount || 0) || (Number(row?.amount || 0) + Number(row?.gstAmount || 0)));
+const resolveContractAmounts = (body: any, fallback?: any) => {
+  const grossAmount = round2(Number(body?.grossAmount ?? body?.amount ?? fallback?.grossAmount ?? fallback?.amount ?? 0));
+  const tdsRate = Math.max(0, round2(Number(body?.tdsRate ?? fallback?.tdsRate ?? 0)));
+  const tdsAmount = round2(
+    body?.tdsAmount !== undefined
+      ? Number(body.tdsAmount || 0)
+      : grossAmount > 0 && tdsRate > 0
+        ? grossAmount * tdsRate / 100
+        : Number(fallback?.tdsAmount || 0)
+  );
+  const netPaymentAmount = round2(
+    body?.netPaymentAmount !== undefined
+      ? Number(body.netPaymentAmount || 0)
+      : Math.max(0, grossAmount - tdsAmount)
+  );
+  return {
+    grossAmount,
+    tdsSectionCode: String(body?.tdsSectionCode ?? fallback?.tdsSectionCode ?? '').trim().toUpperCase(),
+    tdsRate,
+    tdsAmount,
+    netPaymentAmount,
+  };
+};
 const postedSaleMatch = {
   saleStatus: { $in: ['completed', 'returned'] },
   $or: [{ invoiceStatus: 'posted' }, { invoiceStatus: null }, { invoiceStatus: { $exists: false } }],
@@ -296,8 +362,6 @@ const CORE_ACCOUNTS: Array<{ accountCode: string; accountName: string; accountTy
   { accountCode: '3000', accountName: 'Sales Income', accountType: 'income', subType: 'general' },
   { accountCode: '3100', accountName: 'Other Income', accountType: 'income', subType: 'general' },
   { accountCode: '4000', accountName: 'Expense', accountType: 'expense', subType: 'general' },
-  { accountCode: '4010', accountName: 'Salary Expense', accountType: 'expense', subType: 'general' },
-  { accountCode: '4020', accountName: 'Contract Expense', accountType: 'expense', subType: 'general' },
 ];
 
 const DEFAULT_ACCOUNT_GROUPS: Array<{
@@ -376,7 +440,7 @@ const ensureDefaultAccountGroups = async () => {
           isActive: true,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 
@@ -395,7 +459,7 @@ const ensureDefaultAccountGroups = async () => {
           isActive: true,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 };
@@ -424,7 +488,7 @@ const ensureDefaultChartAccounts = async () => {
           isActive: true,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 };
@@ -440,6 +504,21 @@ const getCoreAccount = async (subType: 'cash' | 'bank' | 'stock') => {
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const findDuplicateAccountByName = async (params: {
+  accountName: string;
+  accountType: AccountType;
+  excludeId?: string;
+}) => {
+  const accountName = String(params.accountName || '').trim();
+  if (!accountName) return null;
+
+  return ChartAccount.findOne({
+    accountType: params.accountType,
+    accountName: { $regex: `^${escapeRegex(accountName)}$`, $options: 'i' },
+    ...(params.excludeId ? { _id: { $ne: params.excludeId } } : {}),
+  });
+};
+
 const getOrCreateAccount = async (params: {
   accountName: string;
   accountType: AccountType;
@@ -450,9 +529,9 @@ const getOrCreateAccount = async (params: {
   const accountName = String(params.accountName || '').trim();
   if (!accountName) throw new Error('accountName is required');
 
-  const existing = await ChartAccount.findOne({
+  const existing = await findDuplicateAccountByName({
+    accountName,
     accountType: params.accountType,
-    accountName: { $regex: `^${escapeRegex(accountName)}$`, $options: 'i' },
   });
   if (existing) return existing;
 
@@ -474,13 +553,14 @@ const getOpeningSetup = async () =>
   OpeningBalanceSetup.findOneAndUpdate(
     { setupKey: 'primary' },
     { $setOnInsert: { setupKey: 'primary', isLocked: false } },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
 
-const getAccountClosing = async (accountId: any, endDate?: Date) => {
+const getAccountClosing = async (accountId: any, endDate?: Date, session?: mongoose.ClientSession) => {
   const filter: Record<string, any> = { accountId };
   if (endDate) filter.entryDate = { $lte: endDate };
-  const last = await AccountLedgerEntry.findOne(filter).sort({ entryDate: -1, createdAt: -1, _id: -1 });
+  const query = AccountLedgerEntry.findOne(filter).sort({ entryDate: -1, createdAt: -1, _id: -1 });
+  const last = session ? await query.session(session) : await query;
   return Number(last?.runningBalance || 0);
 };
 
@@ -496,13 +576,14 @@ const postLedger = async (params: {
   paymentMode?: PaymentMode;
   createdBy?: string;
   metadata?: Record<string, any>;
+  session?: mongoose.ClientSession;
 }) => {
   const debit = round2(Number(params.debit || 0));
   const credit = round2(Number(params.credit || 0));
   if (debit <= 0 && credit <= 0) throw new Error('Either debit or credit must be greater than 0');
 
-  const runningBalance = round2((await getAccountClosing(params.accountId, params.entryDate)) + debit - credit);
-  return AccountLedgerEntry.create({
+  const runningBalance = round2((await getAccountClosing(params.accountId, params.entryDate, params.session)) + debit - credit);
+  const doc = {
     accountId: params.accountId,
     entryDate: params.entryDate,
     voucherType: params.voucherType,
@@ -515,7 +596,12 @@ const postLedger = async (params: {
     runningBalance,
     createdBy: params.createdBy,
     metadata: params.metadata,
-  });
+  };
+  if (params.session) {
+    const [created] = await AccountLedgerEntry.create([doc], { session: params.session });
+    return created;
+  }
+  return AccountLedgerEntry.create(doc);
 };
 
 const createVoucherAndLedger = async (params: {
@@ -526,6 +612,7 @@ const createVoucherAndLedger = async (params: {
   counterpartyName?: string;
   notes?: string;
   documentFields?: IAccountingVoucherDocumentFields;
+  metadata?: Record<string, any>;
   lines: Array<{ accountId: string; debit: number; credit: number; narration?: string }>;
   ledgerMetadata?: Record<string, any>;
   createdBy?: string;
@@ -580,6 +667,7 @@ const createVoucherAndLedger = async (params: {
     counterpartyName: params.counterpartyName,
     notes: params.notes,
     documentFields: params.documentFields,
+    metadata: params.metadata,
     totalAmount: totalDebit,
     lines: lines.map((line) => {
       const account = accountMap.get(line.accountId);
@@ -616,12 +704,6 @@ const createVoucherAndLedger = async (params: {
 
 const createTreasuryAwareReceiptVoucher = async (body: any, createdBy?: string) => {
   const payload = await buildVoucherLedgerPayload('receipt', body, createdBy);
-  const route = await resolveTreasuryRoute({
-    paymentMethod: payload.paymentMode,
-    treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
-    channelLabel: body?.paymentChannelLabel,
-  });
-
   const voucher = await createVoucherAndLedger({
     voucherType: payload.voucherType,
     voucherDate: payload.voucherDate,
@@ -630,40 +712,18 @@ const createTreasuryAwareReceiptVoucher = async (body: any, createdBy?: string) 
     counterpartyName: payload.counterpartyName,
     notes: payload.notes,
     documentFields: payload.documentFields,
+    metadata: payload.metadata,
     lines: payload.lines,
-    ledgerMetadata: {
-      treasuryAccountId: route.treasuryAccount._id.toString(),
-      treasuryAccountName: route.treasuryAccount.displayName,
-      paymentChannelLabel: body?.paymentChannelLabel || route.channelLabel,
-      processorName: route.processorName,
-    },
+    ledgerMetadata: payload.ledgerMetadata,
     createdBy,
   });
+  await syncDayBookWithVoucher(voucher, payload, createdBy);
 
-  await DayBookEntry.create({
-    entryType: 'income',
-    category: payload.categoryLabel || 'Service Income',
-    amount: round2(voucher.totalAmount),
-    paymentMethod: toDayBookPaymentMode(payload.paymentMode || 'cash'),
-    treasuryAccountId: route.treasuryAccount._id,
-    treasuryAccountName: route.treasuryAccount.displayName,
-    narration: payload.notes,
-    referenceNo: voucher.voucherNumber,
-    entryDate: payload.voucherDate,
-    createdBy,
-  });
-
-  return { voucher, payload, route };
+  return { voucher, payload };
 };
 
 const createTreasuryAwarePaymentVoucher = async (body: any, createdBy?: string) => {
   const payload = await buildVoucherLedgerPayload('payment', body, createdBy);
-  const route = await resolveTreasuryRoute({
-    paymentMethod: payload.paymentMode,
-    treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
-    channelLabel: body?.paymentChannelLabel,
-  });
-
   const voucher = await createVoucherAndLedger({
     voucherType: payload.voucherType,
     voucherDate: payload.voucherDate,
@@ -672,30 +732,14 @@ const createTreasuryAwarePaymentVoucher = async (body: any, createdBy?: string) 
     counterpartyName: payload.counterpartyName,
     notes: payload.notes,
     documentFields: payload.documentFields,
+    metadata: payload.metadata,
     lines: payload.lines,
-    ledgerMetadata: {
-      treasuryAccountId: route.treasuryAccount._id.toString(),
-      treasuryAccountName: route.treasuryAccount.displayName,
-      paymentChannelLabel: body?.paymentChannelLabel || route.channelLabel,
-      processorName: route.processorName,
-    },
+    ledgerMetadata: payload.ledgerMetadata,
     createdBy,
   });
+  await syncDayBookWithVoucher(voucher, payload, createdBy);
 
-  await DayBookEntry.create({
-    entryType: 'expense',
-    category: payload.categoryLabel || 'General Expense',
-    amount: round2(voucher.totalAmount),
-    paymentMethod: toDayBookPaymentMode(payload.paymentMode || 'cash'),
-    treasuryAccountId: route.treasuryAccount._id,
-    treasuryAccountName: route.treasuryAccount.displayName,
-    narration: payload.notes,
-    referenceNo: voucher.voucherNumber,
-    entryDate: payload.voucherDate,
-    createdBy,
-  });
-
-  return { voucher, payload, route };
+  return { voucher, payload };
 };
 
 const createTreasuryAwareTransferVoucher = async (body: any, createdBy?: string) => {
@@ -709,8 +753,9 @@ const createTreasuryAwareTransferVoucher = async (body: any, createdBy?: string)
     counterpartyName: payload.counterpartyName,
     notes: payload.notes,
     documentFields: payload.documentFields,
+    metadata: payload.metadata,
     lines: payload.lines,
-    ledgerMetadata: {
+    ledgerMetadata: payload.ledgerMetadata || {
       transferDirection: direction,
       fromTreasuryAccountId: body?.fromTreasuryAccountId ? String(body.fromTreasuryAccountId) : undefined,
       toTreasuryAccountId: body?.toTreasuryAccountId ? String(body.toTreasuryAccountId) : undefined,
@@ -731,6 +776,9 @@ interface VoucherLedgerPayload {
   documentFields?: IAccountingVoucherDocumentFields;
   lines: Array<{ accountId: string; debit: number; credit: number; narration?: string }>;
   categoryLabel?: string;
+  metadata?: Record<string, any>;
+  ledgerMetadata?: Record<string, any>;
+  syncDayBook?: boolean;
 }
 
 const toOptionalText = (value: unknown): string | undefined => {
@@ -797,8 +845,10 @@ const buildVoucherLedgerPayload = async (
     const mode = normalizePaymentMode(body?.paymentMode || existing?.paymentMode || 'cash');
     const treasuryRoute = await resolveTreasuryRoute({
       paymentMethod: mode,
-      treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
-      channelLabel: body?.paymentChannelLabel || existing?.paymentChannelLabel,
+      treasuryAccountId: body?.treasuryAccountId
+        ? String(body.treasuryAccountId)
+        : toOptionalText(existing?.metadata?.treasuryAccountId),
+      channelLabel: body?.paymentChannelLabel || existing?.metadata?.paymentChannelLabel,
     });
     const cashBankAccount = await ChartAccount.findById(treasuryRoute.chartAccountId);
     if (!cashBankAccount) throw new Error('Treasury chart account is missing for this receipt');
@@ -816,6 +866,20 @@ const buildVoucherLedgerPayload = async (
       counterpartyName,
       notes,
       categoryLabel,
+      metadata: {
+        entryMode: 'receipt',
+        treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+        treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+        paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+        processorName: treasuryRoute.processorName,
+      },
+      ledgerMetadata: {
+        treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+        treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+        paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+        processorName: treasuryRoute.processorName,
+      },
+      syncDayBook: true,
       lines: normalizeVoucherLines([
         { accountId: cashBankAccount._id.toString(), debit: amountNum, credit: 0, narration: 'Receipt inflow' },
         { accountId: incomeAccount._id.toString(), debit: 0, credit: amountNum, narration: categoryLabel },
@@ -833,17 +897,21 @@ const buildVoucherLedgerPayload = async (
     const mode = normalizePaymentMode(body?.paymentMode || existing?.paymentMode || 'cash');
     const treasuryRoute = await resolveTreasuryRoute({
       paymentMethod: mode,
-      treasuryAccountId: body?.treasuryAccountId ? String(body.treasuryAccountId) : undefined,
-      channelLabel: body?.paymentChannelLabel || existing?.paymentChannelLabel,
+      treasuryAccountId: body?.treasuryAccountId
+        ? String(body.treasuryAccountId)
+        : toOptionalText(existing?.metadata?.treasuryAccountId),
+      channelLabel: body?.paymentChannelLabel || existing?.metadata?.paymentChannelLabel,
     });
     const cashBankAccount = await ChartAccount.findById(treasuryRoute.chartAccountId);
     if (!cashBankAccount) throw new Error('Treasury chart account is missing for this payment');
-    const categoryLabel = String(body?.category || existingExpenseLine?.narration || 'General Expense').trim() || 'General Expense';
-    const expenseAccount = await getOrCreateAccount({
-      accountName: `Expense - ${categoryLabel}`,
-      accountType: 'expense',
-      createdBy,
-    });
+    const entryMode = String(body?.entryMode || existing?.metadata?.entryMode || 'expense').trim().toLowerCase() === 'settlement'
+      ? 'settlement'
+      : 'expense';
+    const categoryLabel = String(
+      body?.category
+      || existingExpenseLine?.narration
+      || (entryMode === 'settlement' ? 'Liability Settlement' : 'General Expense')
+    ).trim() || (entryMode === 'settlement' ? 'Liability Settlement' : 'General Expense');
 
     const documentFieldsInput = body?.documentFields && typeof body.documentFields === 'object'
       ? body.documentFields
@@ -859,6 +927,61 @@ const buildVoucherLedgerPayload = async (
     };
     const hasDocumentFields = Object.values(documentFields).some((value) => Boolean(String(value || '').trim()));
 
+    if (entryMode === 'settlement') {
+      const debitAccountId = String(body?.debitAccountId || existing?.metadata?.debitAccountId || '').trim();
+      if (!debitAccountId) throw new Error('Select the payable or liability account to settle.');
+      const debitAccount = await ChartAccount.findById(debitAccountId);
+      if (!debitAccount) throw new Error('Selected payable or liability account was not found.');
+
+      const linkedEntityType = toOptionalText(body?.linkedEntityType ?? existing?.metadata?.linkedEntityType);
+      const linkedEntityId = toOptionalText(body?.linkedEntityId ?? existing?.metadata?.linkedEntityId);
+      const linkedEntityNumber = toOptionalText(body?.linkedEntityNumber ?? existing?.metadata?.linkedEntityNumber ?? referenceNo);
+
+      return {
+        voucherType,
+        voucherDate,
+        paymentMode: mode,
+        referenceNo,
+        counterpartyName: toOptionalText(counterpartyName || documentFields.accountName),
+        notes: toOptionalText(notes || documentFields.beingPaymentOf),
+        documentFields: hasDocumentFields ? documentFields : undefined,
+        categoryLabel,
+        metadata: {
+          entryMode,
+          debitAccountId: debitAccount._id.toString(),
+          debitAccountCode: debitAccount.accountCode,
+          debitAccountName: debitAccount.accountName,
+          linkedEntityType,
+          linkedEntityId,
+          linkedEntityNumber,
+          treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+          treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+          paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+          processorName: treasuryRoute.processorName,
+        },
+        ledgerMetadata: {
+          treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+          treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+          paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+          processorName: treasuryRoute.processorName,
+          linkedEntityType,
+          linkedEntityId,
+          linkedEntityNumber,
+        },
+        syncDayBook: false,
+        lines: normalizeVoucherLines([
+          { accountId: debitAccount._id.toString(), debit: amountNum, credit: 0, narration: categoryLabel },
+          { accountId: cashBankAccount._id.toString(), debit: 0, credit: amountNum, narration: 'Payment outflow' },
+        ]),
+      };
+    }
+
+    const expenseAccount = await getOrCreateAccount({
+      accountName: `Expense - ${categoryLabel}`,
+      accountType: 'expense',
+      createdBy,
+    });
+
     return {
       voucherType,
       voucherDate,
@@ -868,6 +991,20 @@ const buildVoucherLedgerPayload = async (
       notes: toOptionalText(notes || documentFields.beingPaymentOf),
       documentFields: hasDocumentFields ? documentFields : undefined,
       categoryLabel,
+      metadata: {
+        entryMode,
+        treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+        treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+        paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+        processorName: treasuryRoute.processorName,
+      },
+      ledgerMetadata: {
+        treasuryAccountId: treasuryRoute.treasuryAccount._id.toString(),
+        treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+        paymentChannelLabel: body?.paymentChannelLabel || treasuryRoute.channelLabel,
+        processorName: treasuryRoute.processorName,
+      },
+      syncDayBook: true,
       lines: normalizeVoucherLines([
         { accountId: expenseAccount._id.toString(), debit: amountNum, credit: 0, narration: categoryLabel },
         { accountId: cashBankAccount._id.toString(), debit: 0, credit: amountNum, narration: 'Payment outflow' },
@@ -916,7 +1053,11 @@ const buildVoucherLedgerPayload = async (
       ? String(body.fromTreasuryAccountId)
       : body?.toTreasuryAccountId && direction === 'bank_to_cash'
         ? String(body.toTreasuryAccountId)
-        : undefined,
+        : toOptionalText(
+          direction === 'cash_to_bank'
+            ? existing?.metadata?.fromTreasuryAccountId
+            : existing?.metadata?.toTreasuryAccountId
+        ),
   });
   const bankRoute = await resolveTreasuryRoute({
     paymentMethod: 'bank',
@@ -924,7 +1065,11 @@ const buildVoucherLedgerPayload = async (
       ? String(body.fromTreasuryAccountId)
       : body?.toTreasuryAccountId && direction === 'cash_to_bank'
         ? String(body.toTreasuryAccountId)
-        : undefined,
+        : toOptionalText(
+          direction === 'bank_to_cash'
+            ? existing?.metadata?.fromTreasuryAccountId
+            : existing?.metadata?.toTreasuryAccountId
+        ),
   });
   const cash = await ChartAccount.findById(cashRoute.chartAccountId);
   const bank = await ChartAccount.findById(bankRoute.chartAccountId);
@@ -938,6 +1083,17 @@ const buildVoucherLedgerPayload = async (
     paymentMode: 'bank_transfer',
     referenceNo,
     notes,
+    metadata: {
+      transferDirection: direction,
+      fromTreasuryAccountId: body?.fromTreasuryAccountId ? String(body.fromTreasuryAccountId) : undefined,
+      toTreasuryAccountId: body?.toTreasuryAccountId ? String(body.toTreasuryAccountId) : undefined,
+    },
+    ledgerMetadata: {
+      transferDirection: direction,
+      fromTreasuryAccountId: body?.fromTreasuryAccountId ? String(body.fromTreasuryAccountId) : undefined,
+      toTreasuryAccountId: body?.toTreasuryAccountId ? String(body.toTreasuryAccountId) : undefined,
+    },
+    syncDayBook: false,
     lines: normalizeVoucherLines([
       { accountId: debitAccount._id.toString(), debit: amountNum, credit: 0, narration: `Transfer ${direction}` },
       { accountId: creditAccount._id.toString(), debit: 0, credit: amountNum, narration: `Transfer ${direction}` },
@@ -945,16 +1101,17 @@ const buildVoucherLedgerPayload = async (
   };
 };
 
-const recalculateRunningBalancesForAccounts = async (accountIds: string[]) => {
+const recalculateRunningBalancesForAccounts = async (accountIds: string[], session?: mongoose.ClientSession) => {
   const uniqueIds = Array.from(new Set((accountIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
   for (const accountId of uniqueIds) {
-    const rows = await AccountLedgerEntry.find({ accountId }).sort({ entryDate: 1, createdAt: 1, _id: 1 });
+    const query = AccountLedgerEntry.find({ accountId, isDeleted: { $ne: true } }).sort({ entryDate: 1, createdAt: 1, _id: 1 });
+    const rows = session ? await query.session(session) : await query;
     let runningBalance = 0;
     for (const row of rows) {
       runningBalance = round2(runningBalance + Number(row.debit || 0) - Number(row.credit || 0));
       if (round2(Number(row.runningBalance || 0)) !== runningBalance) {
         row.runningBalance = runningBalance;
-        await row.save();
+        await row.save(session ? { session } : undefined);
       }
     }
   }
@@ -963,9 +1120,10 @@ const recalculateRunningBalancesForAccounts = async (accountIds: string[]) => {
 const markLedgerRowsDeleted = async (
   filter: Record<string, any>,
   actorId: string | undefined,
-  reason: string
+  reason: string,
+  session?: mongoose.ClientSession
 ) => {
-  await AccountLedgerEntry.updateMany(filter, {
+  const query = AccountLedgerEntry.updateMany(filter, {
     $set: {
       isDeleted: true,
       deletedAt: new Date(),
@@ -974,7 +1132,266 @@ const markLedgerRowsDeleted = async (
       isReconciled: false,
     },
   });
+  if (session) await query.session(session);
+  else await query;
 };
+
+const getLedgerAccountIdsForFilter = async (filter: Record<string, any>, session?: mongoose.ClientSession) => {
+  const query = AccountLedgerEntry.find(filter).select('accountId');
+  const rows = session ? await query.session(session) : await query;
+  return rows.map((row) => String(row.accountId));
+};
+
+const isVoucherBackedDayBookEntry = async (entry: any, session?: mongoose.ClientSession) => {
+  const referenceNo = String(entry?.referenceNo || '').trim();
+  if (!referenceNo) return false;
+  const query = AccountLedgerEntry.exists({
+    'metadata.source': 'voucher',
+    voucherNumber: referenceNo,
+    isDeleted: { $ne: true },
+  });
+  return Boolean(session ? await query.session(session) : await query);
+};
+
+const postDayBookLedgerForEntry = async (
+  entry: any,
+  actorId?: string,
+  session?: mongoose.ClientSession
+): Promise<string[]> => {
+  const entryType = String(entry.entryType || '').toLowerCase() === 'income' ? 'income' : 'expense';
+  const amounts = normalizeDayBookPostingAmounts(entry);
+  if (amounts.totalAmount <= 0 || amounts.taxableAmount < 0) {
+    throw new Error('Day-book amount is invalid for ledger posting');
+  }
+
+  const treasuryAccount = await getDayBookTreasuryChartAccount(entry);
+  const categoryAccount = await resolveDayBookCategoryAccount(entryType, entry.category, actorId);
+  const gstAccounts: Array<{ amount: number; account: any; label: string }> = [];
+  if (amounts.cgstAmount > 0) {
+    gstAccounts.push({ amount: amounts.cgstAmount, account: await getSystemChartAccount('cgst_payable', actorId), label: 'CGST' });
+  }
+  if (amounts.sgstAmount > 0) {
+    gstAccounts.push({ amount: amounts.sgstAmount, account: await getSystemChartAccount('sgst_payable', actorId), label: 'SGST' });
+  }
+  if (amounts.igstAmount > 0) {
+    gstAccounts.push({ amount: amounts.igstAmount, account: await getSystemChartAccount('igst_payable', actorId), label: 'IGST' });
+  }
+
+  const entryId = String(entry._id);
+  const referenceNo = String(entry.referenceNo || '').trim() || entryId;
+  const voucherNumber = String(entry.referenceNo || '').trim() || `DB-${entryId.slice(-8).toUpperCase()}`;
+  const paymentMode = normalizePaymentMode(entry.paymentMethod);
+  const baseMetadata = {
+    source: DAYBOOK_LEDGER_SOURCE,
+    sourceId: entryId,
+    category: entry.category,
+    taxableAmount: amounts.taxableAmount,
+    gstAmount: amounts.gstAmount,
+    totalAmount: amounts.totalAmount,
+  };
+  const narration = `${entry.category}${entry.narration ? ` - ${entry.narration}` : ''}`;
+  const touchedAccountIds = [String(treasuryAccount._id), String(categoryAccount._id)];
+
+  if (entryType === 'income') {
+    await postLedger({
+      accountId: treasuryAccount._id,
+      entryDate: entry.entryDate,
+      voucherType: 'income',
+      voucherNumber,
+      referenceNo,
+      narration,
+      debit: amounts.totalAmount,
+      paymentMode,
+      createdBy: actorId,
+      metadata: { ...baseMetadata, leg: 'treasury_debit' },
+      session,
+    });
+    if (amounts.taxableAmount > 0) {
+      await postLedger({
+        accountId: categoryAccount._id,
+        entryDate: entry.entryDate,
+        voucherType: 'income',
+        voucherNumber,
+        referenceNo,
+        narration,
+        credit: amounts.taxableAmount,
+        paymentMode,
+        createdBy: actorId,
+        metadata: { ...baseMetadata, leg: 'income_credit' },
+        session,
+      });
+    }
+    for (const gst of gstAccounts) {
+      touchedAccountIds.push(String(gst.account._id));
+      await postLedger({
+        accountId: gst.account._id,
+        entryDate: entry.entryDate,
+        voucherType: 'income',
+        voucherNumber,
+        referenceNo,
+        narration: `${gst.label} output tax - ${narration}`,
+        credit: gst.amount,
+        paymentMode,
+        createdBy: actorId,
+        metadata: { ...baseMetadata, leg: `${gst.label.toLowerCase()}_output_tax` },
+        session,
+      });
+    }
+  } else {
+    if (amounts.taxableAmount > 0) {
+      await postLedger({
+        accountId: categoryAccount._id,
+        entryDate: entry.entryDate,
+        voucherType: 'expense',
+        voucherNumber,
+        referenceNo,
+        narration,
+        debit: amounts.taxableAmount,
+        paymentMode,
+        createdBy: actorId,
+        metadata: { ...baseMetadata, leg: 'expense_debit' },
+        session,
+      });
+    }
+    for (const gst of gstAccounts) {
+      touchedAccountIds.push(String(gst.account._id));
+      await postLedger({
+        accountId: gst.account._id,
+        entryDate: entry.entryDate,
+        voucherType: 'expense',
+        voucherNumber,
+        referenceNo,
+        narration: `${gst.label} input tax - ${narration}`,
+        debit: gst.amount,
+        paymentMode,
+        createdBy: actorId,
+        metadata: { ...baseMetadata, leg: `${gst.label.toLowerCase()}_input_tax` },
+        session,
+      });
+    }
+    await postLedger({
+      accountId: treasuryAccount._id,
+      entryDate: entry.entryDate,
+      voucherType: 'expense',
+      voucherNumber,
+      referenceNo,
+      narration,
+      credit: amounts.totalAmount,
+      paymentMode,
+      createdBy: actorId,
+      metadata: { ...baseMetadata, leg: 'treasury_credit' },
+      session,
+    });
+  }
+
+  return Array.from(new Set(touchedAccountIds));
+};
+
+const replaceDayBookLedgerForEntry = async (
+  entry: any,
+  actorId: string | undefined,
+  reason: string,
+  session?: mongoose.ClientSession
+) => {
+  const filter = dayBookLedgerFilter(entry._id);
+  const oldAccountIds = await getLedgerAccountIdsForFilter(filter, session);
+  if (await isVoucherBackedDayBookEntry(entry, session)) {
+    if (oldAccountIds.length > 0) {
+      await markLedgerRowsDeleted(filter, actorId, `${reason}; voucher-backed day-book row`, session);
+      await recalculateRunningBalancesForAccounts(oldAccountIds, session);
+    }
+    return { oldAccountIds, newAccountIds: [], skipped: 'voucher_backed_daybook_entry' };
+  }
+  if (oldAccountIds.length > 0) {
+    await markLedgerRowsDeleted(filter, actorId, reason, session);
+  }
+  const newAccountIds = await postDayBookLedgerForEntry(entry, actorId, session);
+  await recalculateRunningBalancesForAccounts([...oldAccountIds, ...newAccountIds], session);
+  return { oldAccountIds, newAccountIds };
+};
+
+const findAccountByExactName = async (accountType: AccountType, names: string[]) => {
+  for (const name of names.map((value) => String(value || '').trim()).filter(Boolean)) {
+    const account = await ChartAccount.findOne({
+      accountType,
+      accountName: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
+    });
+    if (account) return account;
+  }
+  return null;
+};
+
+const getSystemChartAccount = async (systemKey: string, createdBy?: string) => {
+  await ensureAccountingChart(createdBy);
+  const account = await ChartAccount.findOne({ systemKey: String(systemKey || '').trim().toLowerCase(), isActive: true });
+  if (!account) throw new Error(`System account is not configured: ${systemKey}`);
+  return account;
+};
+
+const resolveDayBookCategoryAccount = async (entryType: 'income' | 'expense', category: string, createdBy?: string) => {
+  const normalizedCategory = String(category || '').trim();
+  if (!normalizedCategory) throw new Error('Day-book category is required');
+
+  const accountType: AccountType = entryType === 'income' ? 'income' : 'expense';
+  const candidates =
+    accountType === 'income'
+      ? /(?:income|revenue)$/i.test(normalizedCategory)
+        ? [normalizedCategory]
+        : [`${normalizedCategory} Income`, normalizedCategory]
+      : [normalizedCategory];
+  const existing = await findAccountByExactName(accountType, candidates);
+  if (existing) return existing;
+
+  return getOrCreateAccount({
+    accountName: candidates[0],
+    accountType,
+    subType: 'general',
+    createdBy,
+  });
+};
+
+const getDayBookTreasuryChartAccount = async (entry: any) => {
+  const treasuryAccount = entry.treasuryAccountId ? await TreasuryAccount.findById(entry.treasuryAccountId) : null;
+  let chartAccountId = treasuryAccount?.chartAccountId ? String(treasuryAccount.chartAccountId) : '';
+  if (!chartAccountId) {
+    const route = await resolveTreasuryRoute({ paymentMethod: normalizePaymentMode(entry.paymentMethod) });
+    chartAccountId = String(route.chartAccountId || '');
+  }
+  const chartAccount = await ChartAccount.findById(chartAccountId);
+  if (!chartAccount) throw new Error('Treasury chart account is not configured for day-book posting');
+  return chartAccount;
+};
+
+const normalizeDayBookPostingAmounts = (entry: any) => {
+  let cgstAmount = round2(Number(entry?.cgstAmount || 0));
+  let sgstAmount = round2(Number(entry?.sgstAmount || 0));
+  let igstAmount = round2(Number(entry?.igstAmount || 0));
+  const declaredGst = round2(Number(entry?.gstAmount || 0));
+  if (cgstAmount + sgstAmount + igstAmount <= 0 && declaredGst > 0) {
+    if (String(entry?.gstTreatment || '').toLowerCase() === 'interstate') {
+      igstAmount = declaredGst;
+    } else {
+      cgstAmount = round2(declaredGst / 2);
+      sgstAmount = round2(declaredGst - cgstAmount);
+    }
+  }
+
+  const gstAmount = round2(cgstAmount + sgstAmount + igstAmount);
+  const storedTaxable = round2(Number(entry?.taxableAmount || entry?.amount || 0));
+  const storedTotal = round2(Number(entry?.totalAmount || 0));
+  const totalAmount = storedTotal > 0 ? storedTotal : round2(storedTaxable + gstAmount);
+  const taxableAmount =
+    gstAmount > 0 && round2(storedTaxable + gstAmount) !== totalAmount
+      ? round2(Math.max(0, totalAmount - gstAmount))
+      : storedTaxable;
+
+  return { taxableAmount, gstAmount, cgstAmount, sgstAmount, igstAmount, totalAmount };
+};
+
+const dayBookLedgerFilter = (entryId: unknown) => ({
+  'metadata.source': DAYBOOK_LEDGER_SOURCE,
+  'metadata.sourceId': String(entryId || ''),
+});
 
 const positiveMoney = (value: any): number => round2(Math.max(0, Number(value || 0)));
 
@@ -1226,6 +1643,7 @@ const replaceVoucherLedgerRows = async (
       metadata: {
         source: 'voucher',
         sourceId,
+        ...(payload.ledgerMetadata || {}),
       },
     });
   }
@@ -1235,9 +1653,38 @@ const replaceVoucherLedgerRows = async (
   return accountIds;
 };
 
-const syncDayBookWithVoucher = async (voucher: any, categoryLabel?: string, actorId?: string) => {
+const syncDayBookWithVoucher = async (
+  voucher: any,
+  payloadOrOptions?: VoucherLedgerPayload | string,
+  actorId?: string
+) => {
   if (!voucher || (voucher.voucherType !== 'receipt' && voucher.voucherType !== 'payment')) return;
+
+  const payload = payloadOrOptions && typeof payloadOrOptions === 'object'
+    ? payloadOrOptions
+    : null;
+  const categoryLabel = typeof payloadOrOptions === 'string' ? payloadOrOptions : payload?.categoryLabel;
+  const shouldSync = voucher.voucherType === 'receipt'
+    ? true
+    : payload?.syncDayBook ?? String(voucher?.metadata?.entryMode || 'expense').toLowerCase() !== 'settlement';
   const entryType = voucher.voucherType === 'receipt' ? 'income' : 'expense';
+  const existing = await DayBookEntry.findOne({
+    status: 'active',
+    referenceNo: voucher.voucherNumber,
+    entryType,
+  }).sort({ createdAt: -1 });
+
+  if (!shouldSync) {
+    if (existing) {
+      await markDayBookRowsDeleted(
+        { _id: existing._id },
+        actorId || voucher.createdBy,
+        `Superseded by voucher update ${voucher.voucherNumber}`,
+      );
+    }
+    return;
+  }
+
   const counterpartLine = Array.isArray(voucher.lines)
     ? voucher.lines.find((line: any) =>
       voucher.voucherType === 'receipt'
@@ -1251,18 +1698,29 @@ const syncDayBookWithVoucher = async (voucher: any, categoryLabel?: string, acto
     || (voucher.voucherType === 'receipt' ? 'Service Income' : 'General Expense')
   ).trim();
   const normalizedMode = normalizePaymentMode(voucher.paymentMode || 'cash');
-  const existing = await DayBookEntry.findOne({
-    status: 'active',
-    referenceNo: voucher.voucherNumber,
-    entryType,
-  }).sort({ createdAt: -1 });
+  const amount = round2(Number(voucher.totalAmount || 0));
+  const treasuryAccountId = String(payload?.metadata?.treasuryAccountId || voucher?.metadata?.treasuryAccountId || '').trim();
+  const treasuryAccountName = String(payload?.metadata?.treasuryAccountName || voucher?.metadata?.treasuryAccountName || '').trim();
 
   if (existing) {
     existing.category = resolvedCategory;
-    existing.amount = round2(Number(voucher.totalAmount || 0));
+    existing.amount = amount;
+    existing.taxableAmount = amount;
+    existing.gstRate = 0;
+    existing.gstAmount = 0;
+    existing.cgstAmount = 0;
+    existing.sgstAmount = 0;
+    existing.igstAmount = 0;
+    existing.totalAmount = amount;
+    existing.gstTreatment = 'none';
     existing.paymentMethod = toDayBookPaymentMode(normalizedMode);
+    existing.treasuryAccountId = treasuryAccountId && mongoose.isValidObjectId(treasuryAccountId)
+      ? new mongoose.Types.ObjectId(treasuryAccountId)
+      : undefined;
+    existing.treasuryAccountName = treasuryAccountName || undefined;
     existing.narration = voucher.notes;
     existing.entryDate = new Date(voucher.voucherDate);
+    existing.createdBy = actorId || voucher.createdBy;
     await existing.save();
     return;
   }
@@ -1270,8 +1728,20 @@ const syncDayBookWithVoucher = async (voucher: any, categoryLabel?: string, acto
   await DayBookEntry.create({
     entryType,
     category: resolvedCategory,
-    amount: round2(Number(voucher.totalAmount || 0)),
+    amount,
+    taxableAmount: amount,
+    gstRate: 0,
+    gstAmount: 0,
+    cgstAmount: 0,
+    sgstAmount: 0,
+    igstAmount: 0,
+    totalAmount: amount,
+    gstTreatment: 'none',
     paymentMethod: toDayBookPaymentMode(normalizedMode),
+    treasuryAccountId: treasuryAccountId && mongoose.isValidObjectId(treasuryAccountId)
+      ? new mongoose.Types.ObjectId(treasuryAccountId)
+      : undefined,
+    treasuryAccountName: treasuryAccountName || undefined,
     narration: voucher.notes,
     referenceNo: voucher.voucherNumber,
     entryDate: voucher.voucherDate,
@@ -1685,13 +2155,16 @@ router.post('/contracts', authMiddleware, async (req: AuthenticatedRequest, res:
   try {
     const { contractorName, contractTitle, paymentDate, amount, status, paymentMethod, notes } = req.body;
 
-    if (!contractorName || !contractTitle || amount === undefined) {
+    if (!contractorName || !contractTitle || (amount === undefined && req.body?.grossAmount === undefined)) {
       return res.status(400).json({ success: false, error: 'contractorName, contractTitle and amount are required' });
     }
 
-    const amountNum = round2(Number(amount || 0));
-    if (amountNum <= 0) {
+    const components = resolveContractAmounts(req.body);
+    if (components.grossAmount <= 0) {
       return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
+    }
+    if (components.tdsAmount > components.grossAmount) {
+      return res.status(400).json({ success: false, error: 'TDS amount cannot exceed gross contract amount' });
     }
 
     const contractMode = ['cash', 'bank', 'card', 'upi', 'cheque'].includes(String(paymentMethod || '').toLowerCase())
@@ -1702,7 +2175,12 @@ router.post('/contracts', authMiddleware, async (req: AuthenticatedRequest, res:
       contractorName,
       contractTitle,
       paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
-      amount: amountNum,
+      amount: components.grossAmount,
+      grossAmount: components.grossAmount,
+      tdsSectionCode: components.tdsSectionCode,
+      tdsRate: components.tdsRate,
+      tdsAmount: components.tdsAmount,
+      netPaymentAmount: components.netPaymentAmount,
       status: status || 'paid',
       paymentMethod: contractMode,
       notes,
@@ -1718,6 +2196,15 @@ router.post('/contracts', authMiddleware, async (req: AuthenticatedRequest, res:
         createdBy: req.userId,
       });
       const cashBank = await getCoreAccount(toBookType(payment.paymentMethod) === 'cash' ? 'cash' : 'bank');
+      const tdsPayable = components.tdsAmount > 0
+        ? await getOrCreateAccount({
+            accountName: 'TDS Payable',
+            accountType: 'liability',
+            subType: 'general',
+            isSystem: true,
+            createdBy: req.userId,
+          })
+        : null;
       const voucherNumber = await generateNumber('contract_voucher', { prefix: 'CP-', datePart: true, padTo: 5 });
 
       await postLedger({
@@ -1727,25 +2214,42 @@ router.post('/contracts', authMiddleware, async (req: AuthenticatedRequest, res:
         voucherNumber,
         referenceNo: payment._id.toString(),
         narration: `Contract payment - ${payment.contractorName}: ${payment.contractTitle}`,
-        debit: amountNum,
+        debit: components.grossAmount,
         credit: 0,
         paymentMode: normalizePaymentMode(contractMode),
         createdBy: req.userId,
-        metadata: { source: 'contract_payment', sourceId: payment._id.toString() },
+        metadata: { source: 'contract_payment', sourceId: payment._id.toString(), tdsAmount: components.tdsAmount, netPaymentAmount: components.netPaymentAmount },
       });
-      await postLedger({
-        accountId: cashBank._id,
-        entryDate: payment.paymentDate,
-        voucherType: 'contract',
-        voucherNumber,
-        referenceNo: payment._id.toString(),
-        narration: `Contract payment - ${payment.contractorName}: ${payment.contractTitle}`,
-        debit: 0,
-        credit: amountNum,
-        paymentMode: normalizePaymentMode(contractMode),
-        createdBy: req.userId,
-        metadata: { source: 'contract_payment', sourceId: payment._id.toString() },
-      });
+      if (components.netPaymentAmount > 0) {
+        await postLedger({
+          accountId: cashBank._id,
+          entryDate: payment.paymentDate,
+          voucherType: 'contract',
+          voucherNumber,
+          referenceNo: payment._id.toString(),
+          narration: `Contract net payment - ${payment.contractorName}: ${payment.contractTitle}`,
+          debit: 0,
+          credit: components.netPaymentAmount,
+          paymentMode: normalizePaymentMode(contractMode),
+          createdBy: req.userId,
+          metadata: { source: 'contract_payment', sourceId: payment._id.toString(), grossAmount: components.grossAmount, tdsAmount: components.tdsAmount },
+        });
+      }
+      if (tdsPayable && components.tdsAmount > 0) {
+        await postLedger({
+          accountId: tdsPayable._id,
+          entryDate: payment.paymentDate,
+          voucherType: 'contract',
+          voucherNumber,
+          referenceNo: payment._id.toString(),
+          narration: `TDS payable - ${payment.contractorName}: ${payment.contractTitle}${components.tdsSectionCode ? ` (${components.tdsSectionCode})` : ''}`,
+          debit: 0,
+          credit: components.tdsAmount,
+          paymentMode: 'adjustment',
+          createdBy: req.userId,
+          metadata: { source: 'contract_payment', sourceId: payment._id.toString(), grossAmount: components.grossAmount, tdsSectionCode: components.tdsSectionCode },
+        });
+      }
     }
 
     res.status(201).json({ success: true, data: payment, message: 'Contract payment recorded' });
@@ -1792,9 +2296,12 @@ router.put('/contracts/:id', authMiddleware, async (req: AuthenticatedRequest, r
     }
 
     const before = payment.toObject();
-    const nextAmount = req.body?.amount !== undefined ? round2(Number(req.body.amount || 0)) : round2(Number(payment.amount || 0));
-    if (nextAmount <= 0) {
+    const components = resolveContractAmounts(req.body, payment);
+    if (components.grossAmount <= 0) {
       return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
+    }
+    if (components.tdsAmount > components.grossAmount) {
+      return res.status(400).json({ success: false, error: 'TDS amount cannot exceed gross contract amount' });
     }
 
     const nextMode = req.body?.paymentMethod
@@ -1807,7 +2314,12 @@ router.put('/contracts/:id', authMiddleware, async (req: AuthenticatedRequest, r
     payment.contractorName = req.body?.contractorName !== undefined ? String(req.body.contractorName || '').trim() : payment.contractorName;
     payment.contractTitle = req.body?.contractTitle !== undefined ? String(req.body.contractTitle || '').trim() : payment.contractTitle;
     payment.paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : payment.paymentDate;
-    payment.amount = nextAmount;
+    payment.amount = components.grossAmount;
+    (payment as any).grossAmount = components.grossAmount;
+    (payment as any).tdsSectionCode = components.tdsSectionCode;
+    (payment as any).tdsRate = components.tdsRate;
+    (payment as any).tdsAmount = components.tdsAmount;
+    (payment as any).netPaymentAmount = components.netPaymentAmount;
     payment.status = (['paid', 'partial', 'pending'].includes(nextStatus) ? nextStatus : payment.status) as any;
     payment.paymentMethod = nextMode as any;
     payment.notes = req.body?.notes !== undefined ? String(req.body.notes || '').trim() : payment.notes;
@@ -1835,6 +2347,15 @@ router.put('/contracts/:id', authMiddleware, async (req: AuthenticatedRequest, r
         createdBy: req.userId,
       });
       const cashBank = await getCoreAccount(toBookType(payment.paymentMethod) === 'cash' ? 'cash' : 'bank');
+      const tdsPayable = components.tdsAmount > 0
+        ? await getOrCreateAccount({
+            accountName: 'TDS Payable',
+            accountType: 'liability',
+            subType: 'general',
+            isSystem: true,
+            createdBy: req.userId,
+          })
+        : null;
       const voucherNumber = oldVoucherNo || await generateNumber('contract_voucher', { prefix: 'CP-', datePart: true, padTo: 5 });
 
       await postLedger({
@@ -1844,26 +2365,48 @@ router.put('/contracts/:id', authMiddleware, async (req: AuthenticatedRequest, r
         voucherNumber,
         referenceNo: sourceId,
         narration: `Contract payment - ${payment.contractorName}: ${payment.contractTitle}`,
-        debit: nextAmount,
+        debit: components.grossAmount,
         credit: 0,
         paymentMode: normalizePaymentMode(payment.paymentMethod),
         createdBy: req.userId,
-        metadata: { source: 'contract_payment', sourceId },
+        metadata: { source: 'contract_payment', sourceId, tdsAmount: components.tdsAmount, netPaymentAmount: components.netPaymentAmount },
       });
-      await postLedger({
-        accountId: cashBank._id,
-        entryDate: payment.paymentDate,
-        voucherType: 'contract',
-        voucherNumber,
-        referenceNo: sourceId,
-        narration: `Contract payment - ${payment.contractorName}: ${payment.contractTitle}`,
-        debit: 0,
-        credit: nextAmount,
-        paymentMode: normalizePaymentMode(payment.paymentMethod),
-        createdBy: req.userId,
-        metadata: { source: 'contract_payment', sourceId },
-      });
-      await recalculateRunningBalancesForAccounts([...oldAccountIds, contractExpense._id.toString(), cashBank._id.toString()]);
+      if (components.netPaymentAmount > 0) {
+        await postLedger({
+          accountId: cashBank._id,
+          entryDate: payment.paymentDate,
+          voucherType: 'contract',
+          voucherNumber,
+          referenceNo: sourceId,
+          narration: `Contract net payment - ${payment.contractorName}: ${payment.contractTitle}`,
+          debit: 0,
+          credit: components.netPaymentAmount,
+          paymentMode: normalizePaymentMode(payment.paymentMethod),
+          createdBy: req.userId,
+          metadata: { source: 'contract_payment', sourceId, grossAmount: components.grossAmount, tdsAmount: components.tdsAmount },
+        });
+      }
+      if (tdsPayable && components.tdsAmount > 0) {
+        await postLedger({
+          accountId: tdsPayable._id,
+          entryDate: payment.paymentDate,
+          voucherType: 'contract',
+          voucherNumber,
+          referenceNo: sourceId,
+          narration: `TDS payable - ${payment.contractorName}: ${payment.contractTitle}${components.tdsSectionCode ? ` (${components.tdsSectionCode})` : ''}`,
+          debit: 0,
+          credit: components.tdsAmount,
+          paymentMode: 'adjustment',
+          createdBy: req.userId,
+          metadata: { source: 'contract_payment', sourceId, grossAmount: components.grossAmount, tdsSectionCode: components.tdsSectionCode },
+        });
+      }
+      await recalculateRunningBalancesForAccounts([
+        ...oldAccountIds,
+        contractExpense._id.toString(),
+        cashBank._id.toString(),
+        ...(tdsPayable ? [tdsPayable._id.toString()] : []),
+      ]);
     } else {
       await recalculateRunningBalancesForAccounts(oldAccountIds);
     }
@@ -1906,6 +2449,7 @@ router.post('/day-book/entry', authMiddleware, async (req: AuthenticatedRequest,
     if (amountNum <= 0) {
       return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
     }
+    const taxBreakup = dayBookTaxBreakup(req.body, amountNum);
 
     const normalizedMode = normalizePaymentMode(paymentMethod);
     const treasuryRoute = await resolveTreasuryRoute({
@@ -1914,18 +2458,29 @@ router.post('/day-book/entry', authMiddleware, async (req: AuthenticatedRequest,
       channelLabel: req.body?.paymentChannelLabel ? String(req.body.paymentChannelLabel) : undefined,
     });
 
-    const entry = await DayBookEntry.create({
-      entryType,
-      category,
-      amount: amountNum,
-      paymentMethod: toDayBookPaymentMode(normalizedMode),
-      treasuryAccountId: treasuryRoute.treasuryAccount._id,
-      treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
-      narration,
-      referenceNo,
-      entryDate: entryDate ? new Date(entryDate) : new Date(),
-      createdBy: req.userId,
-    });
+    const session = await mongoose.startSession();
+    let entry: any;
+    try {
+      await session.withTransaction(async () => {
+        const [created] = await DayBookEntry.create([{
+          entryType,
+          category,
+          amount: amountNum,
+          ...taxBreakup,
+          paymentMethod: toDayBookPaymentMode(normalizedMode),
+          treasuryAccountId: treasuryRoute.treasuryAccount._id,
+          treasuryAccountName: treasuryRoute.treasuryAccount.displayName,
+          narration,
+          referenceNo,
+          entryDate: entryDate ? new Date(entryDate) : new Date(),
+          createdBy: req.userId,
+        }], { session });
+        entry = created;
+        await replaceDayBookLedgerForEntry(entry, req.userId, 'Initial day-book ledger posting', session);
+      });
+    } finally {
+      await session.endSession();
+    }
 
     await writeAuditLog({
       module: 'accounting',
@@ -2019,15 +2574,50 @@ router.put('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedReque
     if (req.body.category !== undefined) updates.category = String(req.body.category);
     if (req.body.narration !== undefined) updates.narration = String(req.body.narration);
     if (req.body.referenceNo !== undefined) updates.referenceNo = String(req.body.referenceNo);
-    if (req.body.paymentMethod !== undefined) updates.paymentMethod = toDayBookPaymentMode(normalizePaymentMode(req.body.paymentMethod));
+    const paymentRoutingTouched = ['paymentMethod', 'treasuryAccountId', 'paymentChannelLabel']
+      .some((key) => req.body[key] !== undefined);
+    if (paymentRoutingTouched) {
+      const normalizedMode = normalizePaymentMode(req.body.paymentMethod ?? existing.paymentMethod);
+      const route = await resolveTreasuryRoute({
+        paymentMethod: normalizedMode,
+        treasuryAccountId: req.body?.treasuryAccountId
+          ? String(req.body.treasuryAccountId)
+          : existing.treasuryAccountId
+            ? String(existing.treasuryAccountId)
+            : undefined,
+        channelLabel: req.body?.paymentChannelLabel ? String(req.body.paymentChannelLabel) : undefined,
+      });
+      updates.paymentMethod = toDayBookPaymentMode(normalizedMode);
+      updates.treasuryAccountId = route.treasuryAccount._id;
+      updates.treasuryAccountName = route.treasuryAccount.displayName;
+    }
     if (req.body.amount !== undefined) {
       const amountNum = round2(Number(req.body.amount || 0));
       if (amountNum <= 0) return res.status(400).json({ success: false, error: 'amount must be greater than 0' });
       updates.amount = amountNum;
     }
+    const taxFieldsTouched = ['amount', 'gstRate', 'gstPercent', 'gst', 'gstAmount', 'taxAmount', 'gstTreatment', 'taxTreatment', 'cgstAmount', 'sgstAmount', 'igstAmount']
+      .some((key) => req.body[key] !== undefined);
+    if (taxFieldsTouched) {
+      Object.assign(updates, dayBookTaxBreakup(req.body, round2(Number(updates.amount ?? existing.amount ?? 0))));
+    }
     if (req.body.entryDate !== undefined) updates.entryDate = new Date(req.body.entryDate);
 
-    const updated = await DayBookEntry.findOneAndUpdate({ _id: req.params.id, status: 'active' }, updates, { new: true, runValidators: true });
+    const session = await mongoose.startSession();
+    let updated: any;
+    try {
+      await session.withTransaction(async () => {
+        updated = await DayBookEntry.findOneAndUpdate(
+          { _id: req.params.id, status: 'active' },
+          updates,
+          { returnDocument: 'after', runValidators: true, session }
+        );
+        if (!updated) throw new Error('Day-book entry not found');
+        await replaceDayBookLedgerForEntry(updated, req.userId, `Superseded by day-book update ${req.params.id}`, session);
+      });
+    } finally {
+      await session.endSession();
+    }
     await writeAuditLog({
       module: 'accounting',
       action: 'daybook_entry_updated',
@@ -2068,15 +2658,28 @@ router.delete('/day-book/entry/:id', authMiddleware, async (req: AuthenticatedRe
     }
 
     const reason = String(req.body?.reason || 'Cancelled from accounting console').trim() || 'Cancelled from accounting console';
-    existing.status = 'cancelled';
-    existing.isDeleted = true;
-    existing.deletedAt = new Date();
-    existing.deletedBy = req.userId;
-    existing.deletionReason = reason;
-    existing.cancelledAt = new Date();
-    existing.cancelledBy = req.userId;
-    existing.cancellationReason = reason;
-    await existing.save();
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const ledgerFilter = dayBookLedgerFilter(existing._id);
+        const accountIds = await getLedgerAccountIdsForFilter(ledgerFilter, session);
+        existing.status = 'cancelled';
+        existing.isDeleted = true;
+        existing.deletedAt = new Date();
+        existing.deletedBy = req.userId;
+        existing.deletionReason = reason;
+        existing.cancelledAt = new Date();
+        existing.cancelledBy = req.userId;
+        existing.cancellationReason = reason;
+        await existing.save({ session });
+        if (accountIds.length > 0) {
+          await markLedgerRowsDeleted(ledgerFilter, req.userId, reason, session);
+          await recalculateRunningBalancesForAccounts(accountIds, session);
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
     await writeAuditLog({
       module: 'accounting',
       action: 'daybook_entry_cancelled',
@@ -2161,33 +2764,11 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
     const bank = parseLine(req.body.bankAccount || { amount: req.body.bankAmount, side: req.body.bankSide });
     const stock = parseLine(req.body.openingStock || { amount: req.body.openingStockValue, side: req.body.openingStockSide });
 
-    const posted: Array<Record<string, any>> = [];
-    let openingDebitTotal = 0;
-    let openingCreditTotal = 0;
-    const postOpening = async (account: any, amount: number, side: 'debit' | 'credit', narration: string) => {
+    const planned: Array<{ account: any; amount: number; side: 'debit' | 'credit'; narration: string }> = [];
+    const queueOpening = (account: any, amount: number, side: 'debit' | 'credit', narration: string) => {
       if (amount <= 0) return;
-      await postLedger({
-        accountId: account._id,
-        entryDate: openingDate,
-        voucherType: 'opening',
-        voucherNumber,
-        narration,
-        debit: side === 'debit' ? amount : 0,
-        credit: side === 'credit' ? amount : 0,
-        createdBy: req.userId,
-        metadata: { source: 'opening_balance' },
-      });
-      openingDebitTotal = round2(openingDebitTotal + (side === 'debit' ? amount : 0));
-      openingCreditTotal = round2(openingCreditTotal + (side === 'credit' ? amount : 0));
-      account.openingBalance = round2(Number(account.openingBalance || 0) + amount);
-      account.openingSide = side;
-      await account.save();
-      posted.push({
-        accountId: account._id,
-        accountName: account.accountName,
-        amount,
-        side,
-      });
+      if (!account?._id) throw new Error(`Opening balance account missing for ${narration}`);
+      planned.push({ account, amount, side, narration });
     };
 
     const cashAccount = await getCoreAccount('cash');
@@ -2198,12 +2779,13 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
     const bankSide: 'debit' | 'credit' = String(bank.side).toLowerCase() === 'credit' ? 'credit' : 'debit';
     const stockSide: 'debit' | 'credit' = String(stock.side).toLowerCase() === 'credit' ? 'credit' : 'debit';
 
-    await postOpening(cashAccount, cash.amount, cashSide, 'Opening balance - Cash');
-    await postOpening(bankAccount, bank.amount, bankSide, 'Opening balance - Bank');
-    await postOpening(stockAccount, stock.amount, stockSide, 'Opening balance - Stock');
+    queueOpening(cashAccount, cash.amount, cashSide, 'Opening balance - Cash');
+    queueOpening(bankAccount, bank.amount, bankSide, 'Opening balance - Bank');
+    queueOpening(stockAccount, stock.amount, stockSide, 'Opening balance - Stock');
 
     const customerAccounts = Array.isArray(req.body.customerAccounts) ? req.body.customerAccounts : [];
     const supplierAccounts = Array.isArray(req.body.supplierAccounts) ? req.body.supplierAccounts : [];
+    const masterOpeningSync: Array<(session: mongoose.ClientSession) => Promise<void>> = [];
 
     for (const row of customerAccounts) {
       const name = String(row?.name || row?.accountName || '').trim();
@@ -2216,7 +2798,17 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
         subType: 'customer',
         createdBy: req.userId,
       });
-      await postOpening(account, amount, side, `Opening balance - Customer (${name})`);
+      queueOpening(account, amount, side, `Opening balance - Customer (${name})`);
+      masterOpeningSync.push(async (session) => {
+        const customer = await Customer.findOne({
+          name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
+        }).session(session);
+        if (!customer) return;
+        const signedOpening = side === 'debit' ? amount : -amount;
+        customer.openingBalance = signedOpening;
+        customer.outstandingBalance = signedOpening;
+        await customer.save({ session });
+      });
     }
 
     for (const row of supplierAccounts) {
@@ -2230,35 +2822,99 @@ router.post('/opening-balances', authMiddleware, async (req: AuthenticatedReques
         subType: 'supplier',
         createdBy: req.userId,
       });
-      await postOpening(account, amount, side, `Opening balance - Supplier (${name})`);
+      queueOpening(account, amount, side, `Opening balance - Supplier (${name})`);
+      masterOpeningSync.push(async (session) => {
+        const vendor = await Vendor.findOne({
+          name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
+          isActive: true,
+        }).session(session);
+        if (!vendor) return;
+        vendor.openingBalance = amount;
+        vendor.openingSide = side;
+        await vendor.save({ session });
+      });
     }
 
+    let openingDebitTotal = round2(planned.reduce((sum, row) => sum + (row.side === 'debit' ? row.amount : 0), 0));
+    let openingCreditTotal = round2(planned.reduce((sum, row) => sum + (row.side === 'credit' ? row.amount : 0), 0));
     const openingDifference = round2(openingDebitTotal - openingCreditTotal);
     if (openingDifference !== 0) {
-      const equityAccount = await getOrCreateAccount({
-        accountName: 'Opening Balance Equity',
-        accountType: 'liability',
-        subType: 'general',
-        isSystem: true,
-        createdBy: req.userId,
-      });
+      const equityAccount = await getSystemChartAccount('opening_balance_equity', req.userId);
       const equitySide: 'debit' | 'credit' = openingDifference > 0 ? 'credit' : 'debit';
-      await postOpening(
+      queueOpening(
         equityAccount,
         Math.abs(openingDifference),
         equitySide,
         'Opening balance auto-balancing entry'
       );
+      openingDebitTotal = round2(planned.reduce((sum, row) => sum + (row.side === 'debit' ? row.amount : 0), 0));
+      openingCreditTotal = round2(planned.reduce((sum, row) => sum + (row.side === 'credit' ? row.amount : 0), 0));
     }
 
-    setup.initializedAt = new Date();
-    setup.initializedBy = req.userId;
-    if (Boolean(req.body.lockAfterSave)) {
-      setup.isLocked = true;
-      setup.lockedAt = new Date();
-      setup.lockedBy = req.userId;
+    if (round2(openingDebitTotal - openingCreditTotal) !== 0) {
+      throw new Error('Opening balance posting is not balanced');
     }
-    await setup.save();
+
+    const posted: Array<Record<string, any>> = [];
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        for (const row of planned) {
+          await postLedger({
+            accountId: row.account._id,
+            entryDate: openingDate,
+            voucherType: 'opening',
+            voucherNumber,
+            narration: row.narration,
+            debit: row.side === 'debit' ? row.amount : 0,
+            credit: row.side === 'credit' ? row.amount : 0,
+            createdBy: req.userId,
+            metadata: { source: 'opening_balance' },
+            session,
+          });
+          row.account.openingBalance = round2(Number(row.account.openingBalance || 0) + row.amount);
+          row.account.openingSide = row.side;
+          await row.account.save({ session });
+          posted.push({
+            accountId: row.account._id,
+            accountName: row.account.accountName,
+            amount: row.amount,
+            side: row.side,
+          });
+        }
+
+        setup.initializedAt = new Date();
+        setup.initializedBy = req.userId;
+        if (Boolean(req.body.lockAfterSave)) {
+          setup.isLocked = true;
+          setup.lockedAt = new Date();
+          setup.lockedBy = req.userId;
+        }
+        await setup.save({ session });
+
+        for (const syncMasterOpening of masterOpeningSync) {
+          await syncMasterOpening(session);
+        }
+
+        const primaryBankTreasury =
+          await TreasuryAccount.findOne({ accountType: 'bank', isPrimary: true }).session(session)
+          || await TreasuryAccount.findOne({ accountType: 'bank', chartAccountId: bankAccount._id }).session(session);
+        if (primaryBankTreasury) {
+          primaryBankTreasury.openingBalance = bank.amount;
+          await primaryBankTreasury.save({ session });
+        }
+
+        const cashFloatTreasury =
+          await TreasuryAccount.findOne({ accountType: 'cash_float', chartAccountId: cashAccount._id }).session(session)
+          || await TreasuryAccount.findOne({ accountType: 'cash_float' }).session(session);
+        if (cashFloatTreasury) {
+          cashFloatTreasury.openingBalance = cash.amount;
+          await cashFloatTreasury.save({ session });
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
 
     res.status(201).json({
       success: true,
@@ -2459,6 +3115,17 @@ router.post('/ledgers', authMiddleware, async (req: AuthenticatedRequest, res: R
       return res.status(409).json({ success: false, error: 'Folio number / account code already exists' });
     }
 
+    const duplicateByName = await findDuplicateAccountByName({
+      accountName,
+      accountType: group.under,
+    });
+    if (duplicateByName) {
+      return res.status(409).json({
+        success: false,
+        error: `A ${accountTypeToUnderLabel(group.under)} ledger named "${accountName}" already exists (${duplicateByName.accountCode}). Use sub-ledgers or edit the existing ledger instead.`,
+      });
+    }
+
     const created = await ChartAccount.create({
       accountCode: code,
       accountName,
@@ -2499,9 +3166,12 @@ router.put('/ledgers/:id', authMiddleware, async (req: AuthenticatedRequest, res
     if (!row) return res.status(404).json({ success: false, error: 'Ledger not found' });
 
     const before = row.toObject();
+    let nextAccountName = row.accountName;
+    let nextAccountType = row.accountType;
     if (req.body.accountName !== undefined) {
       const accountName = String(req.body.accountName || '').trim();
       if (!accountName) return res.status(400).json({ success: false, error: 'Account name is required' });
+      nextAccountName = accountName;
       row.accountName = accountName;
     }
     if (req.body.accountCode !== undefined && !row.isSystem) {
@@ -2517,7 +3187,10 @@ router.put('/ledgers/:id', authMiddleware, async (req: AuthenticatedRequest, res
       if (!group) return res.status(404).json({ success: false, error: 'Selected group was not found' });
       row.groupId = group._id;
       row.groupName = group.groupName;
-      if (!row.isSystem) row.accountType = group.under;
+      if (!row.isSystem) {
+        nextAccountType = group.under;
+        row.accountType = group.under;
+      }
     }
     if (req.body.subType !== undefined && !row.isSystem) {
       row.subType = ['cash', 'bank', 'customer', 'supplier', 'stock', 'general'].includes(String(req.body.subType))
@@ -2532,6 +3205,18 @@ router.put('/ledgers/:id', authMiddleware, async (req: AuthenticatedRequest, res
       row.openingSide = String(req.body.openingSide || 'debit').toLowerCase() === 'credit' ? 'credit' : 'debit';
     }
     if (req.body.isActive !== undefined && !row.isSystem) row.isActive = Boolean(req.body.isActive);
+
+    const duplicateByName = await findDuplicateAccountByName({
+      accountName: nextAccountName,
+      accountType: nextAccountType,
+      excludeId: row._id.toString(),
+    });
+    if (duplicateByName) {
+      return res.status(409).json({
+        success: false,
+        error: `A ${accountTypeToUnderLabel(nextAccountType)} ledger named "${nextAccountName}" already exists (${duplicateByName.accountCode}). Merge into the existing ledger instead of creating duplicates.`,
+      });
+    }
 
     await row.save();
 
@@ -2599,6 +3284,17 @@ router.post('/chart-accounts', authMiddleware, async (req: AuthenticatedRequest,
       return res.status(409).json({ success: false, error: 'Account code already exists' });
     }
 
+    const duplicateByName = await findDuplicateAccountByName({
+      accountName: String(accountName).trim(),
+      accountType: safeType,
+    });
+    if (duplicateByName) {
+      return res.status(409).json({
+        success: false,
+        error: `A ${accountTypeToUnderLabel(safeType)} chart account named "${String(accountName).trim()}" already exists (${duplicateByName.accountCode}).`,
+      });
+    }
+
     const created = await ChartAccount.create({
       accountCode: code,
       accountName: String(accountName).trim(),
@@ -2631,7 +3327,20 @@ router.put('/chart-accounts/:id', authMiddleware, async (req: AuthenticatedReque
         : row.subType;
     }
 
-    const updated = await ChartAccount.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const nextAccountName = String(updates.accountName ?? row.accountName ?? '').trim();
+    const duplicateByName = await findDuplicateAccountByName({
+      accountName: nextAccountName,
+      accountType: row.accountType,
+      excludeId: row._id.toString(),
+    });
+    if (duplicateByName) {
+      return res.status(409).json({
+        success: false,
+        error: `A ${accountTypeToUnderLabel(row.accountType)} chart account named "${nextAccountName}" already exists (${duplicateByName.accountCode}).`,
+      });
+    }
+
+    const updated = await ChartAccount.findByIdAndUpdate(req.params.id, updates, { returnDocument: 'after', runValidators: true });
     res.json({ success: true, data: updated, message: 'Chart account updated' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to update chart account' });
@@ -2794,6 +3503,7 @@ const updateVoucherHandler = async (req: AuthenticatedRequest, res: Response) =>
     voucher.counterpartyName = payload.counterpartyName;
     voucher.notes = payload.notes;
     voucher.documentFields = payload.documentFields;
+    voucher.metadata = payload.metadata;
     voucher.totalAmount = round2(payload.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0));
     voucher.lines = payload.lines.map((line) => {
       const account = accountMap.get(line.accountId);
@@ -2810,7 +3520,7 @@ const updateVoucherHandler = async (req: AuthenticatedRequest, res: Response) =>
     await voucher.save();
 
     await replaceVoucherLedgerRows(voucher, payload, req.userId);
-    await syncDayBookWithVoucher(voucher, payload.categoryLabel, req.userId);
+    await syncDayBookWithVoucher(voucher, payload, req.userId);
 
     const after = voucher.toObject();
     await writeAuditLog({
@@ -2918,7 +3628,7 @@ router.delete('/vouchers/:id', authMiddleware, async (req: AuthenticatedRequest,
 
 router.post('/vouchers/:id/mark-printed', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const row = await AccountingVoucher.findByIdAndUpdate(String(req.params.id), { isPrinted: true }, { new: true });
+    const row = await AccountingVoucher.findByIdAndUpdate(String(req.params.id), { isPrinted: true }, { returnDocument: 'after' });
     if (!row) return res.status(404).json({ success: false, error: 'Voucher not found' });
     res.json({ success: true, data: row, message: 'Voucher marked as printed' });
   } catch (error: any) {
@@ -3241,9 +3951,9 @@ router.get('/books/bank', authMiddleware, async (req: AuthenticatedRequest, res:
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
     const data = await buildBookReport('bank', start, end);
-    const bankAccount = await getCoreAccount('bank');
+    const bankAccounts = await ChartAccount.find({ subType: 'bank', isActive: true }).select('_id').lean();
     const reconciliationPending = await AccountLedgerEntry.find({
-      accountId: bankAccount._id,
+      accountId: { $in: bankAccounts.map((account: any) => account._id) },
       entryDate: { $gte: start, $lte: end },
       isReconciled: false,
       voucherType: { $in: ['receipt', 'payment', 'journal', 'transfer', 'salary', 'contract', 'adjustment'] },
@@ -3294,32 +4004,84 @@ const computeNetUntil = async (end: Date) => {
 
 const collectBookEvents = async (book: BookType, start: Date, end: Date): Promise<BookEvent[]> => {
   await ensureDefaultChartAccounts();
-  const cashAccount = await getCoreAccount('cash');
-  const bankAccount = await getCoreAccount('bank');
+  const bookAccounts = await ChartAccount.find({ subType: book, isActive: true }).select('_id accountName accountCode').lean();
+  const bookAccountIds = bookAccounts.map((account: any) => account._id);
+  if (!bookAccountIds.length) return [];
 
-  const [sales, returns, salaries, contracts, daybookRows, receiptRows, transferRows] = await Promise.all([
+  const [ledgerRows, sales, returns, salaries, contracts, daybookRows, receiptRows] = await Promise.all([
+    AccountLedgerEntry.find({
+      accountId: { $in: bookAccountIds },
+      entryDate: { $gte: start, $lte: end },
+      voucherType: { $ne: 'opening' },
+    }).sort({ entryDate: 1, createdAt: 1, _id: 1 }),
     Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: 1 }),
     Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: 1 }),
     SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: 1 }),
     ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: 1 }),
     DayBookEntry.find({ entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: 1 }),
     ReceiptVoucher.find({ entryDate: { $gte: start, $lte: end } }).sort({ entryDate: 1 }),
-    AccountLedgerEntry.find({
-      voucherType: 'transfer',
-      accountId: { $in: [cashAccount._id, bankAccount._id] },
-      entryDate: { $gte: start, $lte: end },
-    }).sort({ entryDate: 1 }),
   ]);
 
   const events: BookEvent[] = [];
+  const postedRefs = new Set<string>();
+  const receiptAllocationRefs = new Set<string>();
+  for (const row of receiptRows) {
+    if (toBookType(row.mode) !== book) continue;
+    for (const allocation of Array.isArray(row.allocations) ? row.allocations : []) {
+      addBookReferenceKey(receiptAllocationRefs, allocation?.saleId);
+      addBookReferenceKey(receiptAllocationRefs, allocation?.saleNumber);
+    }
+  }
+
+  for (const row of ledgerRows) {
+    const amount = round2(Math.max(Number(row.debit || 0), Number(row.credit || 0)));
+    if (amount <= 0) continue;
+    const isInflow = Number(row.debit || 0) > 0;
+    const metadata = (row.metadata as any) || {};
+    const sourceOrigin = String(metadata.source || '').trim().toLowerCase();
+    const referenceType = String(metadata.referenceType || '').trim().toLowerCase();
+    const managementId = String(metadata.sourceId || '').trim() || undefined;
+    const sourceSaleId = String(metadata.sourceSaleId || '').trim() || undefined;
+    const sourceInvoiceNumber = String(metadata.sourceInvoiceNumber || '').trim() || undefined;
+    let sourceLabel = String(row.voucherType || 'ledger').trim() || 'ledger';
+    if (sourceOrigin === 'journal_entry') {
+      if (referenceType === 'payment') {
+        sourceLabel = isInflow ? 'receipt' : 'payment';
+      } else if (referenceType) {
+        sourceLabel = referenceType;
+      }
+    }
+
+    addBookReferenceKey(postedRefs, row.voucherNumber);
+    addBookReferenceKey(postedRefs, row.referenceNo);
+    addBookReferenceKey(postedRefs, managementId);
+    addBookReferenceKey(postedRefs, sourceSaleId);
+    addBookReferenceKey(postedRefs, sourceInvoiceNumber);
+    events.push({
+      time: row.entryDate,
+      source: sourceLabel,
+      type: isInflow ? 'inflow' : 'outflow',
+      amount,
+      narration: row.narration || `${book === 'cash' ? 'Cash' : 'Bank'} ledger movement`,
+      reference: row.voucherNumber || row.referenceNo || row._id.toString(),
+      paymentMethod: row.paymentMode || book,
+      managementType: sourceOrigin === 'voucher' ? 'voucher' : sourceOrigin === 'journal_entry' ? 'journal' : undefined,
+      managementId,
+    });
+  }
 
   for (const row of sales) {
+    const reference = row.invoiceNumber || row.saleNumber;
+    if (postedRefs.has(String(reference || '')) || postedRefs.has(row._id.toString())) continue;
+    if (receiptAllocationRefs.has(row._id.toString()) || receiptAllocationRefs.has(String(reference || '').trim())) continue;
     if (toBookType(row.paymentMethod) !== book) continue;
+    const amountCollected = resolveFallbackSaleBookAmount(row);
+    if (amountCollected <= 0) continue;
     events.push({
       time: row.createdAt || new Date(),
       source: 'sale',
       type: 'inflow',
-      amount: round2(Number(row.totalAmount || 0)),
+      amount: amountCollected,
       narration: `Sale ${row.invoiceNumber || row.saleNumber}`,
       reference: row.invoiceNumber || row.saleNumber,
       paymentMethod: row.paymentMethod,
@@ -3327,6 +4089,8 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   }
 
   for (const row of returns) {
+    const reference = row.returnNumber;
+    if (postedRefs.has(String(reference || '')) || postedRefs.has(row._id.toString())) continue;
     if (toBookType(row.refundMethod) !== book) continue;
     events.push({
       time: row.createdAt || new Date(),
@@ -3340,6 +4104,7 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   }
 
   for (const row of salaries) {
+    if (postedRefs.has(row._id.toString())) continue;
     if (toBookType(row.paymentMethod) !== book) continue;
     events.push({
       time: row.payDate,
@@ -3353,12 +4118,13 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   }
 
   for (const row of contracts) {
+    if (postedRefs.has(row._id.toString())) continue;
     if (toBookType(row.paymentMethod) !== book) continue;
     events.push({
       time: row.paymentDate,
       source: 'contract',
       type: 'outflow',
-      amount: round2(Number(row.amount || 0)),
+      amount: round2(Number((row as any).netPaymentAmount ?? row.amount ?? 0)),
       narration: `Contract ${row.contractorName}`,
       reference: row._id.toString(),
       paymentMethod: row.paymentMethod,
@@ -3366,12 +4132,15 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   }
 
   for (const row of daybookRows) {
+    if (postedRefs.has(String(row.referenceNo || '')) || postedRefs.has(row._id.toString())) continue;
     if (toBookType(row.paymentMethod) !== book) continue;
+    const amount = dayBookCashFlowAmount(row);
+    if (amount <= 0) continue;
     events.push({
       time: row.entryDate,
       source: 'daybook',
       type: row.entryType === 'income' ? 'inflow' : 'outflow',
-      amount: round2(Number(row.amount || 0)),
+      amount,
       narration: `${row.category}${row.narration ? ` - ${row.narration}` : ''}`,
       reference: row.referenceNo || row._id.toString(),
       paymentMethod: row.paymentMethod,
@@ -3379,6 +4148,7 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
   }
 
   for (const row of receiptRows) {
+    if (shouldSkipReceiptVoucherBookEntry(postedRefs, row)) continue;
     if (toBookType(row.mode) !== book) continue;
     events.push({
       time: row.entryDate,
@@ -3391,33 +4161,34 @@ const collectBookEvents = async (book: BookType, start: Date, end: Date): Promis
     });
   }
 
-  for (const row of transferRows) {
-    const isCashAccount = row.accountId.toString() === cashAccount._id.toString();
-    const match = (book === 'cash' && isCashAccount) || (book === 'bank' && !isCashAccount);
-    if (!match) continue;
-    const amount = round2(Number(row.debit > 0 ? row.debit : row.credit));
-    if (amount <= 0) continue;
-    events.push({
-      time: row.entryDate,
-      source: 'transfer',
-      type: row.debit > 0 ? 'inflow' : 'outflow',
-      amount,
-      narration: row.narration || 'Cash/Bank transfer',
-      reference: row.voucherNumber || row.referenceNo || row._id.toString(),
-      paymentMethod: 'bank_transfer',
-    });
-  }
-
   return events.sort((a, b) => a.time.getTime() - b.time.getTime());
+};
+
+const collectBookOpeningBalance = async (book: BookType, start: Date) => {
+  await ensureDefaultChartAccounts();
+  const bookAccounts = await ChartAccount.find({ subType: book, isActive: true }).select('_id accountName accountCode').lean();
+  const bookAccountIds = bookAccounts.map((account: any) => account._id);
+  if (!bookAccountIds.length) return 0;
+  const openingCutoff = new Date(start);
+  openingCutoff.setHours(23, 59, 59, 999);
+  const rows = await AccountLedgerEntry.find({
+    accountId: { $in: bookAccountIds },
+    voucherType: 'opening',
+    entryDate: { $lte: openingCutoff },
+  });
+  return round2(rows.reduce((sum, row) => sum + Number(row.debit || 0) - Number(row.credit || 0), 0));
 };
 
 const buildBookReport = async (book: BookType, start: Date, end: Date) => {
   const beforeStart = new Date(start.getTime() - 1);
-  const [history, current] = await Promise.all([
+  const [openingEntriesBalance, history, current] = await Promise.all([
+    collectBookOpeningBalance(book, start),
     collectBookEvents(book, new Date('1970-01-01T00:00:00.000Z'), beforeStart),
     collectBookEvents(book, start, end),
   ]);
-  const openingBalance = round2(history.reduce((sum, row) => sum + (row.type === 'inflow' ? row.amount : -row.amount), 0));
+  const openingBalance = round2(
+    openingEntriesBalance + history.reduce((sum, row) => sum + (row.type === 'inflow' ? row.amount : -row.amount), 0)
+  );
   const totalInflow = round2(current.filter((row) => row.type === 'inflow').reduce((sum, row) => sum + row.amount, 0));
   const totalOutflow = round2(current.filter((row) => row.type === 'outflow').reduce((sum, row) => sum + row.amount, 0));
   return {
@@ -3582,7 +4353,9 @@ router.get('/reports/trial-balance', authMiddleware, accountingReportRateLimit, 
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = toDateRange(startDate as string | undefined, endDate as string | undefined);
-    const data = await buildTrialBalanceReport(start, end);
+    const data = await buildTrialBalanceReport(start, end, {
+      includeDiagnostics: String(req.query.showDiagnostics || '').trim().toLowerCase() === 'true',
+    });
 
     res.json({ success: true, data });
   } catch (error: any) {
@@ -3606,7 +4379,9 @@ router.get('/reports/balance-sheet', authMiddleware, accountingReportRateLimit, 
   try {
     const asOnDate = req.query.asOnDate ? new Date(String(req.query.asOnDate)) : new Date();
     asOnDate.setHours(23, 59, 59, 999);
-    const data = await buildBalanceSheetReport(asOnDate);
+    const data = await buildBalanceSheetReport(asOnDate, {
+      includeDiagnostics: String(req.query.showDiagnostics || '').trim().toLowerCase() === 'true',
+    });
 
     res.json({ success: true, data });
   } catch (error: any) {

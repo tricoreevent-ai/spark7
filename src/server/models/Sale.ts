@@ -16,6 +16,7 @@ export interface ISaleItem {
   quantity: number;
   unitPrice: number;
   listPrice?: number;
+  priceOverrideAmount?: number;
   discountAmount?: number;
   discountPercentage?: number;
   taxableValue?: number;
@@ -39,6 +40,14 @@ export interface ISaleItem {
   lineTotal?: number; // quantity * unitPrice + gstAmount
 }
 
+export interface ISalePaymentSplit {
+  id?: string;
+  method: 'cash' | 'card' | 'upi' | 'cheque' | 'online' | 'bank_transfer';
+  amount: number;
+  receivedAmount?: number;
+  note?: string;
+}
+
 export interface ISale {
   _id?: string;
   saleNumber: string; // Auto-generated unique sales number
@@ -57,6 +66,7 @@ export interface ISale {
   roundOffAmount?: number;
   totalAmount: number; // Final amount including GST
   paymentMethod: 'cash' | 'card' | 'upi' | 'cheque' | 'online' | 'bank_transfer';
+  paymentSplits?: ISalePaymentSplit[];
   treasuryAccountId?: string;
   treasuryAccountName?: string;
   expectedSettlementDate?: Date;
@@ -76,7 +86,19 @@ export interface ISale {
   discountAmount?: number;
   discountPercentage?: number;
   priceOverrideRequired?: boolean;
+  priceOverrideReason?: string;
   priceOverrideApprovedBy?: string;
+  ledgerPosted?: boolean;
+  ledgerPostedAt?: Date;
+  ledgerPostedBy?: string;
+  accountingInvoiceId?: string;
+  accountingInvoiceNumber?: string;
+  accountingPaymentIds?: string[];
+  migratedToLedger?: boolean;
+  migratedToLedgerAt?: Date;
+  migratedToLedgerBy?: string;
+  migratedLedgerInvoiceId?: string;
+  migratedLedgerInvoiceNumber?: string;
   postedAt?: Date;
   postedBy?: string;
   createdAt?: Date;
@@ -146,6 +168,7 @@ const SaleSchema = new Schema<ISale>(
         quantity: { type: Number, required: true },
         unitPrice: { type: Number, required: true },
         listPrice: Number,
+        priceOverrideAmount: Number,
         discountAmount: Number,
         discountPercentage: Number,
         taxableValue: Number,
@@ -182,6 +205,20 @@ const SaleSchema = new Schema<ISale>(
       enum: ['cash', 'card', 'upi', 'cheque', 'online', 'bank_transfer'],
       default: 'cash',
     },
+    paymentSplits: {
+      type: [{
+        id: { type: String, trim: true },
+        method: {
+          type: String,
+          enum: ['cash', 'card', 'upi', 'cheque', 'online', 'bank_transfer'],
+          default: 'cash',
+        },
+        amount: { type: Number, default: 0, min: 0 },
+        receivedAmount: { type: Number, min: 0 },
+        note: { type: String, trim: true },
+      }],
+      default: [],
+    },
     treasuryAccountId: { type: String, trim: true, index: true },
     treasuryAccountName: { type: String, trim: true },
     expectedSettlementDate: { type: Date, index: true },
@@ -209,7 +246,19 @@ const SaleSchema = new Schema<ISale>(
     discountAmount: { type: Number, default: 0 },
     discountPercentage: { type: Number, default: 0 },
     priceOverrideRequired: { type: Boolean, default: false },
+    priceOverrideReason: { type: String, trim: true },
     priceOverrideApprovedBy: { type: String, index: true },
+    ledgerPosted: { type: Boolean, default: false, index: true },
+    ledgerPostedAt: { type: Date, index: true },
+    ledgerPostedBy: { type: String, index: true },
+    accountingInvoiceId: { type: String, trim: true, index: true },
+    accountingInvoiceNumber: { type: String, trim: true, index: true },
+    accountingPaymentIds: { type: [String], default: [] },
+    migratedToLedger: { type: Boolean, default: false, index: true },
+    migratedToLedgerAt: { type: Date },
+    migratedToLedgerBy: { type: String, index: true },
+    migratedLedgerInvoiceId: { type: String, trim: true, index: true },
+    migratedLedgerInvoiceNumber: { type: String, trim: true, index: true },
     postedAt: { type: Date, index: true },
     postedBy: { type: String, index: true },
   },

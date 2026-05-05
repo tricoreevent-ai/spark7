@@ -119,6 +119,7 @@ const getTooltipForButton = (node: Element): string => {
 
 const applyTooltip = (node: Element, tooltip: string) => {
   if (!tooltip) return;
+  if (String(node.getAttribute('data-disable-auto-tooltip') || '') === 'true') return;
 
   const title = String(node.getAttribute('title') || '').trim();
   const auto = String(node.getAttribute('data-auto-tooltip') || '') === 'true';
@@ -164,7 +165,7 @@ export const initializeAutoTooltips = (): (() => void) => {
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['aria-label', 'href', 'disabled', 'data-tooltip'],
+    attributeFilter: ['aria-label', 'href', 'disabled', 'data-tooltip', 'data-disable-auto-tooltip'],
   });
 
   window.addEventListener('hashchange', queueApply);

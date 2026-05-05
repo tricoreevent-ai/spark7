@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -360,9 +361,7 @@ export const SettlementCenter: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <input className={inputClass} type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
           <input className={inputClass} type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
-          <button type="button" onClick={() => void refreshAll('Settlement data refreshed.')} className={buttonClass} disabled={loading}>
-            Refresh
-          </button>
+          <ActionIconButton kind="refresh" onClick={() => void refreshAll('Settlement data refreshed.')} disabled={loading} title="Refresh" />
         </div>
       </div>
 

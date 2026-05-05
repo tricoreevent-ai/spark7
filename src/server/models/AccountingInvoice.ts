@@ -14,6 +14,7 @@ export interface IAccountingInvoice extends Document {
   referenceId?: string;
   description?: string;
   baseAmount: number;
+  discountAmount: number;
   gstAmount: number;
   cgstAmount: number;
   sgstAmount: number;
@@ -50,6 +51,7 @@ const AccountingInvoiceSchema = new Schema<IAccountingInvoice>(
     referenceId: { type: String, trim: true, index: true },
     description: { type: String, trim: true },
     baseAmount: { type: Number, required: true, min: 0 },
+    discountAmount: { type: Number, default: 0, min: 0 },
     gstAmount: { type: Number, default: 0, min: 0 },
     cgstAmount: { type: Number, default: 0, min: 0 },
     sgstAmount: { type: Number, default: 0, min: 0 },

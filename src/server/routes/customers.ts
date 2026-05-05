@@ -635,7 +635,7 @@ router.put('/:id/block', authMiddleware, async (req: AuthenticatedRequest, res: 
     const customer = await Customer.findByIdAndUpdate(
       req.params.id,
       { isBlocked: Boolean(isBlocked) },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 

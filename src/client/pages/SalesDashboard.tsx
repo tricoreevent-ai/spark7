@@ -184,7 +184,7 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({ permissions }) =
           const rows = Array.isArray(response?.data) ? response.data : [];
           const totalsByKey = rows.reduce<Record<string, number>>((acc, row: any) => {
             const key = `${row?._id?.year || ''}-${String(row?._id?.month || '').padStart(2, '0')}-${String(row?._id?.day || '').padStart(2, '0')}`;
-            acc[key] = Number(row?.salesAmount || 0);
+            acc[key] = Number(row?.netSales ?? row?.salesAmount ?? 0);
             return acc;
           }, {});
 
@@ -209,7 +209,7 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({ permissions }) =
                 headers: { Authorization: `Bearer ${token}` },
               }
             );
-            return Number(response?.data?.summary?.totalSales || 0);
+            return Number(response?.data?.summary?.netSales ?? 0);
           })
         );
 
@@ -347,19 +347,19 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({ permissions }) =
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         <div className="rounded-[28px] border border-emerald-400/15 bg-gradient-to-br from-emerald-500/16 via-emerald-500/6 to-transparent p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/90">Today</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/90">Today Net Sales</p>
           <p className="mt-3 text-3xl font-semibold text-white">{formatCurrency(todaySales)}</p>
-          <p className="mt-2 text-sm text-emerald-100/80">Current day sales movement from the live trend window.</p>
+          <p className="mt-2 text-sm text-emerald-100/80">Taxable sales after discount and before GST from the live trend window.</p>
         </div>
         <div className="rounded-[28px] border border-cyan-400/15 bg-gradient-to-br from-cyan-500/16 via-cyan-500/6 to-transparent p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/90">Last 7 Days</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/90">7-Day Net Sales</p>
           <p className="mt-3 text-3xl font-semibold text-white">{formatCurrency(weekTotal)}</p>
-          <p className="mt-2 text-sm text-cyan-100/80">Combined sales from the current seven-day dashboard trend.</p>
+          <p className="mt-2 text-sm text-cyan-100/80">Combined taxable sales after discount and before GST for the current seven-day trend.</p>
         </div>
         <div className="rounded-[28px] border border-fuchsia-400/15 bg-gradient-to-br from-fuchsia-500/16 via-fuchsia-500/6 to-transparent p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-200/90">Daily Average</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-200/90">Average Net Sales</p>
           <p className="mt-3 text-3xl font-semibold text-white">{formatCurrency(averageDailySales)}</p>
-          <p className="mt-2 text-sm text-fuchsia-100/80">Average daily collection based on the same seven-day window.</p>
+          <p className="mt-2 text-sm text-fuchsia-100/80">Average daily taxable sales after discount and before GST in the same seven-day window.</p>
         </div>
         <div className="rounded-[28px] border border-amber-400/15 bg-gradient-to-br from-amber-500/16 via-amber-500/6 to-transparent p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/90">Peak Day</p>
@@ -377,7 +377,7 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({ permissions }) =
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Sales Graph</p>
               <h2 className="mt-2 text-2xl font-semibold text-white">7-day sales trend</h2>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Compare each day quickly before opening the full sales report.
+                Compare net sales for each day before opening the full sales report.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">

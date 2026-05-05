@@ -36,6 +36,247 @@ const normalizeVariantMatrix = (
 };
 
 const normalizeOptionalHsnCode = (value: any): string => String(value || '').trim().replace(/\s+/g, '');
+const VALID_ITEM_TYPES = new Set(['inventory', 'service', 'non_inventory']);
+const VALID_UNITS = new Set(['piece', 'pcs', 'kg', 'gram', 'liter', 'ml', 'meter', 'box', 'pack', 'dozen']);
+const VALID_GST_RATES = new Set([0, 5, 12, 18, 28]);
+
+type BulkRowError = {
+  rowNumber: number;
+  sku?: string;
+  name?: string;
+  messages: string[];
+};
+
+type BulkDuplicateMode = 'update_existing' | 'skip_existing' | 'error_existing';
+
+type NormalizedBulkProductRow = {
+  sourceRowNumber: number;
+  name: string;
+  sku: string;
+  barcode?: string;
+  description: string;
+  category: string;
+  subcategory: string;
+  itemType: 'inventory' | 'service' | 'non_inventory';
+  price: number;
+  wholesalePrice: number;
+  promotionalPrice: number;
+  promotionStartDate?: Date;
+  promotionEndDate?: Date;
+  priceTiers: Array<{ tierName: string; minQuantity: number; unitPrice: number }>;
+  cost: number;
+  gstRate: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  taxType: 'gst' | 'vat';
+  stock: number;
+  openingStockValue: number;
+  stockLedgerAccountId?: string;
+  returnStock: number;
+  damagedStock: number;
+  minStock: number;
+  autoReorder: boolean;
+  reorderQuantity: number;
+  unit: string;
+  hsnCode: string;
+  allowNegativeStock: boolean;
+  batchTracking: boolean;
+  expiryRequired: boolean;
+  serialNumberTracking: boolean;
+  variantSize: string;
+  variantColor: string;
+  variantMatrix: Array<{ size: string; color: string; skuSuffix: string; barcode: string; price: number; isActive: boolean }>;
+  imageUrl: string;
+  isActive: boolean;
+};
+
+const parseBooleanLike = (value: any, defaultValue = false): boolean => {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', 'yes', 'y', '1', 'active'].includes(normalized)) return true;
+  if (['false', 'no', 'n', '0', 'inactive'].includes(normalized)) return false;
+  return defaultValue;
+};
+
+const normalizeItemTypeValue = (value: any): 'inventory' | 'service' | 'non_inventory' => {
+  const normalized = String(value || 'inventory').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'service') return 'service';
+  if (normalized === 'non_inventory') return 'non_inventory';
+  return 'inventory';
+};
+
+const normalizeUnitValue = (value: any): string => String(value || 'piece').trim().toLowerCase();
+
+const parseOptionalDate = (value: any): Date | null | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const parseOptionalNumber = (value: any, defaultValue = 0): number | null => {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return null;
+  return parsed;
+};
+
+const parseJsonArrayInput = (value: any): any[] | null => {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === '') return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const validateBulkProductRow = (raw: any, fallbackRowNumber: number): { normalized?: NormalizedBulkProductRow; error?: BulkRowError } => {
+  const rowNumber = Math.max(2, Number(raw?.sourceRowNumber || fallbackRowNumber || 2));
+  const name = String(raw?.name || '').trim();
+  const sku = String(raw?.sku || '').trim().toUpperCase();
+  const category = String(raw?.category || '').trim();
+  const barcode = String(raw?.barcode || '').trim().toUpperCase();
+  const description = String(raw?.description || '').trim();
+  const subcategory = String(raw?.subcategory || '').trim();
+  const itemType = normalizeItemTypeValue(raw?.itemType);
+  const unit = normalizeUnitValue(raw?.unit);
+  const taxType = String(raw?.taxType || 'gst').trim().toLowerCase() === 'vat' ? 'vat' : 'gst';
+  const hsnCode = normalizeOptionalHsnCode(raw?.hsnCode);
+  const variantSize = String(raw?.variantSize || '').trim();
+  const variantColor = String(raw?.variantColor || '').trim();
+  const imageUrl = String(raw?.imageUrl || '').trim();
+  const stockLedgerAccountId = String(raw?.stockLedgerAccountId || '').trim();
+  const errors: string[] = [];
+
+  if (!name) errors.push('Product name is required.');
+  if (!sku) errors.push('SKU is required.');
+  if (!category) errors.push('Category is required.');
+  if (!VALID_ITEM_TYPES.has(itemType)) errors.push('Item type must be inventory, service, or non_inventory.');
+  if (!VALID_UNITS.has(unit)) errors.push('Unit is not supported by the product master.');
+
+  const price = parseOptionalNumber(raw?.price, NaN);
+  if (price === null || Number.isNaN(price) || price < 0) errors.push('Selling price must be a valid number greater than or equal to 0.');
+
+  const wholesalePrice = parseOptionalNumber(raw?.wholesalePrice, 0);
+  if (wholesalePrice === null || wholesalePrice < 0) errors.push('Wholesale purchase price must be a valid number greater than or equal to 0.');
+
+  const promotionalPrice = parseOptionalNumber(raw?.promotionalPrice, 0);
+  if (promotionalPrice === null || promotionalPrice < 0) errors.push('Promotional price must be a valid number greater than or equal to 0.');
+
+  const cost = parseOptionalNumber(raw?.cost, NaN);
+  if (cost === null || Number.isNaN(cost) || cost < 0) errors.push('Cost (buying) must be a valid number greater than or equal to 0.');
+
+  const gstRate = parseOptionalNumber(raw?.gstRate, 18);
+  if (gstRate === null || !VALID_GST_RATES.has(gstRate)) errors.push('GST rate must be one of 0, 5, 12, 18, or 28.');
+
+  const cgstRate = parseOptionalNumber(raw?.cgstRate, 0);
+  if (cgstRate === null || cgstRate < 0) errors.push('CGST rate must be a valid number greater than or equal to 0.');
+
+  const sgstRate = parseOptionalNumber(raw?.sgstRate, 0);
+  if (sgstRate === null || sgstRate < 0) errors.push('SGST rate must be a valid number greater than or equal to 0.');
+
+  const igstRate = parseOptionalNumber(raw?.igstRate, 0);
+  if (igstRate === null || igstRate < 0) errors.push('IGST rate must be a valid number greater than or equal to 0.');
+
+  const stock = parseOptionalNumber(raw?.stock, 0);
+  if (stock === null || stock < 0) errors.push('Quantity in stock must be a valid number greater than or equal to 0.');
+
+  const openingStockValue = parseOptionalNumber(raw?.openingStockValue, 0);
+  if (openingStockValue === null || openingStockValue < 0) errors.push('Opening stock value must be a valid number greater than or equal to 0.');
+
+  const returnStock = parseOptionalNumber(raw?.returnStock, 0);
+  if (returnStock === null || returnStock < 0) errors.push('Return stock must be a valid number greater than or equal to 0.');
+
+  const damagedStock = parseOptionalNumber(raw?.damagedStock, 0);
+  if (damagedStock === null || damagedStock < 0) errors.push('Damaged stock must be a valid number greater than or equal to 0.');
+
+  const minStock = parseOptionalNumber(raw?.minStock, 10);
+  if (minStock === null || minStock < 0) errors.push('Min stock alert must be a valid number greater than or equal to 0.');
+
+  const reorderQuantity = parseOptionalNumber(raw?.reorderQuantity, 0);
+  if (reorderQuantity === null || reorderQuantity < 0) errors.push('Preferred reorder quantity must be a valid number greater than or equal to 0.');
+
+  const promotionStartDate = parseOptionalDate(raw?.promotionStartDate);
+  if (promotionStartDate === null) errors.push('Promo start date must be a valid date.');
+
+  const promotionEndDate = parseOptionalDate(raw?.promotionEndDate);
+  if (promotionEndDate === null) errors.push('Promo end date must be a valid date.');
+
+  if (promotionStartDate instanceof Date && promotionEndDate instanceof Date && promotionEndDate < promotionStartDate) {
+    errors.push('Promo end date must be on or after promo start date.');
+  }
+
+  if (hsnCode) {
+    const hsnValidation = validateHsnSacCode(hsnCode);
+    if (!hsnValidation.isValid) {
+      errors.push(hsnValidation.message);
+    }
+  }
+
+  const parsedPriceTiers = parseJsonArrayInput(raw?.priceTiers);
+  if (parsedPriceTiers === null) {
+    errors.push('Price tiers must be blank or a valid JSON array.');
+  }
+  const parsedVariantMatrix = parseJsonArrayInput(raw?.variantMatrix);
+  if (parsedVariantMatrix === null) {
+    errors.push('Variant matrix must be blank or a valid JSON array.');
+  }
+
+  if (errors.length) {
+    return { error: { rowNumber, sku, name, messages: errors } };
+  }
+
+  return {
+    normalized: {
+      sourceRowNumber: rowNumber,
+      name,
+      sku,
+      ...(barcode ? { barcode } : {}),
+      description,
+      category,
+      subcategory,
+      itemType,
+      price: Number(price || 0),
+      wholesalePrice: Number(wholesalePrice || 0),
+      promotionalPrice: Number(promotionalPrice || 0),
+      ...(promotionStartDate instanceof Date ? { promotionStartDate } : {}),
+      ...(promotionEndDate instanceof Date ? { promotionEndDate } : {}),
+      priceTiers: normalizePriceTiers(parsedPriceTiers || []),
+      cost: Number(cost || 0),
+      gstRate: Number(gstRate || 0),
+      cgstRate: Number(cgstRate || 0),
+      sgstRate: Number(sgstRate || 0),
+      igstRate: Number(igstRate || 0),
+      taxType,
+      stock: Number(stock || 0),
+      openingStockValue: Number(openingStockValue || 0),
+      ...(stockLedgerAccountId ? { stockLedgerAccountId } : {}),
+      returnStock: Number(returnStock || 0),
+      damagedStock: Number(damagedStock || 0),
+      minStock: Number(minStock || 0),
+      autoReorder: parseBooleanLike(raw?.autoReorder, false),
+      reorderQuantity: Number(reorderQuantity || 0),
+      unit,
+      hsnCode,
+      allowNegativeStock: parseBooleanLike(raw?.allowNegativeStock, false),
+      batchTracking: parseBooleanLike(raw?.batchTracking, false),
+      expiryRequired: parseBooleanLike(raw?.expiryRequired, false),
+      serialNumberTracking: parseBooleanLike(raw?.serialNumberTracking, false),
+      variantSize,
+      variantColor,
+      variantMatrix: normalizeVariantMatrix(parsedVariantMatrix || []),
+      imageUrl,
+      isActive: parseBooleanLike(raw?.isActive, true),
+    },
+  };
+};
 
 // Get all products
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
@@ -100,6 +341,303 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get products',
+    });
+  }
+});
+
+router.get('/summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.tenantId || getCurrentTenantId();
+    if (!tenantId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Tenant context not found',
+      });
+    }
+
+    const [summary] = await Product.aggregate([
+      {
+        $match: {
+          tenantId,
+          isActive: { $ne: false },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: 1 },
+          inventoryProducts: {
+            $sum: {
+              $cond: [{ $eq: ['$itemType', 'inventory'] }, 1, 0],
+            },
+          },
+          totalStockUnits: { $sum: { $ifNull: ['$stock', 0] } },
+          totalShopProductWorth: {
+            $sum: {
+              $multiply: [{ $ifNull: ['$stock', 0] }, { $ifNull: ['$wholesalePrice', 0] }],
+            },
+          },
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalProducts: Number(summary?.totalProducts || 0),
+        inventoryProducts: Number(summary?.inventoryProducts || 0),
+        totalStockUnits: Number(summary?.totalStockUnits || 0),
+        totalShopProductWorth: Number(summary?.totalShopProductWorth || 0),
+      },
+    });
+  } catch (error: any) {
+    console.error('Get product summary error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get product summary',
+    });
+  }
+});
+
+router.post('/bulk-upsert', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.tenantId || getCurrentTenantId();
+    if (!tenantId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Tenant context not found',
+      });
+    }
+
+    const rows: any[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'No product rows were provided for bulk upload.',
+      });
+    }
+
+    if (rows.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Each bulk upload batch supports up to 1000 rows. Split larger files into smaller batches.',
+      });
+    }
+
+    const duplicateMode: BulkDuplicateMode =
+      String(req.body?.duplicateMode || 'update_existing').trim().toLowerCase() === 'skip_existing'
+        ? 'skip_existing'
+        : String(req.body?.duplicateMode || 'update_existing').trim().toLowerCase() === 'error_existing'
+          ? 'error_existing'
+          : 'update_existing';
+
+    const rowErrors: BulkRowError[] = [];
+    const validRows: NormalizedBulkProductRow[] = [];
+
+    rows.forEach((row: any, index: number) => {
+      const validated = validateBulkProductRow(row, index + 2);
+      if (validated.error) {
+        rowErrors.push(validated.error);
+      } else if (validated.normalized) {
+        validRows.push(validated.normalized);
+      }
+    });
+
+    const seenSkus = new Set<string>();
+    const seenBarcodes = new Map<string, number>();
+    const batchSkus = validRows.map((row) => row.sku);
+    const batchBarcodes = validRows.map((row) => row.barcode).filter(Boolean) as string[];
+    const existingProducts = validRows.length
+      ? await Product.find({
+          tenantId,
+          $or: [
+            { sku: { $in: batchSkus } },
+            ...(batchBarcodes.length ? [{ barcode: { $in: batchBarcodes } }] : []),
+          ],
+        })
+          .select('_id sku barcode')
+          .lean()
+      : [];
+
+    const existingBySku = new Map(existingProducts.map((row: any) => [String(row.sku || '').trim().toUpperCase(), row]));
+    const existingByBarcode = new Map(
+      existingProducts
+        .filter((row: any) => String(row?.barcode || '').trim())
+        .map((row: any) => [String(row.barcode || '').trim().toUpperCase(), row])
+    );
+
+    const now = new Date();
+    const operations: any[] = [];
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    validRows.forEach((row) => {
+      if (seenSkus.has(row.sku)) {
+        rowErrors.push({
+          rowNumber: row.sourceRowNumber,
+          sku: row.sku,
+          name: row.name,
+          messages: ['Duplicate SKU found in the same upload file.'],
+        });
+        return;
+      }
+      seenSkus.add(row.sku);
+
+      if (row.barcode) {
+        const seenBarcodeRowNumber = seenBarcodes.get(row.barcode);
+        if (seenBarcodeRowNumber) {
+          rowErrors.push({
+            rowNumber: row.sourceRowNumber,
+            sku: row.sku,
+            name: row.name,
+            messages: [`Duplicate barcode found in the same upload file (also used on row ${seenBarcodeRowNumber}).`],
+          });
+          return;
+        }
+        seenBarcodes.set(row.barcode, row.sourceRowNumber);
+
+        const existingBarcodeRow: any = existingByBarcode.get(row.barcode);
+        if (existingBarcodeRow && String(existingBarcodeRow.sku || '').trim().toUpperCase() !== row.sku) {
+          rowErrors.push({
+            rowNumber: row.sourceRowNumber,
+            sku: row.sku,
+            name: row.name,
+            messages: ['This barcode is already assigned to another product in this tenant.'],
+          });
+          return;
+        }
+      }
+
+      const existingSkuRow = existingBySku.get(row.sku);
+      if (existingSkuRow) {
+        if (duplicateMode === 'skip_existing') {
+          skippedCount += 1;
+          return;
+        }
+        if (duplicateMode === 'error_existing') {
+          rowErrors.push({
+            rowNumber: row.sourceRowNumber,
+            sku: row.sku,
+            name: row.name,
+            messages: ['SKU already exists in this tenant. Choose Update Existing or change the SKU.'],
+          });
+          return;
+        }
+        updatedCount += 1;
+      } else {
+        createdCount += 1;
+      }
+
+      const updateDoc: any = {
+        $set: {
+          tenantId,
+          name: row.name,
+          sku: row.sku,
+          barcode: row.barcode || undefined,
+          description: row.description,
+          category: row.category,
+          subcategory: row.subcategory,
+          itemType: row.itemType,
+          price: row.price,
+          wholesalePrice: row.wholesalePrice,
+          promotionalPrice: row.promotionalPrice,
+          promotionStartDate: row.promotionStartDate || undefined,
+          promotionEndDate: row.promotionEndDate || undefined,
+          priceTiers: row.priceTiers,
+          cost: row.cost,
+          gstRate: row.gstRate,
+          cgstRate: row.cgstRate,
+          sgstRate: row.sgstRate,
+          igstRate: row.igstRate,
+          taxType: row.taxType,
+          stock: row.stock,
+          openingStockValue: row.openingStockValue,
+          stockLedgerAccountId: row.stockLedgerAccountId || undefined,
+          returnStock: row.returnStock,
+          damagedStock: row.damagedStock,
+          minStock: row.minStock,
+          autoReorder: row.autoReorder,
+          reorderQuantity: row.reorderQuantity,
+          unit: row.unit,
+          hsnCode: row.hsnCode,
+          allowNegativeStock: row.allowNegativeStock,
+          batchTracking: row.batchTracking,
+          expiryRequired: row.expiryRequired,
+          serialNumberTracking: row.serialNumberTracking,
+          variantSize: row.variantSize,
+          variantColor: row.variantColor,
+          variantMatrix: row.variantMatrix,
+          imageUrl: row.imageUrl,
+          isActive: row.isActive,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          createdAt: now,
+        },
+      };
+
+      if (row.isActive) {
+        updateDoc.$unset = {
+          deletedAt: '',
+          deletedBy: '',
+          deletionReason: '',
+        };
+      } else {
+        updateDoc.$set.deletedAt = now;
+        updateDoc.$set.deletedBy = String(req.userId || '');
+        updateDoc.$set.deletionReason = 'Marked inactive by bulk product upload';
+      }
+
+      operations.push({
+        updateOne: {
+          filter: { tenantId, sku: row.sku },
+          update: updateDoc,
+          upsert: true,
+        },
+      });
+    });
+
+    if (operations.length) {
+      await Product.bulkWrite(operations, { ordered: false });
+    }
+
+    await writeAuditLog({
+      module: 'products',
+      action: 'product_bulk_upsert',
+      entityType: 'product_bulk_upload',
+      entityId: tenantId,
+      referenceNo: `bulk-products-${now.toISOString()}`,
+      userId: req.userId,
+      metadata: {
+        receivedRows: rows.length,
+        processedRows: operations.length,
+        createdCount,
+        updatedCount,
+        skippedCount,
+        errorCount: rowErrors.length,
+        duplicateMode,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        receivedRows: rows.length,
+        processedRows: operations.length,
+        createdCount,
+        updatedCount,
+        skippedCount,
+        errorCount: rowErrors.length,
+        errors: rowErrors,
+        duplicateMode,
+      },
+    });
+  } catch (error: any) {
+    console.error('Bulk product upsert error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process bulk product upload',
     });
   }
 });
@@ -442,7 +980,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     const product = await Product.findOneAndUpdate(
       { _id: req.params.id, tenantId },
       updates,
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!product) {

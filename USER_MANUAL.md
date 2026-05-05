@@ -2,7 +2,7 @@
 
 User Manual and Product Documentation
 
-Last updated: April 17, 2026
+Last updated: April 26, 2026
 
 ## Latest Highlights
 
@@ -227,21 +227,64 @@ Key Uses
 
 ## 6. Catalog Menu
 
+### 6.0 Product Center
+
+Direct links: [Product Center](/products), [Product Entry](/products/entry), [Product Catalog](/products/catalog), [Stock Alerts](/products/alerts)
+
+Purpose  
+Provides one starting workspace for catalog review, stock monitoring, and product actions.
+
+Description  
+This page is the catalog landing workspace. It shows total products, item-type splits, low stock, out of stock, auto-reorder, promotion activity, stock value, low-stock urgency, and recently updated products so users can quickly decide which catalog screen to open next.
+
+Key screen logic
+
+- `Total Products` = total product masters in the tenant
+- `Inventory / Services / Non-Inventory` = count by `Item Type`
+- `Low Stock` = inventory products where `Stock > 0` and `Stock <= Min Stock`
+- `Out of Stock` = inventory products where `Stock <= 0`
+- `Auto-Reorder` = products where `Auto Reorder = Yes` and `Stock <= Min Stock`
+- `Stock Value` = `Stock x Cost` for inventory items
+
 ### 6.1 Product Entry
 
 Direct links: [Product Entry](/products/entry), [Product Catalog](/products/catalog), [Categories](/categories)
 
 Purpose  
-Used to create and manage product details.
+Used to create and manage the full product master.
 
 Description  
-This page allows adding new products and updating existing ones for accurate use in billing, stock control, alerts, and reporting. It is the primary product master entry screen.
+This page allows adding new products and updating existing ones for accurate use in billing, stock control, alerts, and reporting. It is the primary product master entry screen and the same full workspace structure is used during product edit.
+
+Field guide
+
+- `Product Name` = visible item name used in catalog, billing, and reports
+- `SKU` = internal item code for search, billing, and stock lookup
+- `Barcode` = optional scan code used during sales or stock operations
+- `Category / Subcategory` = product grouping used in catalog filters and reports
+- `Item Type` = controls whether the row behaves as inventory, service, or non-inventory
+- `Description` = free-text item notes for catalog clarity
+- `Price (Selling)` = main selling price
+- `Cost (Buying)` = buying or landed cost used for stock value and margin logic
+- `Wholesale Price` = alternate selling price for bulk or special selling
+- `Promotional Price` = temporary selling price active only between `Promo Start` and `Promo End`
+- `GST Rate / CGST / SGST / IGST` = sales tax treatment for the product
+- `HSN / SAC Code` = classification used in tax and GST-facing reports
+- `Unit` = selling or counting unit such as `piece`, `pack`, `box`, `kg`
+- `Initial Stock` = opening quantity available when the product is created
+- `Opening Stock Value` = opening inventory valuation amount
+- `Min Stock Alert` = threshold used by low-stock logic
+- `Auto Reorder` + `Preferred Reorder Quantity` = replenishment suggestion settings
+- `Variant Size / Variant Color` = comma-separated helper values used to generate the variant matrix
+- `Variant Matrix` = editable size/color combinations with SKU suffix, barcode, price, and active status
+- `Price Tiers` = tier name, minimum quantity, and unit price used for volume pricing
+- `Batch Tracking / Expiry Required / Serial Number Tracking / Allow Negative Stock` = inventory-control flags
 
 Key Uses
 
 - Add products
-- Update pricing
-- Maintain data
+- Update pricing, GST, and HSN
+- Maintain opening stock, reorder, variants, and tracking rules
 
 ### 6.2 Product Catalog
 
@@ -251,28 +294,46 @@ Purpose
 Displays all products in the system.
 
 Description  
-This page provides a complete view of products with search, filters, and pagination. It is useful for reviewing existing items, checking availability, and confirming product setup.
+This page provides a complete view of products with search, filters, sort controls, pagination, configurable visible columns, and edit/delete actions. It is useful for reviewing existing items, checking availability, and confirming product setup.
+
+Screen logic
+
+- Search checks `Name`, `SKU`, `Barcode`, `Category`, `Subcategory`, `Description`, `HSN`, `Tax Type`, `Variant Size`, and `Variant Color`
+- `Filtered Products` card = rows left after current search and filters
+- `Total Stock` card = sum of `Stock` for the filtered rows
+- `Low Stock` card = filtered rows where `Stock > 0` and `Stock <= Min Stock`
+- `Visible Columns` card = selected table columns plus the `Actions` column
+- `Auto-Reorder` card = filtered rows where `Auto Reorder = Yes` and `Stock <= Min Stock`
+- Table columns such as `Selling Price`, `Cost Price`, `GST %`, `Unit`, and `Status` come directly from the product master
 
 Key Uses
 
 - View products
-- Search items
-- Check availability
+- Search and filter items
+- Check stock, pricing, tax, and status in one table
 
 ### 6.3 Stock Alerts
 
 Direct links: [Stock Alerts](/products/alerts), [Procurement](/inventory/procurement)
 
 Purpose  
-Monitors inventory levels.
+Monitors inventory exceptions that need action.
 
 Description  
-This page notifies users when stock is low or when action is required. It helps the business plan timely restocking and avoid stock shortages.
+This page notifies users when stock is low or when action is required. It helps the business plan timely restocking and avoid stock shortages by splitting alerts into operational sections.
+
+Alert rules
+
+- `Low Stock` = inventory products where `Stock > 0` and `Stock <= Min Stock`
+- `Out of Stock` = inventory products where `Stock <= 0`
+- `Auto-Reorder Queue` = products where `Auto Reorder = Yes` and `Stock <= Min Stock`
+- `Inactive Products` = products where `Status = Inactive`
 
 Key Uses
 
 - Identify low stock
 - Plan restocking
+- Review reorder candidates and inactive catalog rows
 
 ### 6.4 Procurement
 
@@ -441,35 +502,116 @@ Purpose
 Provides sales and POS insights.
 
 Description  
-This page is the tabbed `Sales & POS Reports` workspace. It helps management and front desk users analyze business performance through filters, exports, and multiple report tabs covering store-level finance views, sales analysis, GST datasets, receivables, inventory movement, user performance, and tax review.
+This page is the tabbed `Sales & POS Reports` workspace for sales-facing and catalog-facing reports only. It helps management and front desk users analyze POS sales, receivables, GST datasets, returns, gross profit, payment mix, and POS inventory movement without mixing full accounting statements from the Accounts module.
 
-### 8.5.1 Sales Reports Tabs
+### 8.5.1 Sales Report Filters And Summary Cards
 
-Inside `Sales -> Reports`, use the `Reports Menu` tabs for the exact report needed:
+- `Start Date` and `End Date` apply to every report tab after `Refresh`
+- `Export Excel` and `Export PDF` always export the currently active tab only
+- `Gross Profit Report` card = gross profit from the Gross Profit tab
+- `Revenue` card = revenue from the Gross Profit tab
+- `Outstanding Receivables Report` card = total open POS credit balance
+- `Sales Return Report` card = approved refund value from returns
+- `Tax Summary Report` card = sales tax minus return tax reversal for the selected date range
 
-- `Profit & Loss (Store-level)`: store-level income versus expense view for the selected period
-- `Balance Sheet (Store-level)`: store-level position view for assets, liabilities, and balance
-- `Sales Summary (Daily / Shift)`: daily and shift-wise sales closure comparison
-- `Daily Sales Summary`: day-by-day invoice count, sales amount, tax, and outstanding
-- `Item-wise Sales Report`: quantity, value, and tax grouped item by item
-- `Customer-wise Sales Report`: invoice count, total billed value, and pending amount grouped by customer
-- `Sales Return Report`: approved return value, tax reversal, and refund impact
-- `Gross Profit Report`: revenue, item cost, gross profit, and margin
-- `HSN-wise Sales Report`: sales grouped by HSN or SAC classification
-- `Taxable / Exempt / Nil / Non-GST`: billing value grouped by GST treatment bucket
-- `B2B vs B2C Invoice Report`: registered-party versus consumer invoice split
-- `Credit / Debit Note Register (GST)`: GST note activity for corrected or adjusted invoices
-- `Sales Register (Detailed)`: detailed invoice-level sales register for review and export
-- `Payment Reconciliation Report`: invoice-side and payment-side comparison for settlement review
-- `Z-Report (End of Day)`: day-close summary for counter and billing closure
-- `Inventory Movement (POS only)`: stock movement created only by POS selling activity
-- `Membership Sales Report`: membership or plan-related sales captured through sales billing
-- `GST Handoff Datasets`: GST-facing export and verification datasets from sales transactions
-- `Outstanding Receivables Report`: open credit invoices still awaiting collection
-- `Attendance Report`: attendance-related operational snapshot inside the sales reporting workspace
-- `Cash vs Credit Sales Report`: invoice split by cash billing and credit billing
-- `User-wise Sales Report`: sales grouped by staff user with payment-mode mix
-- `Tax Summary Report`: GST taxable value and tax amount grouped by rate with return reversal effect
+### 8.5.2 Sales Reports Tabs
+
+Inside `Sales -> Reports`, use the `Reports Menu` tabs for the exact report needed. All tabs share the top-level `Start Date` and `End Date` filters, and the `Export Excel` / `Export PDF` buttons always export the currently active tab.
+
+- `Profit & Loss (Store-level)`: A sales-only store profit summary. It uses posted POS invoices, saved invoice discounts, approved returns, and saved item cost data.
+  - Logic: `Sales Before Discounts = taxable value + discount amount`.
+  - `Less Discounts = total invoice discount`.
+  - `Net Billed Sales = taxable sales after discounts`.
+  - `Less Sales Returns = approved returned amount`.
+  - `Net Sales = billed sales - returns`.
+  - `COGS = saved POS item cost`.
+  - `Gross Profit = Net Sales - COGS`.
+  - Use this tab when you need a store-level sales P&L without accounting-only ledger entries or non-POS expenses.
+
+- `Balance Sheet (Store-level)`: A POS-focused balance snapshot for the store.
+  - Logic: `Assets = catalog inventory value + POS credit receivables + cash drawer cash + pending digital settlements`.
+  - `Liabilities = output GST payable` (sales tax collected less return/note reversals).
+  - `Store Net Position = Assets - Liabilities`.
+  - This tab is designed for POS and inventory visibility, not the full statutory accounting balance sheet.
+
+- `Sales Summary (Daily / Shift)`: Compares daily and shift-wise sales closure totals.
+  - Logic: group posted invoices and returns by sales date and assigned shift.
+  - Shows invoice count, returns, net sales, tax, COGS, and gross profit for each day or shift.
+  - Use this when you want to compare counter performance by day and shift.
+
+- `Daily Sales Summary`: Day-by-day invoice performance view.
+  - Logic: count sales invoices per date and sum invoice total, tax collected, and outstanding balances.
+  - Helps you see how many invoices were posted each day, how much revenue was recorded, and how much remains unpaid.
+
+- `Item-wise Sales Report`: Product-level sales analysis.
+  - Logic: group sale item lines by product/item and sum quantity sold, taxable value, tax, and line total.
+  - Useful for checking which items move fastest and which products contribute most to sales value.
+
+- `Customer-wise Sales Report`: Customer revenue and receivable view.
+  - Logic: group posted invoices by customer and sum invoice count, billed value, tax, total, and outstanding amount.
+  - Use this to monitor customer sales, credit, and collection exposure.
+
+- `Sales Return Report`: Return and refund impact analysis.
+  - Logic: sum approved sales return value, returned GST, and refund or adjustment amount for the selected range.
+  - Shows how returned goods affect net sales and tax totals.
+
+- `Gross Profit Report`: Revenue vs item cost analysis.
+  - Logic: compare posted sales revenue against saved product item cost.
+  - `Gross Profit = revenue - item cost`.
+  - `Margin % = gross profit / revenue`.
+  - Use this to understand profitability at the product and sales level.
+
+- `HSN-wise Sales Report`: Tax classification summary.
+  - Logic: group sales by product HSN/SAC code and sum taxable value and GST.
+  - Helps with GST filing, classification review, and HSN-level sales analysis.
+
+- `Taxable / Exempt / Nil / Non-GST`: GST treatment breakdown.
+  - Logic: group billed values into `Taxable`, `Exempt`, `Nil Rated`, and `Non-GST` buckets.
+  - Use this to verify the mix of GST treatments in your sales invoices.
+
+- `B2B vs B2C Invoice Report`: Business vs consumer invoice split.
+  - Logic: classify invoices as B2B when a valid customer GSTIN is present and B2C otherwise.
+  - Shows counts and values for each customer type.
+
+- `Credit / Debit Note Register (GST)`: Corrective note activity.
+  - Logic: list note records from credit note and return/correction workflows.
+  - Shows taxable values, tax amounts, note type, and linked invoice details.
+
+- `Sales Register (Detailed)`: Detailed invoice-level sales register.
+  - Logic: list each posted invoice with customer name, document number, GSTIN, taxable value, tax split, total value, and status.
+  - Use this for audit review and export of raw sales rows.
+
+- `Payment Reconciliation Report`: Payment accuracy and settlement review.
+  - Logic: compare invoice-side totals and payment-side totals by payment method and channel.
+  - Shows invoice count, taxable amount, tax, billed amount, outstanding amount, and pending settlement when payment is not complete.
+
+- `Z-Report (End of Day)`: Day-end counter summary.
+  - Logic: summarize posted sales, approved returns, payment mode totals, invoice count, and closing cash drawer values for the day.
+  - Use this when you need a cashier or store close report for the day.
+
+- `Inventory Movement (POS only)`: Stock movement from POS sales.
+  - Logic: show stock reduction caused only by posted POS invoice item sales.
+  - Helps verify how POS selling impacts inventory levels.
+
+- `GST Handoff Datasets`: GST export and verification data.
+  - Logic: shape posted invoices, returns, credit notes, GSTIN, HSN, taxable values, and tax splits into GST-friendly datasets.
+  - Use this for GST review, filing prep, or validation exports.
+
+- `Outstanding Receivables Report`: Open credit balance tracker.
+  - Logic: sum unpaid POS credit invoice balances, unpaid accounting invoices, and customer debit opening balances.
+  - Helps track money still due from customers.
+
+- `Cash vs Credit Sales Report`: Invoice payment mix.
+  - Logic: split posted invoices into cash and credit buckets based on invoice payment type.
+  - Shows how much revenue was collected immediately versus left as receivable.
+
+- `User-wise Sales Report`: Staff sales performance and payment mix.
+  - Logic: group posted invoices by created-by user and sum invoice count, billed value, tax, and payment-mode totals.
+  - Useful for reviewing staff productivity and collection behavior.
+
+- `Tax Summary Report`: GST rate and tax totals.
+  - Logic: sum taxable value and GST amount by tax rate, then subtract approved return tax reversal.
+  - Use this to validate GST totals for the selected date range.
 
 Export tools  
 The active report tab can be exported to Excel or PDF after applying the selected date range.
@@ -769,13 +911,13 @@ Purpose
 Clears accounting-facing transaction data for testing while preserving master/setup data.
 
 What it clears  
-The reset utility clears transaction collections such as ledger entries, journal entries, customer ledger entries, accounting invoices, payments, vouchers, day-book rows, salary and contract payments, sales, returns, orders, quotations, facility/event booking transactions, member subscriptions, attendance rows used for payroll testing, purchase transactions, inventory balance/batch records, stock movement, bank feed/reconciliation rows, TDS/GST working records, payroll statutory outputs, and validation reports.
+The reset utility clears transaction collections such as ledger entries, journal entries, customer ledger entries, accounting invoices, payments, vouchers, day-book rows, salary and contract payments, sales, returns, orders, quotations, facility/event booking transactions, member subscriptions, attendance rows used for payroll testing, purchase transactions, inventory balance/batch records, stock movement, bank feed/reconciliation rows, TDS/GST working records, payroll statutory outputs, validation reports, fixed asset records, and opening-balance setup records.
 
 What the batch file also resets  
-When run through `clear-accounting-transactions.bat`, the utility also resets derived and opening-balance style fields so the accounting workspace becomes clean again for testing. This includes customer outstanding balances, product stock-style totals, chart account opening balances, vendor opening balances, customer opening balances, treasury opening balances, product opening stock values, and the opening-balance setup lock or initialized state.
+When run through `clear-accounting-transactions.bat`, the utility also resets derived and opening-balance style fields so the accounting workspace becomes clean again for testing. This includes customer outstanding balances, product stock-style totals, chart account opening balances, vendor opening balances, customer opening balances, treasury opening balances, product opening stock values, and opening-balance setup lock or initialized values before or alongside setup-row removal.
 
 What it preserves  
-It does not delete master/setup collections such as users, tenants, chart accounts, account groups, vendors, customers, products, categories, suppliers, employees, facilities, fixed assets, financial periods, stock locations, inventory valuation settings, membership plans, TDS sections, TDS deductee profiles, treasury accounts, app settings, and validation settings.
+It does not delete master/setup collections such as users, tenants, chart accounts, account groups, vendors, customers, products, categories, suppliers, employees, facilities, financial periods, stock locations, inventory valuation settings, membership plans, TDS sections, TDS deductee profiles, treasury accounts, app settings, and validation settings.
 
 Safe usage  
 
@@ -802,11 +944,82 @@ This section explains each main transaction screen in plain business language so
 | [Facility Booking](/user-manual#transaction-facility-booking) | Reserves a facility slot for a customer. Example: book `Badminton Court 2` for `Rahul Menon` on `2026-04-10` from `18:00` to `19:00` for `600` and mark it paid. | The booking increases facility usage history, supports occupancy review, and can contribute to booking revenue summaries. |
 | [Event Booking](/user-manual#transaction-event-booking) | Blocks one or more facilities for an event organizer over a defined date and time window. Example: create `Summer Shuttle League` for `Metro Sports Club` from `2026-05-01` to `2026-05-03` with `5000` advance collected. | The event appears in event schedules, advance and balance tracking, and operational event reports. |
 | [Event Quotation](/user-manual#transaction-event-quotation) | Prepares a quotation before the organizer confirms the booking. Example: quote `State Badminton Camp` for `Court 1` and `Court 2`, edit the default rental charges, apply `10%` discount, add `18%` GST, preview the PDF, and send it by email. | The quote stays in quotation tracking and revision history only. It affects booking and payment views only after the user loads it into the booking form and confirms the actual event booking. |
-| [Sales Invoice](/user-manual#transaction-sales-invoice) | Creates the final customer bill for products sold at the counter or on credit. Example: sell shuttle tubes and grips to `Anjali Nair`, apply `100` discount, choose `UPI`, and post the invoice. | The sale increases sales totals, customer totals, GST summaries, payment-mode summaries, and reduces stock for the items sold. |
+| [Sales Invoice](/user-manual#transaction-sales-invoice) | Creates the final customer bill for products sold at the counter or on credit. Example: sell shuttle tubes and grips to `Anjali Nair`, apply `100` discount, choose `UPI`, keep `Paid Now` + `Finalise Invoice`, and save the bill. | The sale increases sales totals, customer totals, GST summaries, payment-mode summaries, and reduces stock for the items sold. |
 | [Quotation](/user-manual#transaction-quotation) | Prepares a price offer before the customer confirms purchase. Example: send a quotation to `Rising Stars Academy` for jerseys and cones, valid until `2026-04-30`. | Quotations stay in pre-sales tracking and version history. They affect final sales reports only after they are converted into an invoice. |
 | [Returns](/user-manual#transaction-returns) | Records goods coming back from the customer and the related refund or adjustment decision. Example: return `2` shuttle tubes from invoice `INV-260407-00012` because the seal was damaged. | Approved returns reduce net sales impact and update sales return, refund, and customer adjustment reports. |
 | [Membership Plan](/user-manual#transaction-membership-plan) | Defines the rules of a membership product such as price, validity, benefits, and renewal behavior. Example: create `Monthly Badminton Prime` for `2500`, valid `30` days, with `10%` booking discount. | The plan becomes available for subscriptions and later controls membership revenue, benefit usage, expiry, and renewal reporting. |
 | [Membership Subscription](/user-manual#transaction-membership-subscription) | Enrolls a member into a selected plan and records the start of the membership cycle. Example: subscribe `Sreya Thomas` to `Monthly Badminton Prime` starting `2026-04-08` with `2500` paid. | The member appears in active-member counts, expiry alerts, renewal reminders, membership revenue, and benefit analytics. |
+
+<a id="transaction-sales-invoice"></a>
+
+#### Transaction: Sales Invoice
+
+Navigation path: `Top menu -> Sales -> Sales Dashboard -> Sales Invoice`
+
+What this screen does  
+This is the main counter billing screen for product sales. It lets the cashier identify the customer, add items, control stock-sensitive row details, apply discount or member benefits, capture payment, and either post the invoice immediately or keep it as a draft or held bill.
+
+How the screen works  
+The screen follows one billing flow. First, the user decides whether the bill is for a linked customer or a walk-in customer. Next, items are added by scanner, typed search, or the full product catalog dialog. Then the cashier completes any required row details such as variant, quantity, batch, expiry, or serial capture. After that, the bill summary area handles discount, points, store credit, payment method, split collection, and total review. Finally, invoice settings decide whether the bill is `Paid Now` or `Pay Later`, whether it is `Finalise Invoice` or `Save as Draft`, and whether the bill is `GST Bill` or `Non-GST Bill`.
+
+Field guide
+
+| Field or control | Description and how to use it | Purpose / business impact |
+| --- | --- | --- |
+| `New Sale`, `Hold`, `Recall`, `Print`, `Sync Now`, `More` | `New Sale` clears the current editor after confirmation. `Hold` stores the current bill locally. `Recall` reopens held or draft bills. `Print` uses the invoice print flow. `Sync Now` uploads queued offline invoices. `More` opens local recovery, round-off, and store tools. | These controls let the cashier manage the full sale lifecycle without leaving the billing screen. |
+| `Walk-in Customer` | Turn this on only when the sale should be saved without customer lookup, customer credit, or CRM linking. When it is on, customer phone lookup, store credit, and customer-linked follow-up stay skipped. | It allows fast anonymous billing while intentionally preventing customer-linked features from being used by mistake. |
+| `Customer Phone` | Required unless `Walk-in Customer` is enabled. Type a valid 10-digit mobile number, then use the suggestion list to select an existing customer when a match appears. | This is the main customer identity key for billing, repeat sales tracking, receivables, store credit, and CRM history. |
+| `Customer Name` | Enter or confirm the billed customer name. If an existing customer is selected, keep the name aligned with that profile. | It controls the visible customer identity on the invoice and on customer-facing reports. |
+| `Membership / Member ID (optional)` | Enter a member code or reference when the customer has membership linkage that staff wants to keep visible during the sale. | It supports membership lookup, front-desk verification, and benefits alignment. |
+| `Invoice No.` with `Auto` / `Manual` | `Auto` uses the next system number on save. `Manual` lets staff type a specific invoice number. | It keeps invoice numbering aligned with normal billing or with legacy / migrated / pre-printed number rules. |
+| `Manual Invoice Number` | This appears only when `Manual` numbering is chosen and must be filled before save. | It prevents incomplete manual-number invoices and preserves audit clarity. |
+| `Date` | Shows the current invoice date and quick status chips such as `Draft Mode` and `GST Bill`. | It tells staff the business date and the current invoice state before posting. |
+| `Tax Bill` quick toggle | This on-screen GST switch turns GST billing on or off immediately. The same decision can also be controlled from `Tax Mode` below. | It directly changes whether GST is included in the bill totals. |
+| `Scanner Settings` | Opens scanner behavior options such as the submit key used by barcode scanners. | It makes counter scanning usable across different barcode-gun setups. |
+| `Scanner On / Scanner Off` | Turn scanner mode on when staff is scanning barcode or SKU input directly into the billing lane. Leave it off when typing product names manually. | It switches the product-entry lane between hardware scanning and keyboard search. |
+| `Scan / Search Product` input | In scanner mode, scan the barcode or SKU and submit with the configured key. In manual mode, type product name, SKU, or barcode and use Arrow keys plus Enter to add the highlighted result. | This is the fastest item-entry lane on the billing screen. |
+| `Open Product Search` | Opens the full product catalog dialog. Inside the dialog, the cashier can search, move row by row with keyboard arrows, and press Enter to add the selected product. | It gives access to the full cached catalog when quick search is not enough. |
+| `Items` table | Every added product appears here with row-level billing controls and stock-sensitive details. | It is the live billing table that decides what stock will move and what value will be billed. |
+| `Variant` | Select the correct size, color, or variant-level price before checkout. | It ensures the saved sale reflects the exact product variation sold to the customer. |
+| `Quantity` | Use the minus and plus buttons to reduce or increase the quantity for that row. | Quantity affects stock reduction, taxable value, totals, and profit. |
+| `Serial Tracking` | This small row control appears for serial-enabled products. Leave it off for normal retail items. Turn it on only when this sale line truly needs serial capture. | It protects warranty, service, audit, and unique-unit traceability without slowing every sale. |
+| `Batch No` | Enter the lot or batch number when the product requires batch-level stock control. | It preserves traceability for stock recall, expiry review, and supplier follow-up. |
+| `Expiry Date` | Select the expiry date when the product is configured as expiry-controlled. | It ensures regulated or dated stock is sold and reported correctly. |
+| `Serial Numbers` | When sale-line serial tracking is enabled, enter one serial per line or comma-separated. | It stores the actual serial list that belongs to the sold units. |
+| `Delete` | Removes the line from the current sale. | It prevents unwanted rows from affecting stock and totals. |
+| `Bill Summary` totals | Review `Subtotal`, `GST`, `Gross Total`, `Discount`, `Store Credit`, `Net Total`, `Round-off`, `Total`, and the current collection value. | This is the cashier’s final financial checkpoint before posting the bill. |
+| `Discount` with `Mode` and amount / percent value | Choose `Amount` for a flat reduction or `%` for percentage-based discount, then enter the number. | It changes the payable amount and affects net sales and tax basis. |
+| `Points & Membership` with `Redeem Points` and `Apply` | Enter loyalty points to redeem, then click `Apply` to calculate membership-linked benefit preview. | It connects the sale to member discounts, point redemption, and future reward balance. |
+| `Store Credit` | Review `Available`, type `Apply Amount`, choose a `Credit Note`, and click `Apply Credit`. `Clear` removes the applied credit. | It reduces the collectible amount by using the customer’s available credit note balance. |
+| `Payment Method` | Choose the real collection mode such as `Cash`, `Card`, `UPI`, or `Bank Transfer`. | It controls payment-mode reporting and collection analysis. |
+| `Split Payments` | Use `Add Split` to divide collection across methods. Each split row records `Method`, `Amount`, and optional `Cash Received` for cash rows. `Remove Split` deletes one split line. | It supports mixed-mode collections and calculates change due for cash components. |
+| `Credit Settlement` | This appears only when `Invoice Type` is `Pay Later`. Enter the optional amount collected now and review `Outstanding`. | It keeps receivable balances accurate when a credit invoice still receives partial payment. |
+| `Invoice Type` | Choose `Paid Now` for immediate settlement or `Pay Later` when some or all money will be collected later. | It decides whether the invoice stays fully settled or creates receivable balance. |
+| `Save Mode` | Choose `Finalise Invoice` to post it immediately or `Save as Draft` to keep incomplete work without full posting. | It decides whether the sale affects final reports now or only after later completion. |
+| `Tax Mode` | Choose `GST Bill` for taxable billing or `Non-GST Bill` when GST should not apply. | It changes GST calculation and tax-facing reporting. |
+| `Invoice Notes (optional)` | Enter short, meaningful notes only when the bill needs extra operational context. | It supports later customer service review, print clarity, and audit explanation. |
+| `Advanced Options` | Expands lower-frequency fields such as `Email ID`, `Address`, `Round-off Mode`, `Print Profile`, and `Invoice Snapshot`. | It keeps secondary billing details available without cluttering the main cashier flow. |
+| `Email ID (optional)` and `Address (optional)` | These fields stay available only for non-walk-in customer-linked invoices. | They help invoice delivery, customer history quality, and CRM follow-up. |
+| `Round-off Mode` | Review the active round-off method and use `Change` from store tools when policy requires another mode. | It controls how the final bill amount is rounded before posting. |
+| `Print Profile` | Shows the currently active invoice printing layout when preview hints are enabled. | It helps staff know which print format the bill will use. |
+| `Invoice Snapshot` | Shows a compact view of invoice number mode, business date, and customer mode. | It gives a final operational sanity check before posting. |
+| `Hold` and `Post Invoice` / `Save Draft` | `Hold` parks the sale for later. The main checkout button finalizes or drafts the invoice and shows the live amount in the button text. | These are the last save actions that convert the current screen state into a stored transaction. |
+
+Important validation and behavior rules
+
+- `Customer Phone` is mandatory unless `Walk-in Customer` is turned on.
+- `Manual Invoice Number` is mandatory when invoice numbering is set to `Manual`.
+- `Store Credit` is disabled for `Walk-in Customer` and for `Pay Later` invoices.
+- `Tax Mode = Non-GST Bill` removes GST from the billing calculation and the tax-facing bill view.
+- Batch, expiry, and serial inputs must be completed when the selected product row requires them.
+- `Split Payments` and `Cash Received` change the live collection figure and the calculated `Change Due`.
+- Membership benefits and point redemption work only when the customer is identified with a valid phone number.
+
+Practical example  
+Sell `Yonex Mavis 350 Shuttle` quantity `10` and `Badminton Grip` quantity `4` to `Anjali Nair`, choose the correct variants if needed, enter `Customer Phone 9847001122`, keep `Walk-in Customer` off, apply `Discount Amount 100`, choose `UPI`, keep `Invoice Type = Paid Now`, `Save Mode = Finalise Invoice`, `Tax Mode = GST Bill`, add `Invoice Notes = Counter sale after coaching session`, review totals, and click the final invoice button.
+
+How it affects reports  
+When finalized, the invoice updates daily sales, item-wise sales, customer-wise sales, payment-mode summaries, GST summaries, stock movement, and receivable totals when `Pay Later` or partial collection is used.
 
 ### 12.2 People Transactions
 
@@ -934,11 +1147,13 @@ This section explains how report figures are calculated from the day-to-day entr
 - If a payment is added later, the original transaction amount stays the same, but the balance or outstanding amount changes.
 - If a return, refund, credit note, or cancellation is entered later, the related reports change to reflect that correction.
 - Operational reports show activity such as bookings, memberships, or attendance. Financial reports show income, expenses, balances, and cash movement.
+- The "Data source" names in this manual refer to application models or MongoDB collections such as `Sale`, `AccountLedgerEntry`, `AccountingInvoice`, and `DayBookEntry`. They are listed so testers can understand which screen or module feeds each report.
+- Financial reports prefer posted ledger rows. Legacy fallback rows are used only when an old source document exists without a matching ledger posting.
 
 ### 13.2 Sales And Customer Reports
 
 `Sales Reports Menu Tabs`  
-The `Sales & POS Reports` page is a tabbed workspace. Start by selecting the date range, then open the required tab from the `Reports Menu`. The page supports Excel and PDF export for the active tab.
+The `Sales & POS Reports` page is a tabbed workspace for sales, receivables, GST, payment mix, and POS inventory movement only. Start by selecting the date range, then open the required tab from the `Reports Menu`. The page supports Excel and PDF export for the active tab.
 
 `Profit And Loss (Store-level)`  
 This tab gives a store-level profit-and-loss style view for the selected period. It helps management review sales-side income versus expense without leaving the Sales reports workspace.
@@ -980,7 +1195,7 @@ This report shows GST-impacting credit or debit note activity linked to sales co
 This report lists invoice-level rows with customer, document, tax, value, and status details. It acts as the detailed sales register for audit review and export.
 
 `Payment Reconciliation Report`  
-This report compares invoice-side values with payment-side values so the team can identify what is fully settled, partially settled, or still mismatched.
+This report compares POS invoice-side values by payment method and channel so the team can identify billed value, open outstanding value, and pending digital settlement still not completed.
 
 `Z-Report (End of Day)`  
 This report summarizes day-close billing and payment totals for counter operations. It supports front desk closure and end-of-day review.
@@ -988,17 +1203,11 @@ This report summarizes day-close billing and payment totals for counter operatio
 `Inventory Movement (POS only)`  
 This report shows stock movement caused only by POS selling activity. It helps the team review how sales reduced item quantities without mixing procurement-side stock changes.
 
-`Membership Sales Report`  
-This report summarizes membership or plan-related sales captured through the sales-side billing flow. It helps management review membership-linked billing without leaving the reports page.
-
 `GST Handoff Datasets`  
 This report prepares GST-facing export or verification datasets from sales transactions. It is used as handoff data for deeper GST workspace review and filing preparation.
 
 `Outstanding Receivables`  
 This report lists posted credit invoices that still have money left to collect. The total outstanding amount is simply the sum of all remaining balances on those open credit invoices.
-
-`Attendance Report`  
-This report shows attendance-linked operational counts inside the sales reporting workspace for quick comparison with the business period.
 
 `Cash vs Credit Report`  
 This report separates invoices by invoice type. Cash invoices are counted in the cash section. Credit invoices are counted in the credit section. Each side shows the number of invoices and their total value.
@@ -1198,6 +1407,102 @@ This shows how many renewals happened during the current month compared with the
 `Member Retention Rate`  
 This shows how many members have stayed with the business long enough to have renewal history, compared with the total members considered.
 
+### 13.8 Detailed Report Source And Calculation Matrix
+
+Use this section when a tester asks, "Which screen feeds this report?" or "Why did this number appear?" The screen tells where users enter the data. The data source tells which application model or collection is read. The calculation explains the main formula.
+
+#### Sales And POS Report Sources
+
+| Report | Entry screen/module | Data source | Main calculation |
+| --- | --- | --- | --- |
+| Profit & Loss (Store-level) | POS sales invoices and POS returns | `Sale`, `Return`, POS item cost fields | `Sales Before Discounts = taxable value + discounts`, `Less Discounts = saved invoice discounts`, `Net Billed Sales = taxable value`, `Less Sales Returns = approved returned amount`, `Net Sales = billed sales - returns`, `COGS = saved POS item cost`, `Gross Profit = Net Sales - COGS`. |
+| Balance Sheet (Store-level) | POS credit sales, cash drawer counts, unsettled digital sales, stock valuation | `Sale`, `TreasuryAccount`, `CashFloatCount`, `DayEndClosing`, inventory valuation services | `Assets = Catalog Inventory + POS Credit Receivables + Cash Drawers + Pending Digital Settlements`, `Liabilities = Output GST Payable (POS)` when tax collected is greater than return tax reversal, and `Store Net Position = Assets - Liabilities`. |
+| Sales Summary (Daily / Shift) | Sales invoice and shift/day-close flow | `Sale`, shift/day-close data | Invoices and amounts grouped by invoice date or shift. |
+| Daily Sales Summary | Sales invoice screen | `Sale` | Count posted invoices and sum invoice total, GST, and outstanding by date. |
+| Item-wise Sales | Sales invoice item grid | `Sale.items`, `Product` | Sum quantity, taxable value, tax, and line total by product/item. |
+| Customer-wise Sales | Sales invoice customer fields | `Sale`, `Customer` | Sum invoice count, billed value, and outstanding by customer. |
+| Sales Returns | Return approval screen | `Return` | Sum approved returned value, returned GST, and refund/adjustment value. |
+| Gross Profit Report | Sales invoices and product cost setup | `Sale.items`, `Product`, inventory costing data | Revenue minus item cost; margin percent is gross profit divided by revenue. |
+| HSN-wise Sales Report | Product HSN/SAC and invoice item tax fields | `Sale.items` | Sum taxable value and tax by HSN/SAC code. |
+| Taxable / Exempt / Nil / Non-GST | Invoice item GST treatment fields | `Sale.items`, `Return` | Group taxable value by GST treatment bucket and reduce by approved returns. |
+| B2B vs B2C Invoice Report | Customer GSTIN on invoice/customer profile | `Sale`, `Customer` | Valid GSTIN invoices are B2B; others are B2C; count and value are summed. |
+| Credit / Debit Note Register (GST) | Credit note and return/correction workflows | `CreditNote`, `Return` | Sum note taxable value and tax by note type, linked invoice, and date. |
+| Sales Register (Detailed) | Posted sales invoices | `Sale`, `Sale.items` | One invoice row with document number, customer, GSTIN, taxable value, tax split, total, and status. |
+| Payment Reconciliation Report | POS billing and payment collection flow | `Sale` | Group posted POS invoices by payment method and payment channel, then show invoice count, taxable value, tax, total billed amount, outstanding amount, and pending settlement where payment status is not completed. |
+| Z-Report (End of Day) | Counter billing and day-end close | `Sale`, `Return`, `DayEndClosing` | Summarize day invoice count, payment-mode totals, refunds, and closing cash. |
+| POS Inventory Movement | Sales invoice posting | `Sale.items`, `StockLedgerEntry`, inventory balances | Show stock reduced by POS sales only. |
+| GST Handoff Datasets | Sales reports and GST workspace | `Sale`, `Return`, `CreditNote` | Shape invoice, return, note, GSTIN, HSN, taxable value, and tax split for GST review. |
+| Outstanding Receivables | Credit sales, accounting invoices, customer opening balances | `Sale`, `AccountingInvoice`, `Customer` | Sum unpaid sales credit balances, unpaid accounting invoices, and customer debit openings. |
+| Cash vs Credit Report | Sales invoice type field | `Sale.invoiceType` | Split invoice count and value into cash and credit buckets. |
+| User-wise Sales | Sales invoice created-by user | `Sale`, user fields | Group invoice count/value and payment-mode totals by staff user. |
+| Tax Summary | Sales item tax and return tax reversal | `Sale.items`, `Return` | Sum taxable value and GST by rate, less approved return reversal. |
+
+#### Inventory, Attendance, Payroll, And Membership Report Sources
+
+| Report | Entry screen/module | Data source | Main calculation |
+| --- | --- | --- | --- |
+| Inventory Stock Summary | Product, stock receipt, adjustment, and transfer screens | `Product`, `Inventory`, `InventoryBatch`, `StockLedgerEntry` | Current stock, low/out status, cost value, and retail value from saved stock balances. |
+| Low Stock Report | Product stock setup | `Product` | Show products where current stock is less than or equal to minimum stock. |
+| Inventory Valuation | Product cost/price and stock receipt screens | `Product`, `InventoryBatch`, costing settings | Quantity multiplied by cost for cost value; quantity multiplied by selling price for retail value. |
+| Inventory Movement | Purchase, receipt, transfer, sale, return, and adjustment workflows | `StockLedgerEntry`, `InventoryTransfer`, `PurchaseBill`, `DeliveryChallan`, `Sale`, `Return` | Group stock in, stock out, transfer, adjustment, sale consumption, and return movement. |
+| Dead Stock | Product stock and sales history | `Product`, `Inventory`, `Sale.items` | Products with stock on hand and no sale after the selected idle-day cutoff. |
+| Fast Moving Report | Sales invoice item grid | `Sale.items` | Sum sold quantity by product and sort highest first. |
+| Attendance Detail | Employee self attendance and attendance mark screens | `Attendance`, `Employee` | List date, employee, status, check-in/out, worked time, overtime, and location fields. |
+| Monthly Attendance Sheet | Attendance reports month selector | `Attendance`, `Employee` | Pivot attendance rows into a month calendar grid by employee and date. |
+| Payroll Output | Payroll processing screen | `Employee`, `Attendance`, salary setup, payroll records | Calculate payable days, overtime, gross pay, deductions, employer contributions, and net pay. |
+| PF/ESI/PT/TDS Payroll Worksheets | Payroll compliance panels | payroll challan/Form 16/arrear/settlement records | Summarize statutory deductions, challan worksheets, salary TDS, arrears, and settlement values. |
+| Active / Expired Members | Membership subscription screen | `MemberSubscription`, `MembershipPlan` | Count subscriptions by current status and expiry date. |
+| Membership Revenue | Membership issue/renewal and linked billing | `MemberSubscription`, linked payments or sales | Sum billed/collected membership amount for the selected period. |
+| Renewal Rate | Membership renewal action | `MemberSubscription` renewal history | Renewals in the period compared with active/renewable members. |
+| Member Retention Rate | Membership lifecycle records | `MemberSubscription` issue, renewal, expiry, cancellation fields | Retained members compared with total members considered for the period. |
+
+#### Accounting And Settlement Report Sources
+
+| Report | Entry screen/module | Data source | Main calculation |
+| --- | --- | --- | --- |
+| Accounting Dashboard | Accounts MIS Dashboard | `AccountLedgerEntry`, `ChartAccount`, `AccountingInvoice`, `AccountingPayment`, `AccountingVoucher`, `JournalEntry`, TDS/GST services | Selected revenue minus expenses, GST payable as on date, recent activity, and compliance summaries. |
+| Accounting Reports Overview | Accounts Reports tab | accounting report services over ledger, invoices, payments, vouchers, salary, contract, TDS, GST, and day-book data | Total income, total expense, net profit/loss, balance-sheet difference, and recent activity. |
+| Income Report | Accounting invoices, receipt vouchers, manual income day-book, sales/booking integrations | income `AccountLedgerEntry` rows joined to `ChartAccount`; legacy fallback only for unposted old records | Income account credits minus income account debits, excluding opening entries. |
+| Expense Report | Expense/vendor bill, payment voucher, salary, contract, manual expense day-book | expense `AccountLedgerEntry` rows joined to `ChartAccount`; legacy fallback only for unposted old records | Expense account debits minus expense account credits, excluding opening entries. |
+| Trial Balance | All screens that post ledger rows | `ChartAccount`, `AccountLedgerEntry` | Opening balance plus period debits minus period credits for each account; debit and credit totals should match. |
+| Profit & Loss Statement | Invoice, receipt voucher, day-book income, expense, salary, contract, journal screens | income/expense `AccountLedgerEntry` joined to `ChartAccount`; legacy fallback only if no ledger posting exists | Total income minus total expense. GST is excluded from income and shown as liability. |
+| Balance Sheet | All posted accounting screens up to as-on date | asset/liability `ChartAccount`, `AccountLedgerEntry`, retained earnings from P&L | Assets = debit-positive asset closings; liabilities = credit-positive liability closings; equity includes retained earnings. Difference should be zero. |
+| Accounts Receivable in Balance Sheet | Accounting invoices, credit sales, customer opening balances | `AccountingInvoice`, `Sale`, customer sub-ledger accounts, `AccountLedgerEntry` | Consolidates receivable control and customer sub-ledger asset balances into one top-level receivable row with details. |
+| Accounts Payable in Balance Sheet | Vendor bills, vendor opening balances, vendor payments | vendor/supplier sub-ledger accounts, `AccountLedgerEntry`, `Vendor` | Consolidates payable control and vendor sub-ledger liability balances into one top-level payable row with details. |
+| Cash Book | Cash receipts, payments, day-book cash entries, salary/contract cash payment, transfer vouchers | cash-subtype `ChartAccount`, `TreasuryAccount`, `AccountLedgerEntry` | Opening cash plus period cash inflows minus period cash outflows. Opening vouchers are opening balance, not period inflow. |
+| Bank Book | Bank receipts, payments, invoice collections, day-book bank entries, salary/contract bank payment, transfers | bank-subtype `ChartAccount`, `TreasuryAccount`, `AccountLedgerEntry`, bank feed data | Opening bank plus period bank inflows minus period bank outflows. Pending bank rows appear for reconciliation review. |
+| Day Book | Manual income/expense day-book and voucher mirror rows | `DayBookEntry`, linked `AccountLedgerEntry` | Manual income debits cash/bank and credits income/GST payable; manual expense debits expense/input tax where applicable and credits cash/bank. Voucher-backed mirror rows are not double-posted. |
+| Outstanding Receivables | Sales credit invoices, accounting invoices, customer opening balances | `Sale`, `AccountingInvoice`, `Customer` | Sum open sales credit amount, accounting invoice balance, and debit customer opening balance. |
+| Vendor Balance / Payables | Vendor master, vendor bill, vendor payment, vendor opening balance | `Vendor`, supplier ledger `ChartAccount`, `AccountLedgerEntry` | Opening payable plus bill credits minus payment debits, shown by vendor/supplier account. |
+| Invoice Report | Accounting invoice screen | `AccountingInvoice`, linked journal/payment rows | Invoice total, paid amount, balance amount, GST split, status, and customer. |
+| Payment Report | Accounting invoice payments and settlement/payment screens | `AccountingPayment`, `AccountLedgerEntry` | Posted payment amount by party, invoice, mode, date, and reference; cancelled payments are excluded. |
+| Receipt Voucher Report | Receipt voucher screen | `AccountingVoucher`, `AccountLedgerEntry`, day-book mirror row | Voucher total and ledger lines; cash/bank debit and selected income/party credit. |
+| Payment Voucher Report | Payment voucher screen | `AccountingVoucher`, `AccountLedgerEntry`, day-book mirror row | Voucher total and ledger lines; selected expense/party debit and cash/bank credit. |
+| Journal Voucher Report | Journal voucher screen | `AccountingVoucher`, `AccountLedgerEntry` | Debit and credit lines must match; affects ledger, trial balance, P&L, or Balance Sheet based on selected accounts. |
+| Transfer Voucher Report | Transfer voucher screen | `AccountingVoucher`, `AccountLedgerEntry` | Debit destination treasury account and credit source treasury account for the same amount. |
+| Salary Report | Accounts salary screen and payroll data | `SalaryPayment`, `Employee`, `AccountLedgerEntry` | Gross salary less deductions equals net pay; gross/payroll cost posts to salary expense and statutory deductions to liabilities. |
+| Contract Report | Contract payment screen | `ContractPayment`, contractor/vendor data, `AccountLedgerEntry` | Gross contract amount posts to contract expense; TDS posts to TDS payable; net amount moves through cash/bank. |
+| Fixed Asset Report | Fixed asset screen and depreciation run | `FixedAsset`, depreciation `JournalEntry`, `AccountLedgerEntry` | Book value equals asset cost minus accumulated depreciation. |
+| Financial Period Report | Period setup screen | `FinancialPeriod` | Shows open, closed, or locked status used by posting screens and validation checks. |
+| Daily Collection Summary | Settlements workspace | `Sale`, `ReceiptVoucher`, expense/day-book cash rows, `DayEndClosing` | Cash sales plus cash receipts minus cash expenses. |
+| User-wise Collection | Settlements workspace | `Sale`, `ReceiptVoucher`, user/staff fields | Group invoice and receipt counts/values by user. |
+| Day-End Closing | Day-end close screen | `DayEndClosing`, cash sales, receipts, expenses, cash book movement | System cash equals opening plus inflows minus outflows; variance equals physical cash minus system cash. |
+
+#### GST, TDS, Reconciliation, And Validation Report Sources
+
+| Report | Entry screen/module | Data source | Main calculation |
+| --- | --- | --- | --- |
+| GST Return Preview / GST Report | GST & Filing workspace, sales invoices, accounting invoices, GST day-book entries | `Sale`, `AccountingInvoice`, GST-enabled `DayBookEntry`, `Return`, `CreditNote`, `GstReturnRecord`, `GstReconciliationRun` | Outward taxable value and output GST come from source document tax splits; returns/notes reduce GST; GST is liability, not P&L income. |
+| GSTR-1 Preview | GST return preview screen | sales/accounting/day-book outward supply rows | Taxable value plus CGST/SGST/IGST grouped into B2B, B2CL, B2CS, notes, and HSN sections. |
+| GSTR-3B Preview | GST return preview screen | GST outward rows, ITC/reversal inputs, saved reconciliation data | Output tax minus eligible ITC and manual adjustments such as reversal, interest, and late fee. |
+| GSTR-2B Reconciliation | GST reconciliation import/preview | imported 2B rows, purchase/vendor GST rows where available, `GstReconciliationRun` | Match supplier GST rows against imported 2B data and show matched, mismatched, and missing rows. |
+| TDS Computation | TDS Compliance deductions screen, contract/salary TDS | `TdsTransaction`, `Vendor`, deductee profiles, TDS sections, salary TDS records | Taxable amount multiplied by section rate, with higher rate when PAN is missing/invalid where applicable. |
+| TDS Payables / Outstanding | TDS Compliance reports | `TdsTransaction`, `TdsChallan`, `TdsReturn`, `TdsCertificate` | Deducted TDS minus deposited/allocated challan amount. |
+| TDS Returns / Certificates / Audit Trail | TDS Compliance workspace | `TdsReturn`, `TdsCertificate`, `TdsReconciliationRun`, audit logs | Show return drafts, certificates, challan mapping, mismatches, and correction/audit records. |
+| Bank Reconciliation / CSV Import | Cash & Bank Book reconciliation screen | bank-subtype `AccountLedgerEntry`, `BankFeedTransaction`, `ReconciliationLink`, `ReconciliationBookState` | Match statement rows to unreconciled bank ledger entries by date, amount, and description/reference. |
+| Payment Reconciliation | Sales reports and accounting payment reconciliation | `Sale`, `AccountingPayment`, `AccountLedgerEntry` | Compare invoice totals, payment totals, payment mode, and outstanding/mismatch status. |
+| Validation Dashboard | Validation Dashboard | accounting collections plus `validation_reports`, `validation_issue_feedback`, `validation_settings` | Read-only checks for double-entry integrity, trial balance, balance sheet equation, GST/TDS reconciliation, customer/vendor reconciliation, cash/bank books, suspense, and round-off. |
+
 `Most Popular Plan`  
 This is the membership plan with the highest number of assigned subscriptions.
 
@@ -1234,8 +1539,9 @@ Result: the quotation stays in quotation tracking and revision history only. Whe
 ### 14.2 Sales Screens
 
 `Sales Invoice`  
-Sample values: add `Yonex Mavis 350 Shuttle` quantity 10, `Badminton Grip` quantity 4, `Customer Phone` 9847001122, `Customer Name` Anjali Nair, `Customer Email` anjali@example.com, `Notes` Counter sale after coaching session, `Discount` 100 amount, `Payment Method` UPI, `Invoice Type` Cash Invoice, `Invoice Status` Post Invoice, `GST Bill` On.  
-Result: the sale increases sales totals, item-wise sales, customer-wise sales, GST reports, and reduces stock for the products sold.
+Sample values: add `Yonex Mavis 350 Shuttle` quantity `10` and `Badminton Grip` quantity `4`, `Customer Phone` `9847001122`, `Customer Name` `Anjali Nair`, `Membership / Member ID` `ANJ-MEMBER-02`, `Email ID` `anjali@example.com`, `Invoice Notes` `Counter sale after coaching session`, `Discount Mode` `Amount`, `Discount` `100`, `Payment Method` `UPI`, `Invoice Type` `Paid Now`, `Save Mode` `Finalise Invoice`, `Tax Mode` `GST Bill`, and `Round-off Mode` `Never round off`.  
+Use `Walk-in Customer` only when the sale should be saved without customer contact details. Use `Store Credit` only for linked customer invoices, and remember it stays disabled for both `Walk-in Customer` and `Pay Later` invoices.  
+Result: the sale increases sales totals, item-wise sales, customer-wise sales, GST reports, payment-mode summaries, and reduces stock for the products sold.
 
 `Quotation`  
 Sample values: `Customer Name` Rising Stars Academy, `Contact Person` Vivek Joseph, `Phone` 9846011122, `Valid Until` 2026-04-30, `Tax Mode` Tax exclusive, `GST Quote` On, items such as `Team Jersey` quantity 30 and `Practice Cone Set` quantity 6, `Notes` Delivery within 5 working days.  

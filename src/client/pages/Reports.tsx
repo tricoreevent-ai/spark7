@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { CardTabs } from '../components/CardTabs';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings, resolveGeneralSettingsAssetUrl } from '../utils/generalSettings';
@@ -23,10 +24,8 @@ type ReportTabKey =
   | 'payment-reconciliation-report'
   | 'z-report'
   | 'pos-inventory-movement-report'
-  | 'membership-sales-report'
   | 'gst-handoff-report'
   | 'outstanding-receivables-report'
-  | 'attendance-report'
   | 'cash-vs-credit-sales-report'
   | 'user-wise-sales-report'
   | 'tax-summary-report';
@@ -48,10 +47,8 @@ const REPORT_TAB_KEYS: ReportTabKey[] = [
   'payment-reconciliation-report',
   'z-report',
   'pos-inventory-movement-report',
-  'membership-sales-report',
   'gst-handoff-report',
   'outstanding-receivables-report',
-  'attendance-report',
   'cash-vs-credit-sales-report',
   'user-wise-sales-report',
   'tax-summary-report',
@@ -74,19 +71,45 @@ const REPORT_TAB_LABEL: Record<ReportTabKey, string> = {
   'payment-reconciliation-report': 'Payment Reconciliation Report',
   'z-report': 'Z-Report (End of Day)',
   'pos-inventory-movement-report': 'Inventory Movement (POS only)',
-  'membership-sales-report': 'Membership Sales Report',
   'gst-handoff-report': 'GST Handoff Datasets',
   'outstanding-receivables-report': 'Outstanding Receivables Report',
-  'attendance-report': 'Attendance Report',
   'cash-vs-credit-sales-report': 'Cash vs Credit Sales Report',
   'user-wise-sales-report': 'User-wise Sales Report',
   'tax-summary-report': 'Tax Summary Report',
+};
+
+const formatCurrencyOrBlank = (value: unknown, blank = ''): string => {
+  if (value === null || value === undefined || value === '') return blank;
+  return formatCurrency(Number(value || 0));
 };
 
 const KEY_METRIC_TABS: ReportTabKey[] = [
   'gross-profit-report',
   'outstanding-receivables-report',
   'sales-return-report',
+  'tax-summary-report',
+];
+const SALES_REPORT_MENU_KEYS: ReportTabKey[] = [
+  'profit-loss-store-report',
+  'balance-sheet-store-report',
+  'sales-summary-shift-report',
+  'daily-sales-summary',
+  'item-wise-sales',
+  'customer-wise-sales',
+  'sales-return-report',
+  'gross-profit-report',
+  'hsn-wise-sales-report',
+  'taxability-breakup-report',
+  'b2b-vs-b2c-report',
+  'gst-note-register-report',
+  'sales-register-detailed-report',
+  'payment-reconciliation-report',
+  'z-report',
+  'pos-inventory-movement-report',
+  'gst-handoff-report',
+  'outstanding-receivables-report',
+  'cash-vs-credit-sales-report',
+  'user-wise-sales-report',
   'tax-summary-report',
 ];
 
@@ -195,10 +218,8 @@ export const Reports: React.FC = () => {
   const [paymentReconciliation, setPaymentReconciliation] = useState<any>(null);
   const [zReport, setZReport] = useState<any>(null);
   const [posInventoryMovement, setPosInventoryMovement] = useState<any>(null);
-  const [membershipSales, setMembershipSales] = useState<any>(null);
   const [gstHandoff, setGstHandoff] = useState<any>(null);
   const [receivables, setReceivables] = useState<{ totalOutstanding: number; rows: any[] } | null>(null);
-  const [attendanceSummary, setAttendanceSummary] = useState<any[]>([]);
   const [cashVsCredit, setCashVsCredit] = useState<{ cash: any; credit: any } | null>(null);
   const [userSales, setUserSales] = useState<any[]>([]);
   const [taxSummary, setTaxSummary] = useState<{ salesTax: any[]; returnTax: any[] } | null>(null);
@@ -220,31 +241,27 @@ export const Reports: React.FC = () => {
   }, []);
 
   const queryRange = `startDate=${startDate}&endDate=${endDate}`;
-  const reportMenu: Array<{ key: ReportTabKey; label: string }> = [
-    { key: 'profit-loss-store-report', label: 'Profit & Loss (Store-level)' },
-    { key: 'balance-sheet-store-report', label: 'Balance Sheet (Store-level)' },
-    { key: 'sales-summary-shift-report', label: 'Sales Summary (Daily / Shift)' },
-    { key: 'daily-sales-summary', label: 'Daily Sales Summary' },
-    { key: 'item-wise-sales', label: 'Item-wise Sales Report' },
-    { key: 'customer-wise-sales', label: 'Customer-wise Sales Report' },
-    { key: 'sales-return-report', label: 'Sales Return Report' },
-    { key: 'gross-profit-report', label: 'Gross Profit Report' },
-    { key: 'hsn-wise-sales-report', label: 'HSN-wise Sales Report' },
-    { key: 'taxability-breakup-report', label: 'Taxable / Exempt / Nil / Non-GST' },
-    { key: 'b2b-vs-b2c-report', label: 'B2B vs B2C Invoice Report' },
-    { key: 'gst-note-register-report', label: 'Credit / Debit Note Register (GST)' },
-    { key: 'sales-register-detailed-report', label: 'Sales Register (Detailed)' },
-    { key: 'payment-reconciliation-report', label: 'Payment Reconciliation Report' },
-    { key: 'z-report', label: 'Z-Report (End of Day)' },
-    { key: 'pos-inventory-movement-report', label: 'Inventory Movement (POS only)' },
-    { key: 'membership-sales-report', label: 'Membership Sales Report' },
-    { key: 'gst-handoff-report', label: 'GST Handoff Datasets' },
-    { key: 'outstanding-receivables-report', label: 'Outstanding Receivables Report' },
-    { key: 'attendance-report', label: 'Attendance Report' },
-    { key: 'cash-vs-credit-sales-report', label: 'Cash vs Credit Sales Report' },
-    { key: 'user-wise-sales-report', label: 'User-wise Sales Report' },
-    { key: 'tax-summary-report', label: 'Tax Summary Report' },
-  ];
+  const posScopeQueryRange = `${queryRange}&scope=pos`;
+  const reportMenu: Array<{ key: ReportTabKey; label: string }> = SALES_REPORT_MENU_KEYS.map((key) => ({
+    key,
+    label: REPORT_TAB_LABEL[key],
+  }));
+  const profitLossNetSales = toNumber(profitLossStore?.posSummary?.netSales);
+  const profitLossCogs = toNumber(profitLossStore?.posSummary?.cogs);
+  const validatedStoreGrossProfit = toFixed2(profitLossNetSales - profitLossCogs);
+  const validatedStoreMargin = profitLossNetSales > 0 ? toFixed2((validatedStoreGrossProfit / profitLossNetSales) * 100) : 0;
+  const hasProfitLossGrossProfitSummary = Boolean(profitLossStore?.posSummary);
+  const grossProfitRevenueDisplay = hasProfitLossGrossProfitSummary ? toFixed2(profitLossNetSales) : toFixed2(grossProfit?.revenue);
+  const grossProfitCogsDisplay = hasProfitLossGrossProfitSummary ? toFixed2(profitLossCogs) : toFixed2(grossProfit?.costOfGoods);
+  const grossProfitDisplay = hasProfitLossGrossProfitSummary
+    ? validatedStoreGrossProfit
+    : toFixed2(grossProfit?.grossProfit);
+  const grossProfitMarginDisplay = hasProfitLossGrossProfitSummary
+    ? validatedStoreMargin
+    : toFixed2(grossProfit?.marginPercent);
+  const grossProfitHeaderValue = hasProfitLossGrossProfitSummary
+    ? validatedStoreGrossProfit
+    : grossProfitDisplay;
 
   const setSearchForTab = (tab: ReportTabKey, value: string) => {
     setReportSearchByTab((prev) => ({ ...prev, [tab]: value }));
@@ -370,7 +387,7 @@ export const Reports: React.FC = () => {
     const rows = dailySales.filter((row) => {
       const dateText = `${row?._id?.year}-${String(row?._id?.month || '').padStart(2, '0')}-${String(row?._id?.day || '').padStart(2, '0')}`;
       if (q) {
-        const hay = `${dateText} ${row?.invoices || 0} ${row?.salesAmount || 0} ${row?.taxAmount || 0} ${row?.outstanding || 0}`.toLowerCase();
+        const hay = `${dateText} ${row?.invoices || 0} ${row?.grossSales || 0} ${row?.discounts || 0} ${row?.netSales || row?.salesAmount || 0} ${row?.taxAmount || 0} ${row?.totalSales || 0} ${row?.amountCollected || 0} ${row?.storeCreditUsed || 0} ${row?.outstanding || 0}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (filter === 'with-outstanding' && Number(row?.outstanding || 0) <= 0) return false;
@@ -384,22 +401,35 @@ export const Reports: React.FC = () => {
       const accessors: Record<string, unknown> = {
         dateA,
         invoicesA: Number(a?.invoices || 0),
-        salesA: Number(a?.salesAmount || 0),
+        grossSalesA: Number(a?.grossSales || 0),
+        discountA: Number(a?.discounts || 0),
+        salesA: Number(a?.netSales || a?.salesAmount || 0),
         taxA: Number(a?.taxAmount || 0),
+        totalA: Number(a?.totalSales || 0),
+        collectedA: Number(a?.amountCollected || 0),
         outstandingA: Number(a?.outstanding || 0),
       };
       const accessorsB: Record<string, unknown> = {
         dateA: dateB,
         invoicesA: Number(b?.invoices || 0),
-        salesA: Number(b?.salesAmount || 0),
+        grossSalesA: Number(b?.grossSales || 0),
+        discountA: Number(b?.discounts || 0),
+        salesA: Number(b?.netSales || b?.salesAmount || 0),
         taxA: Number(b?.taxAmount || 0),
+        totalA: Number(b?.totalSales || 0),
+        collectedA: Number(b?.amountCollected || 0),
         outstandingA: Number(b?.outstanding || 0),
       };
       const keyMap: Record<string, string> = {
         date: 'dateA',
         invoices: 'invoicesA',
+        grossSales: 'grossSalesA',
+        discounts: 'discountA',
         salesAmount: 'salesA',
+        netSales: 'salesA',
         taxAmount: 'taxA',
+        totalSales: 'totalA',
+        amountCollected: 'collectedA',
         outstanding: 'outstandingA',
       };
       const mapKey = keyMap[sortField];
@@ -417,7 +447,7 @@ export const Reports: React.FC = () => {
     const direction = reportSortDirectionByTab[tab];
     const rows = itemSales.filter((row) => {
       if (q) {
-        const hay = `${row?.productName || ''} ${row?.category || ''} ${row?.subcategory || ''} ${row?.variantSize || ''} ${row?.variantColor || ''} ${row?.quantity || 0} ${row?.taxableValue || 0} ${row?.tax || 0} ${row?.amount || 0}`.toLowerCase();
+        const hay = `${row?.productName || ''} ${row?.category || ''} ${row?.subcategory || ''} ${row?.variantSize || ''} ${row?.variantColor || ''} ${row?.quantity || 0} ${row?.grossSales || 0} ${row?.discount || 0} ${row?.taxableValue || 0} ${row?.tax || 0} ${row?.amount || 0} ${row?.grossProfit || 0} ${row?.marginPercent || 0}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (filter === 'high-qty' && Number(row?.quantity || 0) < 5) return false;
@@ -433,9 +463,15 @@ export const Reports: React.FC = () => {
           `${String(b?.variantSize || '')} ${String(b?.variantColor || '')}`.trim(),
         ],
         quantity: [Number(a?.quantity || 0), Number(b?.quantity || 0)],
+        grossSales: [Number(a?.grossSales || 0), Number(b?.grossSales || 0)],
+        discount: [Number(a?.discount || 0), Number(b?.discount || 0)],
         taxableValue: [Number(a?.taxableValue || 0), Number(b?.taxableValue || 0)],
         tax: [Number(a?.tax || 0), Number(b?.tax || 0)],
         amount: [Number(a?.amount || 0), Number(b?.amount || 0)],
+        cogs: [Number(a?.cogs || 0), Number(b?.cogs || 0)],
+        grossProfit: [Number(a?.grossProfit || 0), Number(b?.grossProfit || 0)],
+        marginPercent: [Number(a?.marginPercent || 0), Number(b?.marginPercent || 0)],
+        rank: [Number(a?.rank || 0), Number(b?.rank || 0)],
       };
       const pair = keyMap[sortField];
       if (!pair) return 0;
@@ -451,19 +487,28 @@ export const Reports: React.FC = () => {
     const direction = reportSortDirectionByTab[tab];
     const rows = customerSales.filter((row) => {
       if (q) {
-        const hay = `${row?._id?.customerName || 'Walk-in Customer'} ${row?.invoices || 0} ${row?.amount || 0} ${row?.outstanding || 0}`.toLowerCase();
+        const hay = `${row?.customerName || 'Walk-in Customer'} ${row?.invoices || 0} ${row?.visitCount || 0} ${row?.grossSales || 0} ${row?.discount || 0} ${row?.returns || 0} ${row?.netSales || 0} ${row?.gst || 0} ${row?.totalSales || 0} ${row?.amountCollected || 0} ${row?.storeCreditUsed || 0} ${row?.balanceDue || 0} ${row?.avgOrderValue || 0}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (filter === 'with-outstanding' && Number(row?.outstanding || 0) <= 0) return false;
-      if (filter === 'no-outstanding' && Number(row?.outstanding || 0) > 0) return false;
+      if (filter === 'with-outstanding' && Number(row?.balanceDue || 0) <= 0) return false;
+      if (filter === 'no-outstanding' && Number(row?.balanceDue || 0) > 0) return false;
       return true;
     });
     return [...rows].sort((a, b) => {
       const keyMap: Record<string, [unknown, unknown]> = {
-        customer: [String(a?._id?.customerName || 'Walk-in Customer'), String(b?._id?.customerName || 'Walk-in Customer')],
+        customer: [String(a?.customerName || 'Walk-in Customer'), String(b?.customerName || 'Walk-in Customer')],
         invoices: [Number(a?.invoices || 0), Number(b?.invoices || 0)],
-        amount: [Number(a?.amount || 0), Number(b?.amount || 0)],
-        outstanding: [Number(a?.outstanding || 0), Number(b?.outstanding || 0)],
+        visitCount: [Number(a?.visitCount || 0), Number(b?.visitCount || 0)],
+        grossSales: [Number(a?.grossSales || 0), Number(b?.grossSales || 0)],
+        discount: [Number(a?.discount || 0), Number(b?.discount || 0)],
+        returns: [Number(a?.returns || 0), Number(b?.returns || 0)],
+        amount: [Number(a?.netSales || 0), Number(b?.netSales || 0)],
+        gst: [Number(a?.gst || 0), Number(b?.gst || 0)],
+        totalSales: [Number(a?.totalSales || 0), Number(b?.totalSales || 0)],
+        collected: [Number(a?.amountCollected || 0), Number(b?.amountCollected || 0)],
+        storeCredit: [Number(a?.storeCreditUsed || 0), Number(b?.storeCreditUsed || 0)],
+        outstanding: [Number(a?.balanceDue || 0), Number(b?.balanceDue || 0)],
+        avgOrderValue: [Number(a?.avgOrderValue || 0), Number(b?.avgOrderValue || 0)],
       };
       const pair = keyMap[sortField];
       if (!pair) return 0;
@@ -529,39 +574,6 @@ export const Reports: React.FC = () => {
       return compareSortValues(pair[0], pair[1], direction);
     });
   }, [receivables?.rows, reportFilterByTab, reportSearchByTab, reportSortDirectionByTab, reportSortFieldByTab]);
-
-  const attendanceView = useMemo(() => {
-    const tab: ReportTabKey = 'attendance-report';
-    const q = normalizeText(reportSearchByTab[tab]);
-    const filter = reportFilterByTab[tab];
-    const sortField = reportSortFieldByTab[tab];
-    const direction = reportSortDirectionByTab[tab];
-    const rows = attendanceSummary.filter((row) => {
-      const employeeName = row.employeeCode ? `${row.employeeCode} - ${row.employeeName || ''}` : row.employeeName || 'Unknown';
-      if (q) {
-        const hay = `${employeeName} ${row?.presentDays || 0} ${row?.halfDays || 0} ${row?.leaveDays || 0} ${row?.absentDays || 0} ${row?.overtimeHours || 0}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (filter === 'with-absence' && Number(row?.absentDays || 0) <= 0) return false;
-      if (filter === 'perfect' && (Number(row?.absentDays || 0) > 0 || Number(row?.leaveDays || 0) > 0)) return false;
-      return true;
-    });
-    return [...rows].sort((a, b) => {
-      const employeeA = a.employeeCode ? `${a.employeeCode} - ${a.employeeName || ''}` : a.employeeName || 'Unknown';
-      const employeeB = b.employeeCode ? `${b.employeeCode} - ${b.employeeName || ''}` : b.employeeName || 'Unknown';
-      const keyMap: Record<string, [unknown, unknown]> = {
-        employee: [employeeA, employeeB],
-        presentDays: [Number(a?.presentDays || 0), Number(b?.presentDays || 0)],
-        halfDays: [Number(a?.halfDays || 0), Number(b?.halfDays || 0)],
-        leaveDays: [Number(a?.leaveDays || 0), Number(b?.leaveDays || 0)],
-        absentDays: [Number(a?.absentDays || 0), Number(b?.absentDays || 0)],
-        overtimeHours: [Number(a?.overtimeHours || 0), Number(b?.overtimeHours || 0)],
-      };
-      const pair = keyMap[sortField];
-      if (!pair) return 0;
-      return compareSortValues(pair[0], pair[1], direction);
-    });
-  }, [attendanceSummary, reportFilterByTab, reportSearchByTab, reportSortDirectionByTab, reportSortFieldByTab]);
 
   const cashVsCreditRows = useMemo(
     () => [
@@ -871,15 +883,19 @@ export const Reports: React.FC = () => {
     return {
       'profit-loss-store-report': {
         title: 'Profit & Loss (Store-level)',
+        notes: [
+          'This store view is limited to posted POS sales, returns, discounts, and cost of goods sold.',
+          'Payroll, sponsorship, vouchers, and other accounting-ledger entries stay in the main Accounting reports.',
+        ],
         summary: [
           ['Net Sales', formatCurrency(Number(profitLossStore?.posSummary?.netSales || 0))],
           ['COGS', formatCurrency(Number(profitLossStore?.posSummary?.cogs || 0))],
-          ['Gross Profit', formatCurrency(Number(profitLossStore?.posSummary?.grossProfit || 0))],
-          ['Margin %', `${Number(profitLossStore?.posSummary?.marginPercent || 0).toFixed(2)}%`],
+          ['Gross Profit', formatCurrency(validatedStoreGrossProfit)],
+          ['Margin %', `${validatedStoreMargin.toFixed(2)}%`],
         ],
         sections: [
           {
-            title: 'Accounting Statement',
+            title: 'Sales Profitability Statement',
             columns: ['Section', 'Particulars', 'Amount'],
             rows: (profitLossStore?.statement?.rows || []).map((row: any) => [
               String(row.section || ''),
@@ -889,11 +905,12 @@ export const Reports: React.FC = () => {
           },
           {
             title: 'Register / Cashier Performance',
-            columns: ['Register', 'Shift', 'Invoices', 'Net Sales', 'Tax', 'COGS', 'Gross Profit'],
+            columns: ['Register', 'Shift', 'Invoices', 'Returns', 'Net Sales', 'Tax', 'COGS', 'Gross Profit'],
             rows: (profitLossStore?.registerRows || []).map((row: any) => [
               String(row.register || ''),
               String(row.shiftName || ''),
               Number(row.invoices || 0),
+              formatCurrency(Number(row.returns || 0)),
               formatCurrency(Number(row.netSales || 0)),
               formatCurrency(Number(row.taxAmount || 0)),
               formatCurrency(Number(row.cogsAmount || 0)),
@@ -904,6 +921,10 @@ export const Reports: React.FC = () => {
       },
       'balance-sheet-store-report': {
         title: 'Balance Sheet (Store-level)',
+        notes: [
+          'This store snapshot is POS-only. It shows sales-side inventory, POS receivables, till balances, pending digital settlements, and sales tax position.',
+          'Vendor payables, payroll liabilities, banking, and other accounting balances remain in the full Accounting Balance Sheet.',
+        ],
         summary: [
           ['Total Assets', formatCurrency(Number(balanceSheetStore?.report?.totals?.totalAssets || 0))],
           ['Total Liabilities', formatCurrency(Number(balanceSheetStore?.report?.totals?.totalLiabilities || 0))],
@@ -912,13 +933,24 @@ export const Reports: React.FC = () => {
         ],
         sections: [
           {
-            title: 'Balance Sheet Rows',
+            title: 'Store Position Rows',
             columns: ['Section', 'Account', 'Amount'],
             rows: [
               ...(balanceSheetStore?.report?.assets || []).map((row: any) => ['Asset', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
               ...(balanceSheetStore?.report?.liabilities || []).map((row: any) => ['Liability', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
               ...(balanceSheetStore?.report?.equityRows || []).map((row: any) => ['Equity', String(row.accountName || ''), formatCurrency(Number(row.amount || 0))]),
             ],
+          },
+          {
+            title: 'Open Sales Receivables',
+            columns: ['Invoice', 'Customer', 'Due Date', 'Mode', 'Outstanding'],
+            rows: (balanceSheetStore?.receivableRows || []).map((row: any) => [
+              String(row.invoiceNumber || ''),
+              String(row.customerName || ''),
+              formatDateCell(row.dueDate),
+              String(row.paymentMethod || ''),
+              formatCurrency(Number(row.outstandingAmount || 0)),
+            ]),
           },
           {
             title: 'Cash Drawer Balances',
@@ -932,7 +964,7 @@ export const Reports: React.FC = () => {
             ]),
           },
           {
-            title: 'Undeposited Receipts',
+            title: 'Pending Digital Settlements',
             columns: ['Source', 'Reference', 'Customer', 'Method', 'Expected Settlement', 'Amount'],
             rows: (balanceSheetStore?.undepositedRows || []).map((row: any) => [
               String(row.source || ''),
@@ -943,43 +975,40 @@ export const Reports: React.FC = () => {
               formatCurrency(Number(row.amount || 0)),
             ]),
           },
-          {
-            title: 'Membership Receivables',
-            columns: ['Member Code', 'Member', 'Amount Due', 'Amount Paid', 'End Date'],
-            rows: (balanceSheetStore?.membershipReceivableRows || []).map((row: any) => [
-              String(row.memberCode || ''),
-              String(row.memberName || ''),
-              formatCurrency(Number(row.amountDue || 0)),
-              formatCurrency(Number(row.amountPaid || 0)),
-              formatDateCell(row.endDate),
-            ]),
-          },
         ],
       },
       'sales-summary-shift-report': {
         title: 'Sales Summary (Daily / Shift)',
         summary: [
           ['Gross Sales', formatCurrency(Number(salesSummaryShift?.summary?.grossSales || 0))],
-          ['Returns', formatCurrency(Number(salesSummaryShift?.summary?.returns || 0))],
           ['Discounts', formatCurrency(Number(salesSummaryShift?.summary?.discounts || 0))],
+          ['Returns', formatCurrency(Number(salesSummaryShift?.summary?.returns || 0))],
           ['Net Sales', formatCurrency(Number(salesSummaryShift?.summary?.netSales || 0))],
+          ['GST', formatCurrency(Number(salesSummaryShift?.summary?.taxes || 0))],
+          ['Total Sales', formatCurrency(Number(salesSummaryShift?.summary?.totalSales || 0))],
+          ['Collected', formatCurrency(Number(salesSummaryShift?.summary?.amountCollected || 0))],
+          ['Store Credit Used', formatCurrency(Number(salesSummaryShift?.summary?.storeCreditUsed || 0))],
         ],
         sections: [
           {
             title: 'Shift Summary',
-            columns: ['Date', 'Shift', 'Invoices', 'Gross Sales', 'Returns', 'Discounts', 'Taxes', 'Net Sales', 'Cash', 'Card', 'UPI', 'Other'],
+            columns: ['Date', 'Shift', 'Invoices', 'Gross Sales', 'Discounts', 'Returns', 'Net Sales', 'GST', 'Total Sales', 'Collected', 'Store Credit', 'Cash', 'Card', 'UPI', 'Bank', 'Other'],
             rows: (salesSummaryShift?.rows || []).map((row: any) => [
               String(row.dateKey || ''),
               String(row.shiftName || ''),
               Number(row.invoices || 0),
               formatCurrency(Number(row.grossSales || 0)),
-              formatCurrency(Number(row.returns || 0)),
               formatCurrency(Number(row.discounts || 0)),
-              formatCurrency(Number(row.taxes || 0)),
+              formatCurrency(Number(row.returns || 0)),
               formatCurrency(Number(row.netSalesAfterReturns || 0)),
+              formatCurrency(Number(row.taxes || 0)),
+              formatCurrency(Number(row.totalSalesAfterReturns || 0)),
+              formatCurrency(Number(row.amountCollected || 0)),
+              formatCurrency(Number(row.storeCreditUsed || 0)),
               formatCurrency(Number(row.cash || 0)),
               formatCurrency(Number(row.card || 0)),
               formatCurrency(Number(row.upi || 0)),
+              formatCurrency(Number(row.bank || 0)),
               formatCurrency(Number(row.other || 0)),
             ]),
           },
@@ -995,7 +1024,7 @@ export const Reports: React.FC = () => {
         sections: [
           {
             title: 'HSN Summary',
-            columns: ['HSN', 'Quantity', 'Taxable Value', 'Tax Amount', 'CGST', 'SGST', 'IGST', 'Cess', 'Total'],
+            columns: ['HSN', 'Quantity', 'Taxable Value', 'Tax Amount', 'CGST', 'SGST', 'IGST', 'Cess', 'Tax Total Before Round Off'],
             rows: (hsnWiseSales?.rows || []).map((row: any) => [
               String(row.hsnCode || ''),
               Number(row.quantity || 0),
@@ -1086,12 +1115,16 @@ export const Reports: React.FC = () => {
           ['Rows', Number(salesRegisterDetailed?.summary?.rows || 0)],
           ['Invoices', Number(salesRegisterDetailed?.summary?.invoices || 0)],
           ['Taxable Value', formatCurrency(Number(salesRegisterDetailed?.summary?.taxableValue || 0))],
-          ['Total Amount', formatCurrency(Number(salesRegisterDetailed?.summary?.totalAmount || 0))],
+          ['GST', formatCurrency(Number(salesRegisterDetailed?.summary?.gstAmount || 0))],
+          ['Subtotal Before Round Off', formatCurrency(Number(salesRegisterDetailed?.summary?.totalBeforeRoundOff || 0))],
+          ['Round Off', formatCurrency(Number(salesRegisterDetailed?.summary?.roundOffAmount || 0))],
+          ['Final Invoice Total', formatCurrency(Number(salesRegisterDetailed?.summary?.totalAmount || 0))],
+          ['Collected', formatCurrency(Number(salesRegisterDetailed?.summary?.amountCollected || 0))],
         ],
         sections: [
           {
             title: 'Detailed Register',
-            columns: ['Date', 'Invoice', 'Customer', 'GSTIN', 'Item', 'SKU', 'HSN', 'Qty', 'Rate', 'Taxable', 'Discount', 'Tax', 'Total', 'Payment', 'Shift'],
+            columns: ['Date', 'Invoice', 'Customer', 'GSTIN', 'Item', 'SKU', 'HSN', 'Qty', 'Rate', 'Taxable', 'Discount', 'GST', 'Subtotal Before Round Off', 'Round Off', 'Final Invoice Total', 'Collected', 'Payment', 'Shift'],
             rows: (salesRegisterDetailed?.rows || []).map((row: any) => [
               formatDateCell(row.invoiceDate),
               String(row.invoiceNumber || ''),
@@ -1105,7 +1138,10 @@ export const Reports: React.FC = () => {
               formatCurrency(Number(row.taxableValue || 0)),
               formatCurrency(Number(row.discountAmount || 0)),
               formatCurrency(Number(row.taxAmount || 0)),
-              formatCurrency(Number(row.totalAmount || 0)),
+              formatCurrency(Number(row.subtotalBeforeRoundOff || 0)),
+              formatCurrencyOrBlank(row.roundOffAmount),
+              formatCurrencyOrBlank(row.finalInvoiceTotal),
+              formatCurrencyOrBlank(row.amountCollected),
               String(row.paymentMethod || ''),
               String(row.shiftName || ''),
             ]),
@@ -1116,21 +1152,24 @@ export const Reports: React.FC = () => {
         title: 'Payment Reconciliation Report',
         summary: [
           ['Methods', Number(paymentReconciliation?.summary?.methods || 0)],
-          ['Total Amount', formatCurrency(Number(paymentReconciliation?.summary?.totalAmount || 0))],
+          ['Collected', formatCurrency(Number(paymentReconciliation?.summary?.amountCollected || 0))],
+          ['Store Credit Used', formatCurrency(Number(paymentReconciliation?.summary?.storeCreditUsed || 0))],
+          ['Settlement Total', formatCurrency(Number(paymentReconciliation?.summary?.settlementAmount || 0))],
           ['Outstanding', formatCurrency(Number(paymentReconciliation?.summary?.outstandingAmount || 0))],
         ],
         sections: [
           {
             title: 'Payment Reconciliation',
-            columns: ['Method', 'Channel', 'Invoices', 'Taxable', 'Tax', 'Total', 'Outstanding', 'Pending Settlement'],
+            columns: ['Method', 'Channel', 'Invoices', 'Taxable Share', 'GST Share', 'Collected', 'Store Credit', 'Settlement Total', 'Pending Settlement'],
             rows: (paymentReconciliation?.rows || []).map((row: any) => [
               String(row.paymentMethod || ''),
               String(row.channel || ''),
               Number(row.invoices || 0),
               formatCurrency(Number(row.taxableValue || 0)),
               formatCurrency(Number(row.taxAmount || 0)),
-              formatCurrency(Number(row.totalAmount || 0)),
-              formatCurrency(Number(row.outstandingAmount || 0)),
+              formatCurrency(Number(row.amountCollected || 0)),
+              formatCurrency(Number(row.storeCreditUsed || 0)),
+              formatCurrency(Number(row.settlementAmount || 0)),
               formatCurrency(Number(row.pendingSettlement || 0)),
             ]),
           },
@@ -1141,21 +1180,26 @@ export const Reports: React.FC = () => {
         summary: [
           ['Days', Number(zReport?.summary?.days || 0)],
           ['Gross Sales', formatCurrency(Number(zReport?.summary?.grossSales || 0))],
+          ['Discounts', formatCurrency(Number(zReport?.summary?.discounts || 0))],
           ['Returns', formatCurrency(Number(zReport?.summary?.returns || 0))],
           ['Net Sales', formatCurrency(Number(zReport?.summary?.netSales || 0))],
+          ['Total Sales', formatCurrency(Number(zReport?.summary?.totalSales || 0))],
         ],
         sections: [
           {
             title: 'Daily Closing',
-            columns: ['Date', 'Invoices', 'Gross Sales', 'Returns', 'Net Sales', 'Tax', 'Discounts', 'Cash Sales', 'Digital Sales', 'System Closing Cash', 'Physical Closing Cash', 'Variance'],
+            columns: ['Date', 'Invoices', 'Gross Sales', 'Discounts', 'Returns', 'Net Sales', 'GST', 'Total Sales', 'Collected', 'Store Credit', 'Cash Collection', 'Digital Collection', 'System Closing Cash', 'Physical Closing Cash', 'Variance'],
             rows: (zReport?.rows || []).map((row: any) => [
               String(row.dateKey || ''),
               Number(row.invoices || 0),
               formatCurrency(Number(row.grossSales || 0)),
+              formatCurrency(Number(row.discounts || 0)),
               formatCurrency(Number(row.returns || 0)),
               formatCurrency(Number(row.netSales || 0)),
               formatCurrency(Number(row.taxAmount || 0)),
-              formatCurrency(Number(row.discounts || 0)),
+              formatCurrency(Number(row.totalSales || 0)),
+              formatCurrency(Number(row.amountCollected || 0)),
+              formatCurrency(Number(row.storeCreditUsed || 0)),
               formatCurrency(Number(row.cashSales || 0)),
               formatCurrency(Number(row.digitalSales || 0)),
               formatCurrency(Number(row.systemClosingCash || 0)),
@@ -1169,15 +1213,42 @@ export const Reports: React.FC = () => {
         title: 'Inventory Movement (POS only)',
         summary: [
           ['Sold Items', Number(posInventoryMovement?.summary?.soldItems || 0)],
-          ['Quantity Sold', Number(posInventoryMovement?.summary?.quantitySold || 0)],
-          ['COGS', formatCurrency(Number(posInventoryMovement?.summary?.cogsAmount || 0))],
+          ['Net Quantity', Number(posInventoryMovement?.summary?.quantitySold || 0)],
+          ['Sold Quantity', Number(posInventoryMovement?.summary?.soldQuantity || 0)],
+          ['Returned Quantity', Number(posInventoryMovement?.summary?.returnQuantity || 0)],
+          ['Net COGS', formatCurrency(Number(posInventoryMovement?.summary?.cogsAmount || 0))],
+          ['Return COGS', formatCurrency(Number(posInventoryMovement?.summary?.returnCogsAmount || 0))],
           ['Stock Alerts', Number(posInventoryMovement?.summary?.stockAlerts || 0)],
         ],
         sections: [
           {
-            title: 'Sold Items',
+            title: 'Net Inventory Movement',
+            columns: ['Item', 'SKU', 'Net Qty', 'Net Taxable Value', 'Net COGS', 'Net Gross Profit'],
+            rows: (posInventoryMovement?.netRows || []).map((row: any) => [
+              String(row.productName || ''),
+              String(row.sku || ''),
+              Number(row.quantitySold || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.cogsAmount || 0)),
+              formatCurrency(Number(row.grossProfit || 0)),
+            ]),
+          },
+          {
+            title: 'Gross Sold Items',
             columns: ['Item', 'SKU', 'Qty Sold', 'Taxable Value', 'COGS', 'Gross Profit'],
             rows: (posInventoryMovement?.soldRows || []).map((row: any) => [
+              String(row.productName || ''),
+              String(row.sku || ''),
+              Number(row.quantitySold || 0),
+              formatCurrency(Number(row.taxableValue || 0)),
+              formatCurrency(Number(row.cogsAmount || 0)),
+              formatCurrency(Number(row.grossProfit || 0)),
+            ]),
+          },
+          {
+            title: 'Returned Items',
+            columns: ['Item', 'SKU', 'Qty Returned', 'Taxable Value Reversed', 'Return COGS', 'Gross Profit Reversed'],
+            rows: (posInventoryMovement?.returnRows || []).map((row: any) => [
               String(row.productName || ''),
               String(row.sku || ''),
               Number(row.quantitySold || 0),
@@ -1199,35 +1270,12 @@ export const Reports: React.FC = () => {
           },
         ],
       },
-      'membership-sales-report': {
-        title: 'Membership Sales Report',
-        summary: [
-          ['Events', Number(membershipSales?.summary?.events || 0)],
-          ['Amount Paid', formatCurrency(Number(membershipSales?.summary?.amountPaid || 0))],
-          ['Recognised Revenue', formatCurrency(Number(membershipSales?.summary?.recognizedRevenue || 0))],
-          ['Deferred Revenue', formatCurrency(Number(membershipSales?.summary?.deferredRevenue || 0))],
-        ],
-        sections: [
-          {
-            title: 'Membership Sales',
-            columns: ['Event', 'Date', 'Member Code', 'Member', 'Plan', 'Amount Paid', 'Amount Due', 'Recognised', 'Deferred'],
-            rows: (membershipSales?.rows || []).map((row: any) => [
-              String(row.eventType || ''),
-              formatDateCell(row.eventDate),
-              String(row.memberCode || ''),
-              String(row.memberName || ''),
-              String(row.planName || ''),
-              formatCurrency(Number(row.amountPaid || 0)),
-              formatCurrency(Number(row.amountDue || 0)),
-              formatCurrency(Number(row.recognizedRevenue || 0)),
-              formatCurrency(Number(row.deferredRevenue || 0)),
-            ]),
-          },
-        ],
-      },
       'gst-handoff-report': {
         title: 'GST Handoff Datasets',
-        notes: ['This tab prepares POS verification and sync datasets only. GSTR JSON generation remains in the main GST Workspace.'],
+        notes: [
+          'This tab prepares POS verification and sync datasets only. GSTR JSON generation remains in the main GST Workspace.',
+          'Round-off is excluded from GST taxable value and tax calculation. Invoice totals can be slightly higher or lower because round-off is tracked separately.',
+        ],
         summary: [
           ['B2B Invoices', Number(gstHandoff?.summary?.b2bInvoices || 0)],
           ['B2C Invoices', Number(gstHandoff?.summary?.b2cInvoices || 0)],
@@ -1322,7 +1370,6 @@ export const Reports: React.FC = () => {
     gstHandoff,
     gstNoteRegister,
     hsnWiseSales,
-    membershipSales,
     paymentReconciliation,
     posInventoryMovement,
     profitLossStore,
@@ -1341,12 +1388,17 @@ export const Reports: React.FC = () => {
     if (activeTab === 'daily-sales-summary') {
       return {
         title: 'Daily Sales Summary',
-        columns: ['Date', 'Invoices', 'Sales', 'Tax', 'Outstanding'],
+        columns: ['Date', 'Invoices', 'Gross Sales', 'Discount', 'Net Sales', 'GST', 'Total Sales', 'Collected', 'Store Credit', 'Outstanding'],
         rows: dailySalesView.map((row) => [
           `${row._id.year}-${String(row._id.month).padStart(2, '0')}-${String(row._id.day).padStart(2, '0')}`,
           toNumber(row.invoices),
-          toFixed2(row.salesAmount),
+          toFixed2(row.grossSales),
+          toFixed2(row.discounts),
+          toFixed2(row.netSales || row.salesAmount),
           toFixed2(row.taxAmount),
+          toFixed2(row.totalSales),
+          toFixed2(row.amountCollected),
+          toFixed2(row.storeCreditUsed),
           toFixed2(row.outstanding),
         ]),
       };
@@ -1355,15 +1407,21 @@ export const Reports: React.FC = () => {
     if (activeTab === 'item-wise-sales') {
       return {
         title: 'Item-wise Sales Report',
-        columns: ['Item', 'Category', 'Variant', 'Qty', 'Taxable', 'Tax', 'Total'],
+        columns: ['Rank', 'Item', 'Category', 'Variant', 'Qty', 'Gross Sales', 'Discount', 'Net Sales', 'GST', 'Tax Total Before Round Off', 'COGS', 'Gross Profit', 'Margin %'],
         rows: itemSalesView.map((row) => [
+          toNumber(row.rank),
           String(row.productName || ''),
           [String(row.category || ''), String(row.subcategory || '')].filter(Boolean).join(' / '),
           [String(row.variantSize || ''), String(row.variantColor || '')].filter(Boolean).join(' / ') || '-',
           toNumber(row.quantity),
+          toFixed2(row.grossSales),
+          toFixed2(row.discount),
           toFixed2(row.taxableValue),
           toFixed2(row.tax),
           toFixed2(row.amount),
+          toFixed2(row.cogs),
+          toFixed2(row.grossProfit),
+          toFixed2(row.marginPercent),
         ]),
       };
     }
@@ -1371,12 +1429,21 @@ export const Reports: React.FC = () => {
     if (activeTab === 'customer-wise-sales') {
       return {
         title: 'Customer-wise Sales Report',
-        columns: ['Customer', 'Invoices', 'Amount', 'Outstanding'],
+        columns: ['Customer', 'Invoices', 'Visits', 'Gross Sales', 'Discount', 'Returns', 'Net Sales', 'GST', 'Total Sales', 'Collected', 'Store Credit', 'Balance Due', 'Avg Order Value'],
         rows: customerSalesView.map((row) => [
-          String(row._id?.customerName || 'Walk-in Customer'),
+          String(row.customerName || 'Walk-in Customer'),
           toNumber(row.invoices),
-          toFixed2(row.amount),
-          toFixed2(row.outstanding),
+          toNumber(row.visitCount),
+          toFixed2(row.grossSales),
+          toFixed2(row.discount),
+          toFixed2(row.returns),
+          toFixed2(row.netSales),
+          toFixed2(row.gst),
+          toFixed2(row.totalSales),
+          toFixed2(row.amountCollected),
+          toFixed2(row.storeCreditUsed),
+          toFixed2(row.balanceDue),
+          toFixed2(row.avgOrderValue),
         ]),
       };
     }
@@ -1407,10 +1474,10 @@ export const Reports: React.FC = () => {
         title: 'Gross Profit Report',
         columns: ['Metric', 'Value'],
         rows: [
-          ['Revenue', toFixed2(grossProfit?.revenue)],
-          ['Cost of Goods', toFixed2(grossProfit?.costOfGoods)],
-          ['Gross Profit', toFixed2(grossProfit?.grossProfit)],
-          ['Margin %', Number(toNumber(grossProfit?.marginPercent).toFixed(2))],
+          ['Net Sales (Before GST)', grossProfitRevenueDisplay],
+          ['Cost of Goods', grossProfitCogsDisplay],
+          ['Gross Profit', grossProfitDisplay],
+          ['Margin %', Number(grossProfitMarginDisplay.toFixed(2))],
         ],
       };
     }
@@ -1425,21 +1492,6 @@ export const Reports: React.FC = () => {
           String(row.customerName || 'Walk-in Customer'),
           row.dueDate ? String(row.dueDate).slice(0, 10) : '-',
           toFixed2(row.outstandingAmount),
-        ]),
-      };
-    }
-
-    if (activeTab === 'attendance-report') {
-      return {
-        title: 'Attendance Report',
-        columns: ['Employee', 'Present', 'Half Day', 'Leave', 'Absent', 'OT Hours'],
-        rows: attendanceView.map((row) => [
-          row.employeeCode ? `${row.employeeCode} - ${row.employeeName || ''}` : row.employeeName || 'Unknown',
-          toNumber(row.presentDays),
-          toNumber(row.halfDays),
-          toNumber(row.leaveDays),
-          toNumber(row.absentDays),
-          toFixed2(row.overtimeHours),
         ]),
       };
     }
@@ -1466,6 +1518,7 @@ export const Reports: React.FC = () => {
           ['Sales Tax', toFixed2(totalSalesTax)],
           ['Return Tax Reversal', toFixed2(totalReturnTax)],
           ['Net Tax', toFixed2(totalSalesTax - totalReturnTax)],
+          ['GST Scope', 'Round-off excluded from GST calculation'],
         ],
         rows: taxSummaryView.map((row) => [
           row.source,
@@ -1494,7 +1547,6 @@ export const Reports: React.FC = () => {
     };
   }, [
     activeTab,
-    attendanceView,
     cashVsCreditView,
     customerSalesView,
     dailySalesView,
@@ -1834,12 +1886,12 @@ export const Reports: React.FC = () => {
         }
         case 'item-wise-sales': {
           const response = await fetchApiJson(apiUrl(`/api/reports/item-wise-sales?${queryRange}`), { headers });
-          setItemSales(Array.isArray(response?.data) ? response.data : []);
+          setItemSales(Array.isArray(response?.data?.rows) ? response.data.rows : []);
           break;
         }
         case 'customer-wise-sales': {
           const response = await fetchApiJson(apiUrl(`/api/reports/customer-wise-sales?${queryRange}`), { headers });
-          setCustomerSales(Array.isArray(response?.data) ? response.data : []);
+          setCustomerSales(Array.isArray(response?.data?.rows) ? response.data.rows : []);
           break;
         }
         case 'sales-return-report': {
@@ -1878,7 +1930,7 @@ export const Reports: React.FC = () => {
           break;
         }
         case 'payment-reconciliation-report': {
-          const response = await fetchApiJson(apiUrl(`/api/reports/payment-reconciliation?${queryRange}`), { headers });
+          const response = await fetchApiJson(apiUrl(`/api/reports/payment-reconciliation?${posScopeQueryRange}`), { headers });
           setPaymentReconciliation(response?.data || null);
           break;
         }
@@ -1892,24 +1944,14 @@ export const Reports: React.FC = () => {
           setPosInventoryMovement(response?.data || null);
           break;
         }
-        case 'membership-sales-report': {
-          const response = await fetchApiJson(apiUrl(`/api/reports/membership-sales?${queryRange}`), { headers });
-          setMembershipSales(response?.data || null);
-          break;
-        }
         case 'gst-handoff-report': {
           const response = await fetchApiJson(apiUrl(`/api/reports/gst-handoff?${queryRange}`), { headers });
           setGstHandoff(response?.data || null);
           break;
         }
         case 'outstanding-receivables-report': {
-          const response = await fetchApiJson(apiUrl(`/api/reports/outstanding-receivables?${queryRange}`), { headers });
+          const response = await fetchApiJson(apiUrl(`/api/reports/outstanding-receivables?${posScopeQueryRange}`), { headers });
           setReceivables(response?.data || null);
-          break;
-        }
-        case 'attendance-report': {
-          const response = await fetchApiJson(apiUrl(`/api/reports/attendance-summary?${queryRange}`), { headers });
-          setAttendanceSummary(Array.isArray(response?.data) ? response.data : []);
           break;
         }
         case 'cash-vs-credit-sales-report': {
@@ -1941,7 +1983,7 @@ export const Reports: React.FC = () => {
     }
   };
 
-  const runReportsLoad = async (force = false) => {
+  const runReportsLoad = async (force = false, loadAllTabs = false) => {
     if (startDate > endDate) {
       setError('Start date should be before or equal to end date');
       return;
@@ -1953,7 +1995,9 @@ export const Reports: React.FC = () => {
     if (force) {
       setTabLoaded(createTabState(false));
     }
-    const targetTabs = Array.from(new Set<ReportTabKey>([activeTab, ...KEY_METRIC_TABS]));
+    const targetTabs = loadAllTabs
+      ? REPORT_TAB_KEYS
+      : Array.from(new Set<ReportTabKey>([activeTab, ...KEY_METRIC_TABS]));
     try {
       await Promise.all(targetTabs.map((tab) => loadReportTab(tab, true)));
     } finally {
@@ -1962,7 +2006,7 @@ export const Reports: React.FC = () => {
   };
 
   const loadReports = () => {
-    void runReportsLoad(true);
+    void runReportsLoad(true, true);
   };
 
   useEffect(() => {
@@ -2006,7 +2050,7 @@ export const Reports: React.FC = () => {
       return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
           <h2 className="mb-2 text-lg font-semibold text-white">Daily Sales Summary</h2>
-          {renderReportControls(tab, 'Filter by date, invoices, sales, tax or outstanding...', [
+          {renderReportControls(tab, 'Filter by date, gross sales, discounts, net sales, GST, collections, or outstanding...', [
             { value: 'all', label: 'All rows' },
             { value: 'with-outstanding', label: 'Outstanding only' },
             { value: 'no-outstanding', label: 'No outstanding' },
@@ -2016,8 +2060,13 @@ export const Reports: React.FC = () => {
               <tr>
                 {renderSortHeader(tab, 'Date', 'date')}
                 {renderSortHeader(tab, 'Invoices', 'invoices')}
-                {renderSortHeader(tab, 'Sales', 'salesAmount')}
-                {renderSortHeader(tab, 'Tax', 'taxAmount')}
+                {renderSortHeader(tab, 'Gross Sales', 'grossSales')}
+                {renderSortHeader(tab, 'Discount', 'discounts')}
+                {renderSortHeader(tab, 'Net Sales', 'netSales')}
+                {renderSortHeader(tab, 'GST', 'taxAmount')}
+                {renderSortHeader(tab, 'Total Sales', 'totalSales')}
+                {renderSortHeader(tab, 'Collected', 'amountCollected')}
+                <th className="px-2 py-2 text-left text-sm font-semibold text-gray-200">Store Credit</th>
                 {renderSortHeader(tab, 'Outstanding', 'outstanding')}
               </tr>
             </thead>
@@ -2026,12 +2075,17 @@ export const Reports: React.FC = () => {
                 <tr key={idx}>
                   <td className="px-2 py-2 text-sm text-gray-300">{`${row._id.year}-${String(row._id.month).padStart(2, '0')}-${String(row._id.day).padStart(2, '0')}`}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{row.invoices}</td>
-                  <td className="px-2 py-2 text-sm text-white">{formatCurrency(Number(row.salesAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.grossSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-red-200">{formatCurrency(Number(row.discounts || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-white">{formatCurrency(Number(row.netSales || row.salesAmount || 0))}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.taxAmount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.totalSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-cyan-200">{formatCurrency(Number(row.amountCollected || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-violet-200">{formatCurrency(Number(row.storeCreditUsed || 0))}</td>
                   <td className="px-2 py-2 text-sm text-amber-300">{formatCurrency(Number(row.outstanding || 0))}</td>
                 </tr>
               ))}
-              {!dailySalesView.length && <tr><td colSpan={5} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
+              {!dailySalesView.length && <tr><td colSpan={10} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
             </tbody>
           </table>
           {renderPagination(tab, dailySalesView.length)}
@@ -2047,7 +2101,7 @@ export const Reports: React.FC = () => {
       return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
           <h2 className="mb-2 text-lg font-semibold text-white">Item-wise Sales Report</h2>
-          {renderReportControls(tab, 'Filter by item, category, variant, qty, taxable, tax or total...', [
+          {renderReportControls(tab, 'Filter by item, category, variant, gross sales, net sales, profit, or margin...', [
             { value: 'all', label: 'All items' },
             { value: 'high-qty', label: 'High qty (>=5)' },
             { value: 'low-qty', label: 'Low qty (<5)' },
@@ -2055,18 +2109,25 @@ export const Reports: React.FC = () => {
           <table className="min-w-full divide-y divide-white/10">
             <thead>
               <tr>
+                {renderSortHeader(tab, 'Rank', 'rank')}
                 {renderSortHeader(tab, 'Item', 'item')}
                 {renderSortHeader(tab, 'Category', 'category')}
                 {renderSortHeader(tab, 'Variant', 'variant')}
                 {renderSortHeader(tab, 'Qty', 'quantity')}
-                {renderSortHeader(tab, 'Taxable', 'taxableValue')}
-                {renderSortHeader(tab, 'Tax', 'tax')}
-                {renderSortHeader(tab, 'Total', 'amount')}
+                {renderSortHeader(tab, 'Gross Sales', 'grossSales')}
+                {renderSortHeader(tab, 'Discount', 'discount')}
+                {renderSortHeader(tab, 'Net Sales', 'taxableValue')}
+                {renderSortHeader(tab, 'GST', 'tax')}
+                {renderSortHeader(tab, 'Tax Total Before Round Off', 'amount')}
+                {renderSortHeader(tab, 'COGS', 'cogs')}
+                {renderSortHeader(tab, 'Gross Profit', 'grossProfit')}
+                {renderSortHeader(tab, 'Margin %', 'marginPercent')}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {paged.rows.map((row, idx) => (
                 <tr key={idx}>
+                  <td className="px-2 py-2 text-sm text-gray-300">{row.rank}</td>
                   <td className="px-2 py-2 text-sm text-white">{row.productName}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">
                     {[row.category, row.subcategory].filter(Boolean).join(' / ') || '-'}
@@ -2075,12 +2136,17 @@ export const Reports: React.FC = () => {
                     {[row.variantSize, row.variantColor].filter(Boolean).join(' / ') || '-'}
                   </td>
                   <td className="px-2 py-2 text-sm text-gray-300">{row.quantity}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.grossSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-red-200">{formatCurrency(Number(row.discount || 0))}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.taxableValue || 0))}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.tax || 0))}</td>
                   <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.amount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.cogs || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.grossProfit || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-cyan-200">{Number(row.marginPercent || 0).toFixed(2)}%</td>
                 </tr>
               ))}
-              {!itemSalesView.length && <tr><td colSpan={7} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
+              {!itemSalesView.length && <tr><td colSpan={13} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
             </tbody>
           </table>
           {renderPagination(tab, itemSalesView.length)}
@@ -2096,7 +2162,7 @@ export const Reports: React.FC = () => {
       return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
           <h2 className="mb-2 text-lg font-semibold text-white">Customer-wise Sales Report</h2>
-          {renderReportControls(tab, 'Filter by customer, invoice count, amount...', [
+          {renderReportControls(tab, 'Filter by customer, invoices, net sales, collections, or balance due...', [
             { value: 'all', label: 'All customers' },
             { value: 'with-outstanding', label: 'With outstanding' },
             { value: 'no-outstanding', label: 'No outstanding' },
@@ -2106,20 +2172,38 @@ export const Reports: React.FC = () => {
               <tr>
                 {renderSortHeader(tab, 'Customer', 'customer')}
                 {renderSortHeader(tab, 'Invoices', 'invoices')}
-                {renderSortHeader(tab, 'Amount', 'amount')}
-                {renderSortHeader(tab, 'Outstanding', 'outstanding')}
+                {renderSortHeader(tab, 'Visits', 'visitCount')}
+                {renderSortHeader(tab, 'Gross Sales', 'grossSales')}
+                {renderSortHeader(tab, 'Discount', 'discount')}
+                {renderSortHeader(tab, 'Returns', 'returns')}
+                {renderSortHeader(tab, 'Net Sales', 'amount')}
+                {renderSortHeader(tab, 'GST', 'gst')}
+                {renderSortHeader(tab, 'Total Sales', 'totalSales')}
+                {renderSortHeader(tab, 'Collected', 'collected')}
+                <th className="px-2 py-2 text-left text-sm font-semibold text-gray-200">Store Credit</th>
+                {renderSortHeader(tab, 'Balance Due', 'outstanding')}
+                {renderSortHeader(tab, 'Avg Order', 'avgOrderValue')}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {paged.rows.map((row, idx) => (
                 <tr key={idx}>
-                  <td className="px-2 py-2 text-sm text-white">{row._id?.customerName || 'Walk-in Customer'}</td>
+                  <td className="px-2 py-2 text-sm text-white">{row.customerName || 'Walk-in Customer'}</td>
                   <td className="px-2 py-2 text-sm text-gray-300">{row.invoices}</td>
-                  <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.amount || 0))}</td>
-                  <td className="px-2 py-2 text-sm text-amber-300">{formatCurrency(Number(row.outstanding || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{row.visitCount}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.grossSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-red-200">{formatCurrency(Number(row.discount || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-amber-200">{formatCurrency(Number(row.returns || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-emerald-300">{formatCurrency(Number(row.netSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.gst || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-white">{formatCurrency(Number(row.totalSales || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-cyan-200">{formatCurrency(Number(row.amountCollected || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-violet-200">{formatCurrency(Number(row.storeCreditUsed || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-amber-300">{formatCurrency(Number(row.balanceDue || 0))}</td>
+                  <td className="px-2 py-2 text-sm text-gray-300">{formatCurrency(Number(row.avgOrderValue || 0))}</td>
                 </tr>
               ))}
-              {!customerSalesView.length && <tr><td colSpan={4} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
+              {!customerSalesView.length && <tr><td colSpan={13} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
             </tbody>
           </table>
           {renderPagination(tab, customerSalesView.length)}
@@ -2181,20 +2265,20 @@ export const Reports: React.FC = () => {
           <h2 className="mb-4 text-lg font-semibold text-white">Gross Profit Report</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded border border-white/10 p-3">
-              <p className="text-xs text-gray-400">Revenue</p>
-              <p className="mt-1 text-lg font-semibold text-white">{formatCurrency(Number(grossProfit?.revenue || 0))}</p>
+              <p className="text-xs text-gray-400">Net Sales (Before GST)</p>
+              <p className="mt-1 text-lg font-semibold text-white">{formatCurrency(grossProfitRevenueDisplay)}</p>
             </div>
             <div className="rounded border border-white/10 p-3">
               <p className="text-xs text-gray-400">Cost of Goods</p>
-              <p className="mt-1 text-lg font-semibold text-gray-200">{formatCurrency(Number(grossProfit?.costOfGoods || 0))}</p>
+              <p className="mt-1 text-lg font-semibold text-gray-200">{formatCurrency(grossProfitCogsDisplay)}</p>
             </div>
             <div className="rounded border border-white/10 p-3">
               <p className="text-xs text-gray-400">Gross Profit</p>
-              <p className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(Number(grossProfit?.grossProfit || 0))}</p>
+              <p className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(grossProfitDisplay)}</p>
             </div>
             <div className="rounded border border-white/10 p-3">
               <p className="text-xs text-gray-400">Margin %</p>
-              <p className="mt-1 text-lg font-semibold text-indigo-200">{Number(grossProfit?.marginPercent || 0).toFixed(2)}%</p>
+              <p className="mt-1 text-lg font-semibold text-indigo-200">{grossProfitMarginDisplay.toFixed(2)}%</p>
             </div>
           </div>
         </div>
@@ -2236,49 +2320,6 @@ export const Reports: React.FC = () => {
             </tbody>
           </table>
           {renderPagination(tab, receivablesView.length)}
-        </div>
-      );
-    }
-
-    if (activeTab === 'attendance-report') {
-      const placeholder = renderTabPlaceholder('attendance-report');
-      if (placeholder) return placeholder;
-      const tab: ReportTabKey = 'attendance-report';
-      const paged = paginateRows(tab, attendanceView);
-      return (
-        <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
-          <h2 className="mb-2 text-lg font-semibold text-white">Attendance Report</h2>
-          {renderReportControls(tab, 'Filter by employee or attendance values...', [
-            { value: 'all', label: 'All employees' },
-            { value: 'with-absence', label: 'With absence' },
-            { value: 'perfect', label: 'Perfect attendance' },
-          ])}
-          <table className="min-w-full divide-y divide-white/10">
-            <thead>
-              <tr>
-                {renderSortHeader(tab, 'Employee', 'employee')}
-                {renderSortHeader(tab, 'Present', 'presentDays')}
-                {renderSortHeader(tab, 'Half Day', 'halfDays')}
-                {renderSortHeader(tab, 'Leave', 'leaveDays')}
-                {renderSortHeader(tab, 'Absent', 'absentDays')}
-                {renderSortHeader(tab, 'OT Hours', 'overtimeHours')}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {paged.rows.map((row, idx) => (
-                <tr key={idx}>
-                  <td className="px-2 py-2 text-sm text-white">{row.employeeCode ? `${row.employeeCode} - ${row.employeeName || ''}` : (row.employeeName || 'Unknown')}</td>
-                  <td className="px-2 py-2 text-sm text-gray-300">{row.presentDays || 0}</td>
-                  <td className="px-2 py-2 text-sm text-gray-300">{row.halfDays || 0}</td>
-                  <td className="px-2 py-2 text-sm text-gray-300">{row.leaveDays || 0}</td>
-                  <td className="px-2 py-2 text-sm text-gray-300">{row.absentDays || 0}</td>
-                  <td className="px-2 py-2 text-sm text-indigo-200">{row.overtimeHours || 0}</td>
-                </tr>
-              ))}
-              {!attendanceView.length && <tr><td colSpan={6} className="px-2 py-3 text-center text-sm text-gray-400">No data</td></tr>}
-            </tbody>
-          </table>
-          {renderPagination(tab, attendanceView.length)}
         </div>
       );
     }
@@ -2336,6 +2377,9 @@ export const Reports: React.FC = () => {
       return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">
           <h2 className="mb-2 text-lg font-semibold text-white">Tax Summary Report</h2>
+          <div className="mb-3 rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-3 text-xs text-cyan-100">
+            Round-off is excluded from GST calculation. This report shows only taxable value and GST amounts; invoice totals can differ slightly because round-off is tracked separately.
+          </div>
           {renderReportControls(tab, 'Filter by source, GST rate, taxable value, or tax amount...', [
             { value: 'all', label: 'All sources' },
             { value: 'sales', label: 'Sales only' },
@@ -2433,7 +2477,10 @@ export const Reports: React.FC = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Sales & POS Reports</h1>
-          <p className="text-sm text-gray-300">Operational sales reports, POS accounting views, GST verification datasets, and handoff data for the main GST workspace.</p>
+          <p className="text-sm text-gray-300">Sales, receivables, GST, payment mix, and catalog movement reports for the POS workspace.</p>
+          <p className="mt-2 max-w-4xl text-xs text-gray-500 sm:text-sm">
+            One shared sales-report calculation path now drives the dashboard, reports, and gross-profit views. Gross Sales means before discount and before GST, Discount means pre-tax discount, Net Sales means after discount and before GST, GST means output tax, Total Sales means after GST and round-off, Collected means cash/card/UPI/bank receipts only, and Store Credit is shown separately because it settles invoices without creating cash flow.
+          </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <ManualHelpLink anchor="sales-reports-tabs" />
@@ -2445,26 +2492,32 @@ export const Reports: React.FC = () => {
             <label className="mb-1 block text-xs text-gray-400">End Date</label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" />
           </div>
-          <button onClick={loadReports} className="cursor-pointer rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400">Refresh</button>
-          <button
-            onClick={exportActiveToExcel}
-            disabled={!hasExportData}
-            className="cursor-pointer rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Export Excel
-          </button>
-          <button
-            onClick={exportActiveToPdf}
-            disabled={!hasExportData}
-            className="cursor-pointer rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Export PDF
-          </button>
+          <ActionIconButton kind="refresh" onClick={loadReports} title="Refresh" />
+          <ActionIconButton kind="exportExcel" onClick={exportActiveToExcel} disabled={!hasExportData} title="Export Excel" />
+          <ActionIconButton kind="exportPdf" onClick={exportActiveToPdf} disabled={!hasExportData} title="Export PDF" />
         </div>
       </div>
 
       {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       {loading && <p className="text-sm text-gray-400">Loading reports...</p>}
+
+      <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-200">Metric Definitions</h2>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
+              Use these labels consistently across every sales report: Gross Sales = before discount and GST. Discount = pre-tax only. Net Sales = after discount and before GST. GST = tax amount. Total Sales = Net Sales + GST + round-off. Amount Collected excludes store credit. Store Credit Used settles invoices but is not cash collection.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('daily-sales-summary')}
+            className="rounded-md border border-cyan-300/25 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/20"
+          >
+            View invoice transactions
+          </button>
+        </div>
+      </div>
 
       <div className="rounded-xl border border-white/10 bg-white/5 p-4">
         <h2 className="mb-2 text-lg font-semibold text-white">Reports Menu</h2>
@@ -2481,26 +2534,36 @@ export const Reports: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs text-gray-400">Gross Profit Report</p>
-          <p className="mt-1 text-xl font-semibold text-emerald-300">{formatCurrency(Number(grossProfit?.grossProfit || 0))}</p>
+          <p className="text-xs text-gray-400">Gross Profit</p>
+          <p className="mt-1 text-xl font-semibold text-emerald-300">{formatCurrency(grossProfitHeaderValue)}</p>
+          <p className="mt-1 text-xs text-gray-500">Net sales minus item COGS for posted POS invoices.</p>
+          <button type="button" onClick={() => setActiveTab('gross-profit-report')} className="mt-3 text-xs font-semibold text-emerald-200 hover:text-emerald-100">Open report</button>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs text-gray-400">Revenue</p>
-          <p className="mt-1 text-xl font-semibold text-white">{formatCurrency(Number(grossProfit?.revenue || 0))}</p>
+          <p className="text-xs text-gray-400">Net Sales (Before GST)</p>
+          <p className="mt-1 text-xl font-semibold text-white">{formatCurrency(grossProfitRevenueDisplay)}</p>
+          <p className="mt-1 text-xs text-gray-500">Taxable billed sales after discount and before GST.</p>
+          <button type="button" onClick={() => setActiveTab('daily-sales-summary')} className="mt-3 text-xs font-semibold text-cyan-200 hover:text-cyan-100">View transactions</button>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-gray-400">Outstanding Receivables Report</p>
           <p className="mt-1 text-xl font-semibold text-amber-300">{formatCurrency(Number(receivables?.totalOutstanding || 0))}</p>
+          <p className="mt-1 text-xs text-gray-500">Open customer balances still due on POS invoices.</p>
+          <button type="button" onClick={() => setActiveTab('outstanding-receivables-report')} className="mt-3 text-xs font-semibold text-amber-200 hover:text-amber-100">View transactions</button>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-gray-400">Sales Return Report</p>
           <p className="mt-1 text-xl font-semibold text-red-300">{formatCurrency(Number(returnsReport?.summary?.refundAmount || 0))}</p>
+          <p className="mt-1 text-xs text-gray-500">Approved refund total including tax reversal.</p>
+          <button type="button" onClick={() => setActiveTab('sales-return-report')} className="mt-3 text-xs font-semibold text-rose-200 hover:text-rose-100">View transactions</button>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-gray-400">Tax Summary Report</p>
           <p className="mt-1 text-xl font-semibold text-cyan-200">
             {formatCurrency(taxSummaryRows.reduce((sum, row) => sum + (row.source === 'Sales' ? Number(row.taxAmount || 0) : -Number(row.taxAmount || 0)), 0))}
           </p>
+          <p className="mt-1 text-xs text-gray-500">Sales GST less approved return tax reversal.</p>
+          <button type="button" onClick={() => setActiveTab('tax-summary-report')} className="mt-3 text-xs font-semibold text-cyan-200 hover:text-cyan-100">Open report</button>
         </div>
       </div>
 

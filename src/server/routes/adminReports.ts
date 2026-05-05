@@ -280,7 +280,7 @@ const saveAdminReportSettings = async (req: AuthenticatedRequest, settings: Admi
         updatedBy: req.userId,
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 };
 

@@ -29,8 +29,6 @@ const CORE_ACCOUNTS: Array<{
   { accountCode: '3000', accountName: 'Sales Income', accountType: 'income', subType: 'general' },
   { accountCode: '3100', accountName: 'Other Income', accountType: 'income', subType: 'general' },
   { accountCode: '4000', accountName: 'Expense', accountType: 'expense', subType: 'general' },
-  { accountCode: '4010', accountName: 'Salary Expense', accountType: 'expense', subType: 'general' },
-  { accountCode: '4020', accountName: 'Contract Expense', accountType: 'expense', subType: 'general' },
 ];
 
 const REQUIRED_SEQUENCE_KEYS = [
@@ -145,7 +143,7 @@ const ensureCoreChartAccounts = async (): Promise<void> => {
           isActive: true,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 };
@@ -178,6 +176,126 @@ const ensureChartAccountIndexes = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Chart account index migration warning:', error);
+  }
+};
+
+const ensureCustomerIndexes = async (): Promise<void> => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+
+  try {
+    const collection = db.collection('customers');
+    const indexes = await collection.indexes();
+    const hasLegacyUniqueCustomerCode = indexes.some(
+      (index) => index.name === 'customerCode_1' && index.unique === true
+    );
+    if (hasLegacyUniqueCustomerCode) {
+      await collection.dropIndex('customerCode_1');
+      console.log('Dropped legacy index customers.customerCode_1');
+    }
+
+    const hasTenantScopedUnique = indexes.some(
+      (index) =>
+        index.name === 'tenantId_1_customerCode_1' &&
+        index.unique === true &&
+        index.key?.tenantId === 1 &&
+        index.key?.customerCode === 1
+    );
+    if (!hasTenantScopedUnique) {
+      await collection.createIndex({ tenantId: 1, customerCode: 1 }, { unique: true, name: 'tenantId_1_customerCode_1' });
+      console.log('Created index customers.tenantId_1_customerCode_1');
+    }
+  } catch (error) {
+    console.warn('Customer index migration warning:', error);
+  }
+};
+
+const ensureProductIndexes = async (): Promise<void> => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+
+  try {
+    const collection = db.collection('products');
+    const indexes = await collection.indexes();
+    const hasLegacyUniqueSku = indexes.some(
+      (index) => index.name === 'sku_1' && index.unique === true
+    );
+    if (hasLegacyUniqueSku) {
+      await collection.dropIndex('sku_1');
+      console.log('Dropped legacy index products.sku_1');
+    }
+
+    const hasLegacyUniqueBarcode = indexes.some(
+      (index) => index.name === 'barcode_1' && index.unique === true
+    );
+    if (hasLegacyUniqueBarcode) {
+      await collection.dropIndex('barcode_1');
+      console.log('Dropped legacy index products.barcode_1');
+    }
+
+    const hasTenantScopedSku = indexes.some(
+      (index) =>
+        index.name === 'tenantId_1_sku_1' &&
+        index.unique === true &&
+        index.key?.tenantId === 1 &&
+        index.key?.sku === 1
+    );
+    if (!hasTenantScopedSku) {
+      await collection.createIndex({ tenantId: 1, sku: 1 }, { unique: true, name: 'tenantId_1_sku_1' });
+      console.log('Created index products.tenantId_1_sku_1');
+    }
+
+    const hasTenantScopedBarcode = indexes.some(
+      (index) =>
+        index.name === 'tenantId_1_barcode_1' &&
+        index.unique === true &&
+        index.key?.tenantId === 1 &&
+        index.key?.barcode === 1
+    );
+    if (!hasTenantScopedBarcode) {
+      await collection.createIndex(
+        { tenantId: 1, barcode: 1 },
+        {
+          unique: true,
+          name: 'tenantId_1_barcode_1',
+          partialFilterExpression: { barcode: { $type: 'string', $gt: '' } },
+        }
+      );
+      console.log('Created index products.tenantId_1_barcode_1');
+    }
+  } catch (error) {
+    console.warn('Product index migration warning:', error);
+  }
+};
+
+const ensureAppSettingIndexes = async (): Promise<void> => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+
+  try {
+    const collection = db.collection('appsettings');
+    const indexes = await collection.indexes();
+    const hasLegacyUniqueKey = indexes.some(
+      (index) => index.name === 'key_1' && index.unique === true
+    );
+    if (hasLegacyUniqueKey) {
+      await collection.dropIndex('key_1');
+      console.log('Dropped legacy index appsettings.key_1');
+    }
+
+    const hasTenantScopedUnique = indexes.some(
+      (index) =>
+        index.name === 'tenantId_1_key_1' &&
+        index.unique === true &&
+        index.key?.tenantId === 1 &&
+        index.key?.key === 1
+    );
+    if (!hasTenantScopedUnique) {
+      await collection.createIndex({ tenantId: 1, key: 1 }, { unique: true, name: 'tenantId_1_key_1' });
+      console.log('Created index appsettings.tenantId_1_key_1');
+    }
+  } catch (error) {
+    console.warn('App setting index migration warning:', error);
   }
 };
 
@@ -218,7 +336,7 @@ const ensureBaselineSequences = async (): Promise<void> => {
     await NumberSequence.findOneAndUpdate(
       { key },
       { $setOnInsert: { key, value: 0 } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
   }
 };
@@ -259,7 +377,7 @@ const ensureOpeningBalanceSetup = async (): Promise<void> => {
   await OpeningBalanceSetup.findOneAndUpdate(
     { setupKey: 'primary' },
     { $setOnInsert: { setupKey: 'primary', isLocked: false } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 };
 
@@ -279,7 +397,7 @@ const syncGeneralMailSettings = async (): Promise<void> => {
   await AppSetting.findOneAndUpdate(
     { key: GENERAL_SETTINGS_KEY },
     { $set: { value: nextValue } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 };
 
@@ -325,6 +443,9 @@ const backfillRequestedCurrentUserEmail = async (): Promise<void> => {
 
 export const initializeTenantDefaults = async (tenantId: string): Promise<void> => {
   await runWithTenantContext(tenantId, async () => {
+    await ensureCustomerIndexes();
+    await ensureAppSettingIndexes();
+    await ensureProductIndexes();
     await ensureOpeningBalanceSetup();
     await ensureCoreChartAccounts();
     await ensureBaselineSequences();

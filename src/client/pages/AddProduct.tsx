@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CodeScannerSettingsDialog } from '../components/CodeScannerSettingsDialog';
+import { ManualHelpLink } from '../components/ManualHelpLink';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useCodeScannerCapture } from '../hooks/useCodeScannerCapture';
 import { useCategories } from '../hooks/useCategories';
 import { apiUrl } from '../utils/api';
@@ -12,8 +14,10 @@ import {
   isConfiguredScannerSubmitKey,
   saveCodeScannerSettings,
 } from '../utils/codeScanner';
+import { notifyProductsChanged } from '../utils/productCatalogEvents';
 
 interface VariantMatrixRowForm {
+  rowId: string;
   size: string;
   color: string;
   skuSuffix: string;
@@ -21,6 +25,20 @@ interface VariantMatrixRowForm {
   price: string;
   isActive: boolean;
 }
+
+interface PriceTierRowForm {
+  rowId: string;
+  tierName: string;
+  minQuantity: string;
+  unitPrice: string;
+}
+
+const makeLocalRowId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 const splitVariantTokens = (value: string): string[] =>
   Array.from(
@@ -55,6 +73,7 @@ const buildVariantMatrixRows = (
         const prior = existingMap.get(key);
         nextRows.push(
           prior || {
+            rowId: makeLocalRowId(),
             size,
             color,
             skuSuffix: `${size}-${color}`.replace(/\s+/g, '-').toUpperCase(),
@@ -75,6 +94,7 @@ const buildVariantMatrixRows = (
     const prior = existingMap.get(key);
     nextRows.push(
       prior || {
+        rowId: makeLocalRowId(),
         size: singleField === 'size' ? token : '',
         color: singleField === 'color' ? token : '',
         skuSuffix: token.replace(/\s+/g, '-').toUpperCase(),
@@ -88,6 +108,7 @@ const buildVariantMatrixRows = (
 };
 
 export const AddProduct: React.FC = () => {
+  const navigate = useNavigate();
   const { categories, loading: categoriesLoading } = useCategories();
   const [formData, setFormData] = useState({
     name: '',
@@ -123,7 +144,7 @@ export const AddProduct: React.FC = () => {
     variantSize: '',
     variantColor: '',
     variantMatrix: [] as VariantMatrixRowForm[],
-    priceTiers: [] as Array<{ tierName: string; minQuantity: string; unitPrice: string }>,
+    priceTiers: [] as PriceTierRowForm[],
   });
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -133,6 +154,11 @@ export const AddProduct: React.FC = () => {
   const [scanTarget, setScanTarget] = useState<'sku' | 'barcode'>('barcode');
   const [scanValue, setScanValue] = useState('');
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEscapeKey(() => navigate('/products/catalog'), {
+    enabled: !showScannerSettings,
+    ignoreTypingTarget: true,
+  });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -152,7 +178,7 @@ export const AddProduct: React.FC = () => {
   const addPriceTier = () => {
     setFormData((prev) => ({
       ...prev,
-      priceTiers: [...prev.priceTiers, { tierName: '', minQuantity: '1', unitPrice: '' }],
+      priceTiers: [...prev.priceTiers, { rowId: makeLocalRowId(), tierName: '', minQuantity: '1', unitPrice: '' }],
     }));
   };
 
@@ -177,7 +203,7 @@ export const AddProduct: React.FC = () => {
       ...prev,
       variantMatrix: [
         ...prev.variantMatrix,
-        { size: '', color: '', skuSuffix: '', barcode: '', price: prev.price || '', isActive: true },
+        { rowId: makeLocalRowId(), size: '', color: '', skuSuffix: '', barcode: '', price: prev.price || '', isActive: true },
       ],
     }));
   };
@@ -284,6 +310,7 @@ export const AddProduct: React.FC = () => {
 
       if (response.ok) {
         const createdName = String(formData.name || '').trim();
+        notifyProductsChanged();
         setFormData({
           name: '',
           sku: '',
@@ -333,10 +360,10 @@ export const AddProduct: React.FC = () => {
     }
   };
 
-  const sectionClassName = 'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-[0_18px_44px_rgba(15,23,42,0.28)]';
+  const sectionClassName = 'min-w-0 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-[0_18px_44px_rgba(15,23,42,0.28)]';
   const labelClassName = 'block text-sm font-medium leading-6 text-white';
   const fieldClassName = 'mt-1 block w-full rounded-md bg-white/5 px-3 py-2 text-sm text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500';
-  const compactFieldClassName = 'rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15 placeholder:text-gray-400';
+  const compactFieldClassName = 'w-full min-w-0 rounded-md bg-black/20 px-3 py-1.5 text-xs text-white outline-1 -outline-offset-1 outline-white/15 placeholder:text-gray-400';
 
   return (
     <div className="w-full px-4 py-8 sm:px-6 lg:px-8 2xl:px-10">
@@ -348,10 +375,17 @@ export const AddProduct: React.FC = () => {
             <p className="mt-2 text-sm text-gray-400 sm:text-base">
               Use the full workspace to enter catalog basics, pricing, stock, variants, and controls without losing the lower fields or action buttons.
             </p>
+            <p className="mt-2 text-xs text-gray-500 sm:text-sm">
+              Name, SKU, and Barcode identify the item. Price and Cost drive selling and margin review. GST, HSN, stock opening, min stock, reorder, variants, and tiers control how the item behaves in sales, stock alerts, and reports.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <ManualHelpLink anchor="product-entry-logic" />
             <Link to="/products" className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20">
               Product Center
+            </Link>
+            <Link to="/products/bulk-entry" className="rounded-md bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/30">
+              Bulk Entry
             </Link>
             <Link to="/products/catalog" className="rounded-md bg-sky-500/20 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/30">
               Product Catalog
@@ -662,7 +696,7 @@ export const AddProduct: React.FC = () => {
 
           </section>
 
-          <section className={`${sectionClassName} xl:col-span-12 2xl:col-span-7`}>
+          <section className={`${sectionClassName} xl:col-span-12 min-[1800px]:col-span-7`}>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Variant Matrix</p>
@@ -688,7 +722,10 @@ export const AddProduct: React.FC = () => {
 
             <div className="space-y-2">
               {formData.variantMatrix.map((row, index) => (
-                <div key={`${row.size}-${row.color}-${index}`} className="grid grid-cols-1 gap-2 xl:grid-cols-[0.9fr_0.9fr_1fr_1.1fr_0.8fr_auto_auto]">
+                <div
+                  key={row.rowId}
+                  className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 min-[1800px]:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_auto_auto]"
+                >
                   <input value={row.size} onChange={(e) => updateVariantMatrixRow(index, 'size', e.target.value)} placeholder="Size" className={compactFieldClassName} />
                   <input value={row.color} onChange={(e) => updateVariantMatrixRow(index, 'color', e.target.value)} placeholder="Color" className={compactFieldClassName} />
                   <input value={row.skuSuffix} onChange={(e) => updateVariantMatrixRow(index, 'skuSuffix', e.target.value)} placeholder="SKU suffix" className={compactFieldClassName} />
@@ -715,7 +752,7 @@ export const AddProduct: React.FC = () => {
             </div>
           </section>
 
-          <section className={`${sectionClassName} xl:col-span-12 2xl:col-span-5`}>
+          <section className={`${sectionClassName} xl:col-span-12 min-[1800px]:col-span-5`}>
             <div className="mb-4">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-fuchsia-200/80">Tiers And Tracking</p>
               <p className="mt-1 text-xs text-gray-400">Keep tier pricing and inventory controls visible beside the matrix on large screens.</p>
@@ -737,7 +774,10 @@ export const AddProduct: React.FC = () => {
               </div>
               <div className="space-y-2">
                 {formData.priceTiers.map((tier, index) => (
-                  <div key={`${tier.tierName}-${index}`} className="grid grid-cols-1 gap-2 lg:grid-cols-[1.2fr_0.7fr_0.8fr_auto]">
+                  <div
+                    key={tier.rowId}
+                    className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 min-[1800px]:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_auto]"
+                  >
                     <input value={tier.tierName} onChange={(e) => updatePriceTier(index, 'tierName', e.target.value)} placeholder="Tier name" className={compactFieldClassName} />
                     <input type="number" min="1" value={tier.minQuantity} onChange={(e) => updatePriceTier(index, 'minQuantity', e.target.value)} placeholder="Min qty" className={compactFieldClassName} />
                     <input type="number" min="0" step="0.01" value={tier.unitPrice} onChange={(e) => updatePriceTier(index, 'unitPrice', e.target.value)} placeholder="Unit price" className={compactFieldClassName} />
@@ -755,21 +795,36 @@ export const AddProduct: React.FC = () => {
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
-                <input type="checkbox" name="batchTracking" checked={formData.batchTracking} onChange={handleChange} />
-                Batch Tracking
+              <div className="sm:col-span-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">
+                Turn these controls on only when the product is really tracked that way in daily operations. If <span className="font-semibold">Serial Number Tracking</span> is enabled here, the Sales screen will show an optional serial-tracking toggle for that item, but it still stays off by default during billing.
+              </div>
+              <label className="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
+                <input type="checkbox" name="batchTracking" checked={formData.batchTracking} onChange={handleChange} className="mt-1" />
+                <span>
+                  <span className="block font-medium text-white">Batch Tracking</span>
+                  <span className="mt-1 block text-xs text-gray-400">Require batch or lot number entry during stock movement and sale.</span>
+                </span>
               </label>
-              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
-                <input type="checkbox" name="expiryRequired" checked={formData.expiryRequired} onChange={handleChange} />
-                Expiry Required
+              <label className="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
+                <input type="checkbox" name="expiryRequired" checked={formData.expiryRequired} onChange={handleChange} className="mt-1" />
+                <span>
+                  <span className="block font-medium text-white">Expiry Required</span>
+                  <span className="mt-1 block text-xs text-gray-400">Block sales until an expiry date is captured for the stock being sold.</span>
+                </span>
               </label>
-              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
-                <input type="checkbox" name="serialNumberTracking" checked={formData.serialNumberTracking} onChange={handleChange} />
-                Serial Number Tracking
+              <label className="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
+                <input type="checkbox" name="serialNumberTracking" checked={formData.serialNumberTracking} onChange={handleChange} className="mt-1" />
+                <span>
+                  <span className="block font-medium text-white">Serial Number Tracking</span>
+                  <span className="mt-1 block text-xs text-gray-400">Require one unique serial number per unit on sales and stock transactions.</span>
+                </span>
               </label>
-              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
-                <input type="checkbox" name="allowNegativeStock" checked={formData.allowNegativeStock} onChange={handleChange} />
-                Allow Negative Stock
+              <label className="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-gray-200">
+                <input type="checkbox" name="allowNegativeStock" checked={formData.allowNegativeStock} onChange={handleChange} className="mt-1" />
+                <span>
+                  <span className="block font-medium text-white">Allow Negative Stock</span>
+                  <span className="mt-1 block text-xs text-gray-400">Let billing continue even if stock falls below zero for this item.</span>
+                </span>
               </label>
             </div>
           </section>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from './CardTabs';
+import { ActionIconButton } from './ActionIconButton';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -1597,17 +1598,15 @@ export const AccountingGstWorkspace: React.FC = () => {
       {activeTab === 'history' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <button
-              type="button"
-              className={secondaryButtonClass}
+            <ActionIconButton
+              kind="refresh"
               onClick={() => void runTabTask('history', async () => {
                 await refreshHistory();
                 setTabMessage('history', 'GST history refreshed.');
               })}
               disabled={loading}
-            >
-              Refresh GST History
-            </button>
+              title="Refresh GST History"
+            />
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/5 p-4">

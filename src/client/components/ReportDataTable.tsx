@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { PaginationControls } from './PaginationControls';
+import { downloadCsvRows, downloadExcelRows, downloadPdfRows } from '../utils/reportExports';
+import { ActionIconButton } from './ActionIconButton';
 
 export interface ReportTableColumn<T> {
   key: string;
@@ -32,31 +34,11 @@ interface ReportDataTableProps<T> {
   searchPlaceholder?: string;
   filters?: ReportTableFilter<T>[];
   exportFileName?: string;
+  exportFormats?: Array<'csv' | 'xlsx' | 'pdf'>;
+  exportSubtitle?: string;
 }
 
 const normalizeText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
-
-const toCsvCell = (value: unknown): string => {
-  const text = String(value ?? '');
-  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-};
-
-const downloadCsv = (fileName: string, rows: Array<Record<string, unknown>>) => {
-  if (!rows.length) return;
-  const headers = Object.keys(rows[0] || {});
-  const csv = [
-    headers.join(','),
-    ...rows.map((row) => headers.map((header) => toCsvCell(row[header])).join(',')),
-  ].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
-};
 
 export const ReportDataTable = <T extends Record<string, any>>({
   title,
@@ -68,9 +50,12 @@ export const ReportDataTable = <T extends Record<string, any>>({
   searchPlaceholder = 'Search this report',
   filters = [],
   exportFileName = 'report.csv',
+  exportFormats = ['csv', 'xlsx', 'pdf'],
+  exportSubtitle,
 }: ReportDataTableProps<T>) => {
   const [search, setSearch] = useState('');
   const [sortState, setSortState] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [exporting, setExporting] = useState<'' | 'csv' | 'xlsx' | 'pdf'>('');
   const [filterState, setFilterState] = useState<Record<string, string>>(
     () => Object.fromEntries(filters.map((filter) => [filter.key, 'all']))
   );
@@ -172,6 +157,29 @@ export const ReportDataTable = <T extends Record<string, any>>({
     [columns, sortedRows]
   );
 
+  const handleExport = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    if (!exportRows.length || exporting) return;
+    setExporting(format);
+    try {
+      if (format === 'csv') {
+        downloadCsvRows(exportFileName, exportRows);
+        return;
+      }
+      if (format === 'xlsx') {
+        await downloadExcelRows(exportFileName, exportRows, title);
+        return;
+      }
+      await downloadPdfRows({
+        fileName: exportFileName,
+        title,
+        rows: exportRows,
+        subtitle: exportSubtitle,
+      });
+    } finally {
+      setExporting('');
+    }
+  };
+
   const toggleSort = (columnKey: string) => {
     setSortState((previous) => {
       if (!previous || previous.key !== columnKey) return { key: columnKey, direction: 'asc' };
@@ -199,14 +207,32 @@ export const ReportDataTable = <T extends Record<string, any>>({
             Search, filter, sort, paginate, and export this report.
           </p>
         </div>
-        <button
-          type="button"
-          className="inline-flex items-center rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm font-medium text-white hover:bg-white/10 disabled:opacity-60"
-          onClick={() => downloadCsv(exportFileName, exportRows)}
-          disabled={exportRows.length === 0}
-        >
-          Export CSV
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {exportFormats.includes('csv') && (
+            <ActionIconButton
+              kind="exportCsv"
+              onClick={() => void handleExport('csv')}
+              disabled={exportRows.length === 0 || Boolean(exporting)}
+              title={exporting === 'csv' ? 'Exporting CSV...' : 'Export CSV'}
+            />
+          )}
+          {exportFormats.includes('xlsx') && (
+            <ActionIconButton
+              kind="exportExcel"
+              onClick={() => void handleExport('xlsx')}
+              disabled={exportRows.length === 0 || Boolean(exporting)}
+              title={exporting === 'xlsx' ? 'Exporting Excel...' : 'Export Excel'}
+            />
+          )}
+          {exportFormats.includes('pdf') && (
+            <ActionIconButton
+              kind="exportPdf"
+              onClick={() => void handleExport('pdf')}
+              disabled={exportRows.length === 0 || Boolean(exporting)}
+              title={exporting === 'pdf' ? 'Exporting PDF...' : 'Export PDF'}
+            />
+          )}
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

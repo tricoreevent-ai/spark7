@@ -1,6 +1,7 @@
 import { AccountingInvoice } from '../models/AccountingInvoice.js';
 import { CreditNote } from '../models/CreditNote.js';
 import { Customer } from '../models/Customer.js';
+import { DayBookEntry } from '../models/DayBookEntry.js';
 import { GstReconciliationRun } from '../models/GstReconciliationRun.js';
 import { GstReturnRecord } from '../models/GstReturnRecord.js';
 import { PurchaseOrder } from '../models/PurchaseOrder.js';
@@ -45,7 +46,7 @@ export interface ParsedGstr2bRow {
 }
 
 interface GstSupplyLine {
-  source: 'sale' | 'accounting_invoice';
+  source: 'sale' | 'accounting_invoice' | 'daybook_income';
   sourceId: string;
   sourceReference: string;
   invoiceNumber: string;
@@ -277,9 +278,15 @@ const buildOutwardSourceBundle = async (window: { start: Date; end: Date }, stor
     referenceType: { $ne: 'sale' },
   };
 
-  const [sales, invoices, creditNotes, returns] = await Promise.all([
+  const [sales, invoices, dayBookIncomeRows, creditNotes, returns] = await Promise.all([
     Sale.find(postedSaleMatch).sort({ createdAt: 1 }),
     AccountingInvoice.find(invoiceMatch).sort({ invoiceDate: 1 }),
+    DayBookEntry.find({
+      entryType: 'income',
+      entryDate: { $gte: window.start, $lte: window.end },
+      status: 'active',
+      gstAmount: { $gt: 0 },
+    }).sort({ entryDate: 1 }),
     CreditNote.find({ createdAt: { $gte: window.start, $lte: window.end }, status: { $ne: 'cancelled' } }).sort({ createdAt: 1 }),
     Return.find({
       createdAt: { $gte: window.start, $lte: window.end },
@@ -380,6 +387,38 @@ const buildOutwardSourceBundle = async (window: { start: Date; end: Date }, stor
       quantity: 1,
       hsnCode: normalizeText((invoice.metadata as any)?.hsnCode) || undefined,
       isRegistered,
+      isInterState,
+    });
+  }
+
+  for (const row of dayBookIncomeRows) {
+    const taxableValue = absoluteNumber((row as any).taxableAmount || row.amount);
+    const gstAmount = absoluteNumber((row as any).gstAmount);
+    const isInterState = String((row as any).gstTreatment || '').toLowerCase() === 'interstate' || Number((row as any).igstAmount || 0) > 0;
+    const cgst = isInterState ? 0 : absoluteNumber((row as any).cgstAmount || gstAmount / 2);
+    const sgst = isInterState ? 0 : absoluteNumber((row as any).sgstAmount || gstAmount / 2);
+    const igst = isInterState ? absoluteNumber((row as any).igstAmount || gstAmount) : 0;
+    const reference = normalizeText(row.referenceNo) || `DAYBOOK-${row._id.toString().slice(-6).toUpperCase()}`;
+    if (!normalizeText((row as any).hsnCode)) {
+      warnings.push(`Day-book income ${reference} has no HSN/SAC code. Review before portal upload.`);
+    }
+    lines.push({
+      source: 'daybook_income',
+      sourceId: String(row._id),
+      sourceReference: reference,
+      invoiceNumber: reference,
+      invoiceDate: safeDate(row.entryDate),
+      customerName: normalizeText(row.category) || 'Day-book Income',
+      placeOfSupply: storeStateCode,
+      taxableValue,
+      cgst,
+      sgst,
+      igst,
+      cess: 0,
+      gstRate: taxableValue ? round2((gstAmount / taxableValue) * 100) : absoluteNumber((row as any).gstRate),
+      quantity: 1,
+      hsnCode: normalizeText((row as any).hsnCode) || undefined,
+      isRegistered: false,
       isInterState,
     });
   }

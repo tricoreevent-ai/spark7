@@ -235,8 +235,7 @@ export const ValidationDashboard: React.FC = () => {
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1680px] space-y-5">
-        <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <ValidationJobLogPanel job={activeJob} />
+        <div className="space-y-5">
           <ValidationControls
             running={runValidation.isPending || jobQuery.data?.status === 'queued' || jobQuery.data?.status === 'running'}
             job={activeJob}
@@ -245,6 +244,7 @@ export const ValidationDashboard: React.FC = () => {
             onRun={handleRun}
             onSaveSettings={(settings) => saveSettings.mutate(settings)}
           />
+          <ValidationJobLogPanel job={activeJob} />
         </div>
 
         {reportsQuery.isError ? (

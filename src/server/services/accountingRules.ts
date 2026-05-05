@@ -108,6 +108,99 @@ export const calculateGstBreakup = (input: {
   };
 };
 
+const stateCodeFromGstin = (gstin?: string): string => {
+  const normalized = String(gstin || '').trim().toUpperCase();
+  return /^[0-9]{2}[A-Z0-9]{13}$/.test(normalized) ? normalized.slice(0, 2) : '';
+};
+
+export const inferGstTreatmentFromPartyGstins = (
+  supplierGstin?: string,
+  storeGstin?: string
+): GstTreatment => {
+  const supplierState = stateCodeFromGstin(supplierGstin);
+  const storeState = stateCodeFromGstin(storeGstin);
+  if (supplierState && storeState && supplierState !== storeState) return 'interstate';
+  return 'intrastate';
+};
+
+export const buildPurchaseBillTaxPostingPlan = (input: {
+  taxableAmount: number;
+  taxAmount?: number;
+  totalAmount?: number;
+  supplierGstin?: string;
+  storeGstin?: string;
+  payableAccountKey?: string;
+  payableDescription?: string;
+}): {
+  gst: GstBreakup;
+  inputTaxLines: JournalPlanLine[];
+  payableLine: JournalPlanLine;
+} => {
+  const taxableAmount = round2(Number(input.taxableAmount || 0));
+  if (taxableAmount <= 0) {
+    throw new Error('Purchase bill taxable amount must be greater than 0');
+  }
+
+  const gst = calculateGstBreakup({
+    baseAmount: taxableAmount,
+    gstAmount: input.taxAmount,
+    totalAmount: input.totalAmount,
+    gstTreatment: inferGstTreatmentFromPartyGstins(input.supplierGstin, input.storeGstin),
+  });
+
+  const inputTaxLines: JournalPlanLine[] = [];
+  if (gst.cgstAmount > 0) {
+    inputTaxLines.push({ accountKey: 'cgst_input', debit: gst.cgstAmount, credit: 0, description: 'CGST input credit' });
+  }
+  if (gst.sgstAmount > 0) {
+    inputTaxLines.push({ accountKey: 'sgst_input', debit: gst.sgstAmount, credit: 0, description: 'SGST input credit' });
+  }
+  if (gst.igstAmount > 0) {
+    inputTaxLines.push({ accountKey: 'igst_input', debit: gst.igstAmount, credit: 0, description: 'IGST input credit' });
+  }
+
+  const payableLine: JournalPlanLine = {
+    accountKey: input.payableAccountKey || 'accounts_payable',
+    debit: 0,
+    credit: gst.totalAmount,
+    description: input.payableDescription || 'Supplier payable',
+  };
+
+  validateJournalLines([
+    { accountKey: 'stock_in_hand', debit: taxableAmount, credit: 0, description: 'Inventory received at taxable cost' },
+    ...inputTaxLines,
+    payableLine,
+  ]);
+
+  return { gst, inputTaxLines, payableLine };
+};
+
+export const buildGstSetoffSummary = (input: {
+  outputTax: number;
+  inputTax: number;
+  reverseChargeTax?: number;
+  interest?: number;
+  lateFee?: number;
+}) => {
+  const outputTax = round2(Number(input.outputTax || 0));
+  const inputTax = round2(Number(input.inputTax || 0));
+  const reverseChargeTax = round2(Number(input.reverseChargeTax || 0));
+  const interest = round2(Number(input.interest || 0));
+  const lateFee = round2(Number(input.lateFee || 0));
+  const netBalance = round2(outputTax + reverseChargeTax + interest + lateFee - inputTax);
+
+  return {
+    outputTax,
+    inputTax,
+    reverseChargeTax,
+    interest,
+    lateFee,
+    netBalance,
+    gstPayable: netBalance > 0 ? netBalance : 0,
+    gstReceivable: netBalance < 0 ? Math.abs(netBalance) : 0,
+  };
+};
+
 export const validateJournalLines = (lines: JournalPlanLine[]): {
   totalDebit: number;
   totalCredit: number;
@@ -142,6 +235,8 @@ export const validateJournalLines = (lines: JournalPlanLine[]): {
 
 export const buildInvoicePostingPlan = (input: {
   baseAmount: number;
+  discountAmount?: number;
+  roundOffAmount?: number;
   gstAmount?: number;
   gstRate?: number;
   gstTreatment?: GstTreatment;
@@ -149,14 +244,23 @@ export const buildInvoicePostingPlan = (input: {
   paymentMode?: AccountingPaymentMode;
   settlementAccountKey?: string;
   revenueAccountKey?: string;
+  discountAccountKey?: string;
+  roundOffIncomeAccountKey?: string;
+  roundOffExpenseAccountKey?: string;
   receivableAccountKey?: string;
 }): {
   gst: GstBreakup;
+  discountAmount: number;
+  roundOffAmount: number;
+  collectibleTotal: number;
   invoiceLines: JournalPlanLine[];
   paymentLines: JournalPlanLine[];
   postingMode: 'cash_sale' | 'credit_invoice' | 'invoice_plus_payment';
 } => {
   const revenueAccountKey = input.revenueAccountKey || 'booking_revenue';
+  const discountAccountKey = input.discountAccountKey || 'sales_discount';
+  const roundOffIncomeAccountKey = input.roundOffIncomeAccountKey || 'round_off_income';
+  const roundOffExpenseAccountKey = input.roundOffExpenseAccountKey || 'round_off_expense';
   const receivableAccountKey = input.receivableAccountKey || 'accounts_receivable';
   const gst = calculateGstBreakup({
     baseAmount: input.baseAmount,
@@ -164,7 +268,10 @@ export const buildInvoicePostingPlan = (input: {
     gstRate: input.gstRate,
     gstTreatment: input.gstTreatment,
   });
-  const paymentAmount = round2(Math.max(0, Number(input.paymentAmount || 0)));
+  const discountAmount = round2(Math.max(0, Math.min(Number(input.discountAmount || 0), gst.totalAmount)));
+  const roundOffAmount = round2(Number(input.roundOffAmount || 0));
+  const collectibleTotal = round2(Math.max(0, gst.totalAmount - discountAmount + roundOffAmount));
+  const paymentAmount = round2(Math.max(0, Math.min(Number(input.paymentAmount || 0), collectibleTotal)));
   const cashAccountKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
 
   const revenueCredits: JournalPlanLine[] = [
@@ -180,17 +287,30 @@ export const buildInvoicePostingPlan = (input: {
     revenueCredits.push({ accountKey: 'igst_payable', debit: 0, credit: gst.igstAmount, description: 'IGST payable' });
   }
 
-  if (paymentAmount >= gst.totalAmount) {
+  const discountLines: JournalPlanLine[] = discountAmount > 0
+    ? [{ accountKey: discountAccountKey, debit: discountAmount, credit: 0, description: 'Invoice discount' }]
+    : [];
+  const roundOffLines: JournalPlanLine[] = roundOffAmount > 0
+    ? [{ accountKey: roundOffIncomeAccountKey, debit: 0, credit: roundOffAmount, description: 'Invoice round-off gain' }]
+    : roundOffAmount < 0
+      ? [{ accountKey: roundOffExpenseAccountKey, debit: Math.abs(roundOffAmount), credit: 0, description: 'Invoice round-off loss' }]
+      : [];
+
+  if (paymentAmount >= collectibleTotal) {
     const invoiceLines: JournalPlanLine[] = [
-      { accountKey: cashAccountKey, debit: gst.totalAmount, credit: 0, description: 'Customer payment received' },
+      { accountKey: cashAccountKey, debit: collectibleTotal, credit: 0, description: 'Customer payment received' },
+      ...discountLines,
+      ...roundOffLines,
       ...revenueCredits,
     ];
     validateJournalLines(invoiceLines);
-    return { gst, invoiceLines, paymentLines: [], postingMode: 'cash_sale' };
+    return { gst, discountAmount, roundOffAmount, collectibleTotal, invoiceLines, paymentLines: [], postingMode: 'cash_sale' };
   }
 
   const invoiceLines: JournalPlanLine[] = [
-    { accountKey: receivableAccountKey, debit: gst.totalAmount, credit: 0, description: 'Raise receivable' },
+    { accountKey: receivableAccountKey, debit: collectibleTotal, credit: 0, description: 'Raise receivable' },
+    ...discountLines,
+    ...roundOffLines,
     ...revenueCredits,
   ];
   validateJournalLines(invoiceLines);
@@ -201,10 +321,10 @@ export const buildInvoicePostingPlan = (input: {
       { accountKey: receivableAccountKey, debit: 0, credit: paymentAmount, description: 'Reduce receivable' },
     ];
     validateJournalLines(paymentLines);
-    return { gst, invoiceLines, paymentLines, postingMode: 'invoice_plus_payment' };
+    return { gst, discountAmount, roundOffAmount, collectibleTotal, invoiceLines, paymentLines, postingMode: 'invoice_plus_payment' };
   }
 
-  return { gst, invoiceLines, paymentLines: [], postingMode: 'credit_invoice' };
+  return { gst, discountAmount, roundOffAmount, collectibleTotal, invoiceLines, paymentLines: [], postingMode: 'credit_invoice' };
 };
 
 export const buildPaymentPostingPlan = (input: {
@@ -303,6 +423,57 @@ export const buildRefundPostingPlan = (input: {
     lines.push({ accountKey: 'igst_payable', debit: gst.igstAmount, credit: 0, description: 'Reverse IGST payable' });
   }
   lines.push({ accountKey: settlementKey, debit: 0, credit: gst.totalAmount, description: 'Refund payout' });
+  validateJournalLines(lines);
+  return { gst, lines };
+};
+
+export const buildPosReturnPostingPlan = (input: {
+  revenueAmount: number;
+  gstAmount?: number;
+  gstRate?: number;
+  gstTreatment?: GstTreatment;
+  cogsAmount?: number;
+  restockInventory?: boolean;
+  settleRefund?: boolean;
+  paymentMode?: AccountingPaymentMode;
+  settlementAccountKey?: string;
+  counterAccountKey?: string;
+  revenueAccountKey?: string;
+}): { gst: GstBreakup; lines: JournalPlanLine[] } => {
+  const revenueAccountKey = input.revenueAccountKey || 'sales_revenue';
+  const counterAccountKey = input.counterAccountKey || 'accounts_receivable';
+  const settlementKey = paymentModeToAccountKey(input.paymentMode, input.settlementAccountKey);
+  const gst = calculateGstBreakup({
+    baseAmount: input.revenueAmount,
+    gstAmount: input.gstAmount,
+    gstRate: input.gstRate,
+    gstTreatment: input.gstTreatment,
+  });
+  const cogsAmount = round2(Number(input.cogsAmount || 0));
+  const lines: JournalPlanLine[] = [
+    { accountKey: revenueAccountKey, debit: gst.baseAmount, credit: 0, description: 'Reverse sales revenue' },
+  ];
+
+  if (gst.cgstAmount > 0) {
+    lines.push({ accountKey: 'cgst_payable', debit: gst.cgstAmount, credit: 0, description: 'Reverse CGST payable' });
+  }
+  if (gst.sgstAmount > 0) {
+    lines.push({ accountKey: 'sgst_payable', debit: gst.sgstAmount, credit: 0, description: 'Reverse SGST payable' });
+  }
+  if (gst.igstAmount > 0) {
+    lines.push({ accountKey: 'igst_payable', debit: gst.igstAmount, credit: 0, description: 'Reverse IGST payable' });
+  }
+  if (input.restockInventory !== false && cogsAmount > 0) {
+    lines.push({ accountKey: 'stock_in_hand', debit: cogsAmount, credit: 0, description: 'Return inventory at cost' });
+    lines.push({ accountKey: 'cost_of_goods_sold', debit: 0, credit: cogsAmount, description: 'Reverse cost of goods sold' });
+  }
+
+  lines.push({
+    accountKey: input.settleRefund === false ? counterAccountKey : settlementKey,
+    debit: 0,
+    credit: gst.totalAmount,
+    description: input.settleRefund === false ? 'Return credit pending settlement' : 'Refund payout',
+  });
   validateJournalLines(lines);
   return { gst, lines };
 };

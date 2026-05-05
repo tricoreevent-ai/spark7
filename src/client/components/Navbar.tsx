@@ -47,6 +47,7 @@ const menuItems = [
   { key: 'customers' as PageKey, name: 'CRM Reports', path: '/customers/reports', category: 'Sales' as MenuCategory, icon: '📊' },
   { key: 'products' as PageKey, name: 'Product Center', path: '/products', category: 'Catalog' as MenuCategory, icon: '📦' },
   { key: 'products' as PageKey, name: 'Product Entry', path: '/products/entry', category: 'Catalog' as MenuCategory, icon: '➕' },
+  { key: 'products' as PageKey, name: 'Bulk Product Entry', path: '/products/bulk-entry', category: 'Catalog' as MenuCategory, icon: '📥' },
   { key: 'products' as PageKey, name: 'Product Catalog', path: '/products/catalog', category: 'Catalog' as MenuCategory, icon: '🗃️' },
   { key: 'products' as PageKey, name: 'Stock Alerts', path: '/products/alerts', category: 'Catalog' as MenuCategory, icon: '🚨' },
   { key: 'inventory' as PageKey, name: 'Procurement', path: '/inventory/procurement', category: 'Catalog' as MenuCategory, icon: '🚚' },
@@ -165,11 +166,18 @@ const mobileHeaderButtonGroupItemClass =
   'inline-flex h-8 w-8 items-center justify-center text-slate-200 transition hover:bg-white/10 hover:text-white';
 const mobileHeaderUserLabelClass =
   'flex h-8 max-w-[132px] items-center gap-1.5 px-2.5 text-xs font-semibold text-slate-100';
+const DESKTOP_SIDEBAR_COLLAPSED_KEY = 'sarva-desktop-sidebar-collapsed';
+
+const readInitialDesktopSidebarCollapsed = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(DESKTOP_SIDEBAR_COLLAPSED_KEY) === '1';
+};
 
 export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, showCompanyCreationMenu = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isDesktopCollapsed, setIsDesktopCollapsed] = useState<boolean>(() => readInitialDesktopSidebarCollapsed());
   const [desktopExpandedCategory, setDesktopExpandedCategory] = useState<MenuCategory | null>(null);
   const [mobileExpandedCategory, setMobileExpandedCategory] = useState<MenuCategory | null>(null);
   const [menuSearchQuery, setMenuSearchQuery] = useState('');
@@ -179,6 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
   const [uiPreferences, setUiPreferences] = useState<ResolvedUiPreferences>(() => readUiPreferencesFromStorage());
   const uiPreferencesRef = useRef<ResolvedUiPreferences>(uiPreferences);
   const menuSearchRef = useRef<HTMLDivElement | null>(null);
+  const desktopSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const allowedMenuItems = useMemo(() => {
     const base = menuItems.filter((item) => {
@@ -371,6 +380,11 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(DESKTOP_SIDEBAR_COLLAPSED_KEY, isDesktopCollapsed ? '1' : '0');
+  }, [isDesktopCollapsed]);
+
   const setTheme = (nextTheme: 'dark' | 'light') => {
     const next = {
       ...uiPreferencesRef.current,
@@ -430,6 +444,23 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
   const searchInputClass =
     'w-full rounded-xl border border-white/10 bg-white/5 py-1.5 pl-9 pr-10 text-[12px] text-white placeholder-slate-500 outline-none transition focus:border-sky-400/35 focus:bg-white/10';
 
+  const collapsedDesktopLinkClass = (selected: boolean) =>
+    `group relative flex h-11 w-11 items-center justify-center rounded-xl border text-base transition ${
+      selected
+        ? 'border-sky-400/40 bg-sky-500/18 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+        : 'border-white/8 bg-white/[0.04] text-slate-300 hover:border-white/12 hover:bg-white/10 hover:text-white'
+    }`;
+
+  const expandDesktopSidebar = (focusSearch = false) => {
+    setIsDesktopCollapsed(false);
+    if (!focusSearch) return;
+    window.setTimeout(() => {
+      desktopSearchInputRef.current?.focus();
+      desktopSearchInputRef.current?.select();
+      setIsMenuSearchOpen(Boolean(menuSearchQuery.trim()));
+    }, 140);
+  };
+
   const renderSearchBlock = (mobile = false) => (
     <div ref={mobile ? undefined : menuSearchRef} className="relative">
       <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
@@ -439,6 +470,7 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
         </svg>
       </span>
       <input
+        ref={mobile ? undefined : desktopSearchInputRef}
         type="text"
         value={menuSearchQuery}
         onChange={(event) => {
@@ -567,34 +599,125 @@ export const Navbar: React.FC<NavbarProps> = ({ user, permissions, onLogout, sho
     </div>
   );
 
+  const renderCollapsedDesktopMenu = () => (
+    <div className="flex h-full flex-col items-center gap-2 p-2">
+      <div className="flex w-full flex-col items-center gap-2 rounded-2xl border border-white/8 bg-white/[0.04] px-2 py-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <img src={brandLogo} alt="Sarva logo" className="h-7 w-7 object-contain" />
+        </div>
+        <button
+          type="button"
+          onClick={() => expandDesktopSidebar(false)}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-500/10 text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-500/18"
+          title="Show full navigation menu"
+          aria-label="Show full navigation menu"
+        >
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+            <path d="M7.5 5.5 12.5 10l-5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => expandDesktopSidebar(true)}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white"
+          title="Expand menu and search pages"
+          aria-label="Expand menu and search pages"
+        >
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.8">
+            <circle cx="8.5" cy="8.5" r="5.25" />
+            <path d="M12.5 12.5 16.25 16.25" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col items-center gap-2 pr-0.5">
+          {homeItem ? (
+            <NavLink
+              to={homeItem.path}
+              className={() => collapsedDesktopLinkClass(location.pathname === homeItem.path)}
+              title="Home"
+              aria-label="Home"
+            >
+              <span aria-hidden="true">{homeItem.icon}</span>
+            </NavLink>
+          ) : null}
+
+          {groupedMenuItems.map((group) => {
+            const landingPath = categoryLandingPaths[group.category] || group.items[0]?.path || '/';
+            const isActiveGroup = activeCategory === group.category;
+            return (
+              <NavLink
+                key={group.category}
+                to={landingPath}
+                className={() => collapsedDesktopLinkClass(isActiveGroup)}
+                title={`${group.category} workspace`}
+                aria-label={`${group.category} workspace`}
+              >
+                <span aria-hidden="true">{categoryIcons[group.category]}</span>
+                {isActiveGroup ? (
+                  <span className="absolute -right-1.5 h-2.5 w-2.5 rounded-full border border-slate-950 bg-cyan-300" aria-hidden="true" />
+                ) : null}
+              </NavLink>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
   const themeMode = uiPreferences.themeMode;
 
   return (
     <>
-      <aside className="hidden h-full w-[256px] shrink-0 overflow-x-hidden border-r border-white/8 bg-slate-950/95 shadow-[20px_0_40px_rgba(2,6,23,0.22)] backdrop-blur-xl lg:flex lg:flex-col">
-        <div className="flex h-full flex-col p-2.5">
-          <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-2.5">
-            {renderSearchBlock(false)}
-          </div>
-
-          <div className="mt-2.5 flex-1 overflow-y-auto overflow-x-hidden pr-1">
-            {homeItem ? (
-              <div className="mb-1.5 rounded-xl border border-white/8 bg-white/[0.03] p-1">
-                <NavLink to={homeItem.path} className={homeLinkClass}>
-                  <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/20 text-xs">
-                    {homeItem.icon}
-                  </span>
-                  <span className="min-w-0 truncate text-[12px] font-semibold text-inherit">Home</span>
-                </NavLink>
+      <aside
+        className={`hidden h-full shrink-0 overflow-x-hidden border-r border-white/8 bg-slate-950/95 shadow-[20px_0_40px_rgba(2,6,23,0.22)] backdrop-blur-xl transition-[width] duration-200 lg:flex lg:flex-col ${
+          isDesktopCollapsed ? 'w-[84px]' : 'w-[256px]'
+        }`}
+      >
+        {isDesktopCollapsed ? (
+          renderCollapsedDesktopMenu()
+        ) : (
+          <div className="flex h-full flex-col p-2.5">
+            <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-2.5">
+              <div className="mb-2.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200/85">Navigation</p>
+                  <p className="mt-1 truncate text-[11px] text-slate-400">Collapse this menu to give forms more room.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDesktopCollapsed(true)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/10 hover:text-white"
+                  title="Collapse navigation menu"
+                  aria-label="Collapse navigation menu"
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M12.5 5.5 7.5 10l5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
               </div>
-            ) : null}
-            {renderMenuGroups(desktopExpandedCategory, (category) =>
-              setDesktopExpandedCategory((current) => (current === category ? null : category)),
-              () => setDesktopExpandedCategory(null)
-            )}
-          </div>
+              {renderSearchBlock(false)}
+            </div>
 
-        </div>
+            <div className="mt-2.5 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+              {homeItem ? (
+                <div className="mb-1.5 rounded-xl border border-white/8 bg-white/[0.03] p-1">
+                  <NavLink to={homeItem.path} className={homeLinkClass}>
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/20 text-xs">
+                      {homeItem.icon}
+                    </span>
+                    <span className="min-w-0 truncate text-[12px] font-semibold text-inherit">Home</span>
+                  </NavLink>
+                </div>
+              ) : null}
+              {renderMenuGroups(desktopExpandedCategory, (category) =>
+                setDesktopExpandedCategory((current) => (current === category ? null : category)),
+                () => setDesktopExpandedCategory(null)
+              )}
+            </div>
+          </div>
+        )}
       </aside>
 
       <div className="sticky top-0 z-40 border-b border-white/8 bg-slate-950/95 px-4 py-2.5 shadow-[0_18px_42px_rgba(2,6,23,0.22)] backdrop-blur-xl lg:hidden">

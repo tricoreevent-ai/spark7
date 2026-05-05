@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { ProductCenterInsights } from '../components/ProductCenterInsights';
 import { formatCurrency } from '../config';
 import { Product, useProducts } from '../hooks/useProducts';
 
 const isInventoryItem = (product: Product): boolean => (product.itemType || 'inventory') === 'inventory';
+const isActiveProduct = (product: Product): boolean => product.isActive !== false;
 
 const isPromotionActive = (product: Product): boolean => {
   const promotionalPrice = Number(product.promotionalPrice || 0);
@@ -23,13 +25,14 @@ export const ProductCenter: React.FC = () => {
   const { products, loading, error } = useProducts();
 
   const metrics = useMemo(() => {
-    const inventoryItems = products.filter(isInventoryItem);
+    const activeProducts = products.filter(isActiveProduct);
+    const inventoryItems = activeProducts.filter(isInventoryItem);
     const lowStockItems = inventoryItems.filter((product) => Number(product.stock || 0) > 0 && Number(product.stock || 0) <= Number(product.minStock || 0));
     const outOfStockItems = inventoryItems.filter((product) => Number(product.stock || 0) <= 0);
     const autoReorderItems = inventoryItems.filter(
       (product) => product.autoReorder && Number(product.stock || 0) <= Number(product.minStock || 0)
     );
-    const activePromotions = products.filter(isPromotionActive);
+    const activePromotions = activeProducts.filter(isPromotionActive);
     const inactiveItems = products.filter((product) => product.isActive === false);
 
     return {
@@ -43,6 +46,10 @@ export const ProductCenter: React.FC = () => {
       promotions: activePromotions.length,
       inactive: inactiveItems.length,
       stockValue: inventoryItems.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.cost || 0), 0),
+      totalShopWorth: activeProducts.reduce(
+        (sum, product) => sum + Number(product.stock || 0) * Number(product.wholesalePrice || 0),
+        0
+      ),
       lowStockItems: lowStockItems
         .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0))
         .slice(0, 5),
@@ -59,6 +66,13 @@ export const ProductCenter: React.FC = () => {
       path: '/products/entry',
       accent: 'from-emerald-500/25 to-emerald-400/10',
       icon: '➕',
+    },
+    {
+      title: 'Bulk Product Entry',
+      description: 'Download the Excel template and import or update products in large batches.',
+      path: '/products/bulk-entry',
+      accent: 'from-violet-500/25 to-violet-400/10',
+      icon: '📥',
     },
     {
       title: 'Product Catalog',
@@ -107,10 +121,17 @@ export const ProductCenter: React.FC = () => {
           <p className="mt-3 max-w-3xl text-sm text-gray-300">
             This is the product entry point for SPARK AI. Use it to open product entry, catalog review, pricing and stock monitoring workflows.
           </p>
+          <p className="mt-2 max-w-3xl text-xs text-gray-500 sm:text-sm">
+            Total Products counts all product masters. Low Stock means active inventory stock is above 0 but at or below Min Stock. Out of Stock means active inventory stock is 0 or lower. Total Worth of Products in Shop is calculated as quantity in stock multiplied by wholesale purchase price for active catalog products.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ManualHelpLink anchor="product-center-logic" />
           <Link to="/products/entry" className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400">
             New Product
+          </Link>
+          <Link to="/products/bulk-entry" className="rounded-md bg-violet-500/90 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-400">
+            Bulk Entry
           </Link>
           <Link to="/products/catalog" className="rounded-md bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20">
             Open Catalog
@@ -121,7 +142,7 @@ export const ProductCenter: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs uppercase tracking-wide text-gray-400">Total Products</p>
           <p className="mt-2 text-2xl font-semibold text-white">{metrics.total}</p>
@@ -147,11 +168,16 @@ export const ProductCenter: React.FC = () => {
           <p className="mt-2 text-2xl font-semibold text-cyan-200">{formatCurrency(metrics.stockValue)}</p>
           <p className="mt-2 text-xs text-gray-400">Approximate cost-based inventory value</p>
         </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Total Worth of Products in Shop</p>
+          <p className="mt-2 text-2xl font-semibold text-violet-200">{formatCurrency(metrics.totalShopWorth)}</p>
+          <p className="mt-2 text-xs text-gray-400">Stock quantity multiplied by wholesale purchase price</p>
+        </div>
       </div>
 
       <ProductCenterInsights products={products} />
 
-      <div className="mb-8 grid grid-cols-1 gap-4 xl:grid-cols-5">
+      <div className="mb-8 grid grid-cols-1 gap-4 xl:grid-cols-6">
         {quickLinks.map((link) => (
           <Link
             key={link.path}

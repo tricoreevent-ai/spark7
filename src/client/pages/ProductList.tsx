@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ActionIconButton } from '../components/ActionIconButton';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
 import { Product, useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { showAlertDialog, showConfirmDialog } from '../utils/appDialogs';
+import { notifyProductsChanged } from '../utils/productCatalogEvents';
 
 type ProductColumnId =
   | 'name'
@@ -153,6 +156,7 @@ const toDateText = (value?: string): string => {
 };
 
 const yesNo = (value?: boolean): string => (value ? 'Yes' : 'No');
+const fileSafe = (value: string): string => String(value || 'export').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
 
 const getSortValue = (product: Product, field: ProductSortField): number | string => {
   if (field === 'name') return String(product.name || '');
@@ -205,6 +209,7 @@ export const ProductList: React.FC = () => {
   const [stockFilter, setStockFilter] = useState<StockFilterOption>('all');
   const [sortField, setSortField] = useState<ProductSortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [exportingMode, setExportingMode] = useState<'screen' | 'full' | null>(null);
 
   useEffect(() => {
     localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
@@ -219,7 +224,7 @@ export const ProductList: React.FC = () => {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      refetch();
+      notifyProductsChanged();
     } catch (err) {
       await showAlertDialog((err as Error)?.message || 'Failed to delete product');
     }
@@ -337,6 +342,26 @@ export const ProductList: React.FC = () => {
     [filteredProducts]
   );
 
+  const totalSellingStockValue = useMemo(
+    () =>
+      filteredProducts.reduce(
+        (sum, product) =>
+          sum + ((product.itemType || 'inventory') === 'inventory' ? Number(product.stock || 0) * Number(product.price || 0) : 0),
+        0
+      ),
+    [filteredProducts]
+  );
+
+  const totalCostStockValue = useMemo(
+    () =>
+      filteredProducts.reduce(
+        (sum, product) =>
+          sum + ((product.itemType || 'inventory') === 'inventory' ? Number(product.stock || 0) * Number(product.cost || 0) : 0),
+        0
+      ),
+    [filteredProducts]
+  );
+
   const toggleColumn = (columnId: ProductColumnId) => {
     setVisibleColumns((prev) => {
       if (prev.includes(columnId)) {
@@ -420,6 +445,132 @@ export const ProductList: React.FC = () => {
     return '-';
   };
 
+  const getExportValue = useCallback((product: Product, columnId: ProductColumnId): string | number => {
+    if (columnId === 'name') return String(product.name || '');
+    if (columnId === 'sku') return String(product.sku || '');
+    if (columnId === 'barcode') return String(product.barcode || '');
+    if (columnId === 'category') return String(product.category || '');
+    if (columnId === 'subcategory') return String(product.subcategory || '');
+    if (columnId === 'itemType') return String(product.itemType || 'inventory').replace('_', ' ');
+    if (columnId === 'description') return String(product.description || '');
+    if (columnId === 'price') return Number(product.price || 0);
+    if (columnId === 'wholesalePrice') return Number(product.wholesalePrice || 0);
+    if (columnId === 'promotionalPrice') return Number(product.promotionalPrice || 0);
+    if (columnId === 'cost') return Number(product.cost || 0);
+    if (columnId === 'gstRate') return Number(product.gstRate || 0);
+    if (columnId === 'cgstRate') return Number(product.cgstRate || 0);
+    if (columnId === 'sgstRate') return Number(product.sgstRate || 0);
+    if (columnId === 'igstRate') return Number(product.igstRate || 0);
+    if (columnId === 'taxType') return String(product.taxType || 'gst').toUpperCase();
+    if (columnId === 'hsnCode') return String(product.hsnCode || '');
+    if (columnId === 'openingStockValue') return Number(product.openingStockValue || 0);
+    if (columnId === 'stockLedgerAccountId') return String(product.stockLedgerAccountId || '');
+    if (columnId === 'stock') return Number(product.stock || 0);
+    if (columnId === 'minStock') return Number(product.minStock || 0);
+    if (columnId === 'autoReorder') return yesNo(product.autoReorder);
+    if (columnId === 'reorderQuantity') return Number(product.reorderQuantity || 0);
+    if (columnId === 'unit') return String(product.unit || '');
+    if (columnId === 'returnStock') return Number(product.returnStock || 0);
+    if (columnId === 'damagedStock') return Number(product.damagedStock || 0);
+    if (columnId === 'allowNegativeStock') return yesNo(product.allowNegativeStock);
+    if (columnId === 'batchTracking') return yesNo(product.batchTracking);
+    if (columnId === 'expiryRequired') return yesNo(product.expiryRequired);
+    if (columnId === 'serialNumberTracking') return yesNo(product.serialNumberTracking);
+    if (columnId === 'variantSize') return String(product.variantSize || '');
+    if (columnId === 'variantColor') return String(product.variantColor || '');
+    if (columnId === 'isActive') return product.isActive === false ? 'Inactive' : 'Active';
+    if (columnId === 'createdAt') return toDateText(product.createdAt);
+    if (columnId === 'updatedAt') return toDateText(product.updatedAt);
+    return '';
+  }, []);
+
+  const exportRowsToWorkbook = useCallback(async (args: {
+    rows: Product[];
+    columns: ColumnDef[];
+    fileLabel: string;
+    includeExtraDetails?: boolean;
+  }) => {
+    const { rows, columns, fileLabel, includeExtraDetails } = args;
+    const XLSX = await import('xlsx');
+    const exportRows = rows.map((product) => {
+      const baseRow = columns.reduce<Record<string, string | number>>((acc, column) => {
+        acc[column.label] = getExportValue(product, column.id);
+        return acc;
+      }, {});
+
+      if (includeExtraDetails) {
+        baseRow['Promotion Start Date'] = toDateText(product.promotionStartDate);
+        baseRow['Promotion End Date'] = toDateText(product.promotionEndDate);
+        baseRow['Image URL'] = String(product.imageUrl || '');
+        baseRow['Price Tiers'] = Array.isArray(product.priceTiers) && product.priceTiers.length
+          ? product.priceTiers.map((tier) => `${tier.tierName}: min ${tier.minQuantity} @ ${tier.unitPrice}`).join(' | ')
+          : '';
+        baseRow['Variant Matrix'] = Array.isArray(product.variantMatrix) && product.variantMatrix.length
+          ? product.variantMatrix
+              .map((variant) => {
+                const pieces = [
+                  variant.size ? `size ${variant.size}` : '',
+                  variant.color ? `color ${variant.color}` : '',
+                  variant.skuSuffix ? `sku ${variant.skuSuffix}` : '',
+                  variant.barcode ? `barcode ${variant.barcode}` : '',
+                  variant.price !== undefined ? `price ${variant.price}` : '',
+                  variant.isActive === false ? 'inactive' : 'active',
+                ].filter(Boolean);
+                return pieces.join(', ');
+              })
+              .join(' | ')
+          : '';
+      }
+
+      return baseRow;
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(exportRows), 'Products');
+    XLSX.writeFile(workbook, `${fileSafe(fileLabel)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }, [getExportValue]);
+
+  const handleExportScreenView = useCallback(async () => {
+    if (!paginatedProducts.length) {
+      await showAlertDialog('There are no product rows on the current screen to export.', { title: 'Nothing To Export' });
+      return;
+    }
+
+    setExportingMode('screen');
+    try {
+      await exportRowsToWorkbook({
+        rows: paginatedProducts,
+        columns: visibleColumnDefs,
+        fileLabel: 'product-catalog-screen-view',
+      });
+    } catch (err) {
+      await showAlertDialog((err as Error)?.message || 'Failed to export the current screen view.');
+    } finally {
+      setExportingMode(null);
+    }
+  }, [exportRowsToWorkbook, paginatedProducts, visibleColumnDefs]);
+
+  const handleExportFullDetails = useCallback(async () => {
+    if (!filteredProducts.length) {
+      await showAlertDialog('There are no filtered product rows to export.', { title: 'Nothing To Export' });
+      return;
+    }
+
+    setExportingMode('full');
+    try {
+      await exportRowsToWorkbook({
+        rows: filteredProducts,
+        columns: columnDefs,
+        fileLabel: 'product-catalog-full-details',
+        includeExtraDetails: true,
+      });
+    } catch (err) {
+      await showAlertDialog((err as Error)?.message || 'Failed to export full product details.');
+    } finally {
+      setExportingMode(null);
+    }
+  }, [exportRowsToWorkbook, filteredProducts]);
+
   if (loading) return <div className="p-8 text-center text-gray-400">Loading products...</div>;
   if (error) return <div className="mx-auto max-w-7xl px-4 py-6 text-red-500">Error: {error}</div>;
 
@@ -429,8 +580,12 @@ export const ProductList: React.FC = () => {
         <div>
           <p className="text-sm font-medium uppercase tracking-[0.22em] text-sky-200/80">Catalog Review</p>
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Product Catalog</h1>
+          <p className="mt-2 max-w-3xl text-sm text-gray-300">
+            Search, filter, sort, and review every product row here. The top cards use the filtered result set, so counts and stock totals change immediately after search, category, status, and stock filters are applied.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ManualHelpLink anchor="product-catalog-logic" />
           <Link
             to="/products"
             className="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
@@ -443,6 +598,12 @@ export const ProductList: React.FC = () => {
           >
             Stock Alerts
           </Link>
+          <Link
+            to="/products/bulk-entry"
+            className="rounded-md bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/30"
+          >
+            Bulk Entry
+          </Link>
           <button
             type="button"
             onClick={() => setShowColumnPicker((value) => !value)}
@@ -450,13 +611,23 @@ export const ProductList: React.FC = () => {
           >
             Customize Columns
           </button>
-          <button
-            type="button"
+          <ActionIconButton
+            kind="exportCsv"
+            onClick={() => void handleExportScreenView()}
+            disabled={exportingMode !== null}
+            title={exportingMode === 'screen' ? 'Exporting Screen...' : 'Export Screen View'}
+          />
+          <ActionIconButton
+            kind="exportCsv"
+            onClick={() => void handleExportFullDetails()}
+            disabled={exportingMode !== null}
+            title={exportingMode === 'full' ? 'Exporting Full...' : 'Export Full Details'}
+          />
+          <ActionIconButton
+            kind="refresh"
             onClick={refetch}
-            className="rounded-md bg-indigo-500/90 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
-          >
-            Refresh
-          </button>
+            title="Refresh"
+          />
           <Link
             to="/products/entry"
             className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400"
@@ -493,7 +664,7 @@ export const ProductList: React.FC = () => {
         </div>
       )}
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-lg border border-white/10 bg-white/5 p-3">
           <p className="text-xs text-gray-400">Filtered Products</p>
           <p className="text-lg font-semibold text-white">{filteredProducts.length}</p>
@@ -507,16 +678,23 @@ export const ProductList: React.FC = () => {
           <p className="text-lg font-semibold text-red-400">{lowStockCount}</p>
         </div>
         <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-          <p className="text-xs text-gray-400">Visible Columns</p>
-          <p className="text-lg font-semibold text-white">{visibleColumnDefs.length + 1}</p>
+          <p className="text-xs text-gray-400">Stock @ Selling Price</p>
+          <p className="text-lg font-semibold text-cyan-200">{formatCurrency(totalSellingStockValue)}</p>
         </div>
         <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-          <p className="text-xs text-gray-400">Auto-Reorder</p>
-          <p className="text-lg font-semibold text-cyan-300">{autoReorderCount}</p>
+          <p className="text-xs text-gray-400">Stock @ Cost Price</p>
+          <p className="text-lg font-semibold text-emerald-200">{formatCurrency(totalCostStockValue)}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <p className="text-xs text-gray-400">Visible Columns</p>
+          <p className="text-lg font-semibold text-white">{visibleColumnDefs.length + 1}</p>
         </div>
       </div>
 
       <div className="mb-4 space-y-2">
+        <p className="text-xs text-gray-400">
+          `Export Screen View` downloads the current page with the same visible columns. `Export Full Details` downloads all filtered rows with extended product fields.
+        </p>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <input
             value={search}
@@ -668,17 +846,9 @@ export const ProductList: React.FC = () => {
                   </td>
                 ))}
                 <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-3">
-                    <Link to={`/products/edit/${product._id}`} className="text-sm font-semibold text-indigo-300 hover:text-indigo-200">
-                      Edit
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(product._id)}
-                      className="text-sm font-semibold text-red-300 hover:text-red-200"
-                    >
-                      Delete
-                    </button>
+                  <div className="flex justify-end gap-2">
+                    <ActionIconButton kind="edit" to={`/products/edit/${product._id}`} title={`Edit ${product.name}`} />
+                    <ActionIconButton kind="delete" onClick={() => void handleDelete(product._id)} title={`Delete ${product.name}`} />
                   </div>
                 </td>
               </tr>

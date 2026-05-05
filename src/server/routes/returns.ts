@@ -2,15 +2,125 @@ import { Router, Response } from 'express';
 import { Return } from '../models/Return.js';
 import { Sale } from '../models/Sale.js';
 import { Product } from '../models/Product.js';
+import { JournalEntry } from '../models/JournalEntry.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { generateNumber } from '../services/numbering.js';
 import { createCreditNoteFromReturn } from '../services/creditNotes.js';
 import { productRequiresStock } from '../services/salesPricing.js';
 import { writeAuditLog } from '../services/audit.js';
+import { createJournalEntry, ensureAccountingChart } from '../services/accountingEngine.js';
+import { buildPosReturnPostingPlan } from '../services/accountingRules.js';
 
 const router = Router();
 
 const roundTo2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const normalizeRefundPaymentMode = (value: unknown, fallback: unknown = 'cash') => {
+  const normalized = String(value || fallback || 'cash').trim().toLowerCase();
+  if (normalized === 'cash') return 'cash';
+  if (normalized === 'card') return 'card';
+  if (normalized === 'upi') return 'upi';
+  if (normalized === 'cheque') return 'cheque';
+  if (normalized === 'online') return 'online';
+  if (normalized === 'bank_transfer') return 'bank_transfer';
+  return String(fallback || 'cash').trim().toLowerCase() === 'cash' ? 'cash' : 'bank';
+};
+
+const inferSaleReturnGstTreatment = (sale: any, returnRecord: any) => {
+  const hasTax = Number(returnRecord?.returnedGst || 0) > 0;
+  if (!hasTax) return 'none';
+  const saleItems = Array.isArray(sale?.items) ? sale.items : [];
+  return saleItems.some((item: any) => Number(item?.igstAmount || 0) > 0) ? 'interstate' : 'intrastate';
+};
+
+const calculateReturnCogsAmount = (sale: any, returnRecord: any) => {
+  const saleItems = Array.isArray(sale?.items) ? sale.items : [];
+  const saleCogsByProduct = new Map<string, { quantity: number; cogs: number }>();
+  for (const item of saleItems) {
+    const productId = String(item?.productId || '').trim();
+    if (!productId) continue;
+    const current = saleCogsByProduct.get(productId) || { quantity: 0, cogs: 0 };
+    current.quantity += Number(item?.quantity || 0);
+    current.cogs += Number(item?.cogsAmount || 0);
+    saleCogsByProduct.set(productId, current);
+  }
+
+  return roundTo2(
+    (Array.isArray(returnRecord?.items) ? returnRecord.items : []).reduce((sum: number, item: any) => {
+      const productId = String(item?.productId || '').trim();
+      const sold = saleCogsByProduct.get(productId);
+      if (!sold || sold.quantity <= 0 || sold.cogs <= 0) return sum;
+      const unitCogs = Number(sold.cogs || 0) / Number(sold.quantity || 1);
+      return sum + unitCogs * Number(item?.returnQuantity || 0);
+    }, 0)
+  );
+};
+
+const postApprovedReturnToAccounting = async (args: {
+  returnRecord: any;
+  linkedSale: any;
+  processDirectRefund: boolean;
+  createdBy?: string;
+}) => {
+  const { returnRecord, linkedSale, processDirectRefund, createdBy } = args;
+  if (!returnRecord?._id || !linkedSale?._id) return null;
+  await ensureAccountingChart(createdBy);
+
+  const existing = await JournalEntry.findOne({
+    referenceType: 'refund',
+    referenceId: String(returnRecord._id),
+    status: { $ne: 'cancelled' },
+  })
+    .select('_id')
+    .lean();
+  if (existing) return existing;
+
+  const paymentMode = normalizeRefundPaymentMode(
+    returnRecord.refundMethod === 'original_payment' ? linkedSale.paymentMethod : returnRecord.refundMethod,
+    linkedSale.paymentMethod
+  );
+  const cogsAmount = calculateReturnCogsAmount(linkedSale, returnRecord);
+  const plan = buildPosReturnPostingPlan({
+    revenueAmount: Number(returnRecord.returnedAmount || 0),
+    gstAmount: Number(returnRecord.returnedGst || 0),
+    gstTreatment: inferSaleReturnGstTreatment(linkedSale, returnRecord) as any,
+    cogsAmount,
+    restockInventory: String(returnRecord.restockStatus || '') === 'completed',
+    settleRefund: processDirectRefund && String(returnRecord.refundStatus || '') === 'completed',
+    paymentMode: paymentMode as any,
+    revenueAccountKey: 'sales_revenue',
+  });
+
+  const journal = await createJournalEntry({
+    entryDate: returnRecord.approvedAt || returnRecord.updatedAt || returnRecord.createdAt || new Date(),
+    referenceType: 'refund',
+    referenceId: String(returnRecord._id),
+    referenceNo: String(returnRecord.returnNumber || linkedSale.invoiceNumber || linkedSale.saleNumber || ''),
+    description: `POS return ${returnRecord.returnNumber || ''}`.trim(),
+    paymentMode: paymentMode as any,
+    createdBy,
+    metadata: {
+      source: 'pos_sales_return',
+      sourceSaleId: String(linkedSale._id),
+      sourceInvoiceNumber: linkedSale.invoiceNumber || linkedSale.saleNumber,
+      sourceReturnId: String(returnRecord._id),
+      sourceReturnNumber: returnRecord.returnNumber,
+      refundMethod: returnRecord.refundMethod,
+      refundStatus: returnRecord.refundStatus,
+      processDirectRefund,
+      cogsAmount,
+      restockStatus: returnRecord.restockStatus,
+    },
+    lines: plan.lines.map((line) => ({
+      accountKey: line.accountKey,
+      debit: line.debit,
+      credit: line.credit,
+      description: line.description,
+    })),
+  }, { skipChartEnsure: true });
+
+  return journal.entry;
+};
 
 const returnedQtyForSaleItem = async (args: {
   saleId: string;
@@ -435,7 +545,20 @@ router.put('/:id/approve', authMiddleware, async (req: AuthenticatedRequest, res
       returnRecord.refundStatus = processDirectRefund ? (normalizedRefundStatus || 'completed') : (normalizedRefundStatus || 'pending');
     }
 
+    if (processDirectRefund && returnRecord.refundStatus === 'completed' && !returnRecord.refundProcessedAt) {
+      returnRecord.refundProcessedAt = new Date();
+    }
+
     await returnRecord.save();
+
+    if (linkedSale) {
+      await postApprovedReturnToAccounting({
+        returnRecord,
+        linkedSale,
+        processDirectRefund: Boolean(processDirectRefund),
+        createdBy: req.userId || 'system',
+      });
+    }
 
     if (linkedSale && linkedSale.invoiceType === 'credit') {
       linkedSale.outstandingAmount = roundTo2(

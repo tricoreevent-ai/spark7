@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { PaginationControls } from './PaginationControls';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { CustomerCrmCustomerRow, CustomerCrmDirectoryFilters } from './customerCrmShared';
+import { ActionIconButton } from './ActionIconButton';
 
 type DirectorySortKey =
   | 'name'
@@ -245,22 +246,18 @@ export const CustomerDirectoryTable: React.FC<CustomerDirectoryTableProps> = ({
           <p className="mt-2 text-sm text-gray-400">Sort, filter, export, select multiple customers, and launch brochure campaigns from one directory.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
+          <ActionIconButton
+            kind="exportCsv"
             onClick={() => downloadCsv('customer-directory-visible.csv', sortedRows.map(mapCustomerCsvRow))}
-            className="rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100"
             disabled={!sortedRows.length}
-          >
-            Export Visible CSV
-          </button>
-          <button
-            type="button"
+            title="Export Visible CSV"
+          />
+          <ActionIconButton
+            kind="exportCsv"
             onClick={() => downloadCsv('customer-directory-selected.csv', selectedRows.map(mapCustomerCsvRow))}
-            className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-100"
             disabled={!selectedRows.length}
-          >
-            Export Selected CSV
-          </button>
+            title="Export Selected CSV"
+          />
         </div>
       </div>
 

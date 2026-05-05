@@ -13,6 +13,7 @@ import { Return } from '../models/Return.js';
 import { DayBookEntry } from '../models/DayBookEntry.js';
 import { AccountingVoucher } from '../models/AccountingVoucher.js';
 import { createJournalEntry, ensureAccountingChart } from './accountingEngine.js';
+import { addBookReferenceKey, shouldSkipReceiptVoucherBookEntry } from './bookReporting.js';
 import { generateNumber } from './numbering.js';
 import { writeAuditLog } from './audit.js';
 
@@ -272,7 +273,7 @@ export const ensureTreasuryDefaults = async (createdBy?: string) => {
     await PaymentMethodRouting.findOneAndUpdate(
       { paymentMethod: route.paymentMethod, channelLabel: '' },
       { $setOnInsert: { ...route, channelLabel: '', createdBy } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 
@@ -285,9 +286,16 @@ const loadTreasuryMaps = async () => {
     TreasuryAccount.find({ isActive: true }).sort({ accountType: 1, isPrimary: -1, displayName: 1 }),
     PaymentMethodRouting.find({ isActive: true }).sort({ isDefault: -1, paymentMethod: 1, channelLabel: 1 }),
   ]);
+  const chartAccountIds = accounts
+    .map((row) => String(row.chartAccountId || '').trim())
+    .filter(Boolean);
+  const chartAccounts = chartAccountIds.length
+    ? await ChartAccount.find({ _id: { $in: chartAccountIds } }).select('_id accountCode systemKey')
+    : [];
   const accountMap = new Map(accounts.map((row) => [String(row._id), row]));
   const chartAccountMap = new Map(accounts.filter((row) => row.chartAccountId).map((row) => [String(row.chartAccountId), row]));
-  return { accounts, routes, accountMap, chartAccountMap };
+  const chartById = new Map(chartAccounts.map((row) => [String(row._id), row]));
+  return { accounts, routes, accountMap, chartAccountMap, chartById };
 };
 
 const getRouteMatch = (routes: IPaymentMethodRouting[], paymentMethod: TreasuryPaymentMethod, channelLabel?: string) => {
@@ -298,22 +306,23 @@ const getRouteMatch = (routes: IPaymentMethodRouting[], paymentMethod: TreasuryP
     || null;
 };
 
-export const resolveTreasuryRoute = async (args: {
-  paymentMethod?: string;
-  treasuryAccountId?: string;
-  channelLabel?: string;
-}): Promise<TreasuryRouteContext> => {
-  const { accounts, routes, accountMap } = await loadTreasuryMaps();
+const resolveTreasuryRouteFromMaps = (
+  args: {
+    paymentMethod?: string;
+    treasuryAccountId?: string;
+    channelLabel?: string;
+  },
+  maps: Awaited<ReturnType<typeof loadTreasuryMaps>>
+): TreasuryRouteContext => {
   const normalizedMethod = normalizeTreasuryPaymentMethod(args.paymentMethod);
-
   if (args.treasuryAccountId) {
-    const treasuryAccount = accountMap.get(String(args.treasuryAccountId));
+    const treasuryAccount = maps.accountMap.get(String(args.treasuryAccountId));
     if (!treasuryAccount) throw new Error('Selected treasury account not found');
-    const chartAccount = treasuryAccount.chartAccountId ? await ChartAccount.findById(treasuryAccount.chartAccountId) : null;
+    const chartAccount = treasuryAccount.chartAccountId ? maps.chartById.get(String(treasuryAccount.chartAccountId)) : null;
     if (!chartAccount) throw new Error(`Chart account is not configured for ${treasuryAccount.displayName}`);
     return {
       treasuryAccount,
-      chartAccountId: chartAccount._id.toString(),
+      chartAccountId: String(chartAccount._id),
       chartAccountCode: chartAccount.accountCode,
       chartAccountKey: chartAccount.systemKey || chartAccount.accountCode,
       settlementDays: 0,
@@ -324,19 +333,19 @@ export const resolveTreasuryRoute = async (args: {
     };
   }
 
-  const route = getRouteMatch(routes, normalizedMethod, args.channelLabel);
+  const route = getRouteMatch(maps.routes, normalizedMethod, args.channelLabel);
   const fallback = route
-    ? accountMap.get(String(route.treasuryAccountId))
+    ? maps.accountMap.get(String(route.treasuryAccountId))
     : (normalizedMethod === 'cash'
-        ? accounts.find((row) => row.accountType === 'cash_float')
-        : accounts.find((row) => row.accountType === 'bank' && row.isPrimary));
+        ? maps.accounts.find((row) => row.accountType === 'cash_float')
+        : maps.accounts.find((row) => row.accountType === 'bank' && row.isPrimary));
   if (!fallback) throw new Error(`Treasury route is not configured for ${normalizedMethod}`);
-  const chartAccount = fallback.chartAccountId ? await ChartAccount.findById(fallback.chartAccountId) : null;
+  const chartAccount = fallback.chartAccountId ? maps.chartById.get(String(fallback.chartAccountId)) : null;
   if (!chartAccount) throw new Error(`Chart account is missing for ${fallback.displayName}`);
 
   return {
     treasuryAccount: fallback,
-    chartAccountId: chartAccount._id.toString(),
+    chartAccountId: String(chartAccount._id),
     chartAccountCode: chartAccount.accountCode,
     chartAccountKey: chartAccount.systemKey || chartAccount.accountCode,
     settlementDays: Number(route?.settlementDays || 0),
@@ -345,6 +354,15 @@ export const resolveTreasuryRoute = async (args: {
     processorName: route?.processorName || fallback.processorName,
     channelLabel: route?.channelLabel || undefined,
   };
+};
+
+export const resolveTreasuryRoute = async (args: {
+  paymentMethod?: string;
+  treasuryAccountId?: string;
+  channelLabel?: string;
+}): Promise<TreasuryRouteContext> => {
+  const maps = await loadTreasuryMaps();
+  return resolveTreasuryRouteFromMaps(args, maps);
 };
 
 export const upsertTreasuryAccount = async (args: {
@@ -447,7 +465,7 @@ export const upsertTreasuryAccount = async (args: {
   };
 
   if (args.id) {
-    const updated = await TreasuryAccount.findByIdAndUpdate(args.id, payload, { new: true, runValidators: true });
+    const updated = await TreasuryAccount.findByIdAndUpdate(args.id, payload, { returnDocument: 'after', runValidators: true });
     if (!updated) {
       throw new Error('Treasury account could not be updated because the selected record no longer exists.');
     }
@@ -504,7 +522,7 @@ export const upsertPaymentMethodRoute = async (args: {
   }
 
   if (args.id) {
-    const updated = await PaymentMethodRouting.findByIdAndUpdate(args.id, payload, { new: true, runValidators: true });
+    const updated = await PaymentMethodRouting.findByIdAndUpdate(args.id, payload, { returnDocument: 'after', runValidators: true });
     if (!updated) {
       throw new Error('Payment route could not be updated because the selected route no longer exists.');
     }
@@ -616,9 +634,12 @@ export const findLumpSumDepositMatch = (
   return best;
 };
 
-const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEntry[]> => {
+export const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEntry[]> => {
   const cutoff = endOfDay(endDate);
-  const { chartAccountMap } = await loadTreasuryMaps();
+  const treasuryMaps = await loadTreasuryMaps();
+  const { chartAccountMap } = treasuryMaps;
+  const resolveRoute = (args: { paymentMethod?: string; treasuryAccountId?: string; channelLabel?: string }) =>
+    resolveTreasuryRouteFromMaps(args, treasuryMaps);
   const [ledgerRows, receipts, sales, returns, daybookRows, vouchers] = await Promise.all([
     AccountLedgerEntry.find({ entryDate: { $lte: cutoff }, isDeleted: { $ne: true } }).sort({ entryDate: 1, createdAt: 1, _id: 1 }),
     ReceiptVoucher.find({ entryDate: { $lte: cutoff } }).sort({ entryDate: 1, createdAt: 1 }),
@@ -650,13 +671,24 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
   );
   const saleById = new Map(sales.map((row: any) => [String(row._id), row]));
   const results: DerivedBookEntry[] = [];
+  const postedRefs = new Set<string>();
 
   for (const row of ledgerRows) {
     const treasuryAccount = chartAccountMap.get(String(row.accountId || ''));
     if (!treasuryAccount) continue;
+    if (String(row.voucherType || '').toLowerCase() === 'opening' || String((row.metadata as any)?.source || '').toLowerCase() === 'opening_balance') {
+      continue;
+    }
     const inflow = Number(row.debit || 0) > 0;
     const amount = round2(Math.max(Number(row.debit || 0), Number(row.credit || 0)));
     if (amount <= 0) continue;
+    addBookReferenceKey(postedRefs, row.voucherNumber);
+    addBookReferenceKey(postedRefs, row.referenceNo);
+    addBookReferenceKey(postedRefs, (row as any)?._id);
+    addBookReferenceKey(postedRefs, (row.metadata as any)?.sourceSaleId);
+    addBookReferenceKey(postedRefs, (row.metadata as any)?.sourceInvoiceNumber);
+    addBookReferenceKey(postedRefs, (row.metadata as any)?.sourceReturnId);
+    addBookReferenceKey(postedRefs, (row.metadata as any)?.sourceReturnNumber);
     results.push({
       key: `ledger:${row._id}`,
       treasuryAccountId: String(treasuryAccount._id),
@@ -690,9 +722,10 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
   }
 
   for (const row of receipts) {
+    if (shouldSkipReceiptVoucherBookEntry(postedRefs, row)) continue;
     const route = row.treasuryAccountId
-      ? await resolveTreasuryRoute({ treasuryAccountId: String(row.treasuryAccountId) })
-      : await resolveTreasuryRoute({ paymentMethod: row.mode, channelLabel: row.paymentChannelLabel });
+      ? resolveRoute({ treasuryAccountId: String(row.treasuryAccountId) })
+      : resolveRoute({ paymentMethod: row.mode, channelLabel: row.paymentChannelLabel });
     results.push({
       key: `receipt:${row._id}`,
       treasuryAccountId: String(route.treasuryAccount._id),
@@ -718,6 +751,8 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
   }
 
   for (const row of sales) {
+    const reference = String(row.invoiceNumber || row.saleNumber || '').trim();
+    if ((reference && postedRefs.has(reference)) || postedRefs.has(String(row._id))) continue;
     if (receiptSaleIds.has(String(row._id))) continue;
     const directPaidAmount = round2(
       String(row.invoiceType || 'cash') === 'cash'
@@ -726,8 +761,8 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
     );
     if (directPaidAmount <= 0) continue;
     const route = row.treasuryAccountId
-      ? await resolveTreasuryRoute({ treasuryAccountId: String(row.treasuryAccountId) })
-      : await resolveTreasuryRoute({ paymentMethod: row.paymentMethod, channelLabel: row.paymentChannelLabel });
+      ? resolveRoute({ treasuryAccountId: String(row.treasuryAccountId) })
+      : resolveRoute({ paymentMethod: row.paymentMethod, channelLabel: row.paymentChannelLabel });
     const createdAt = row.createdAt ? new Date(row.createdAt) : new Date();
     results.push({
       key: `sale:${row._id}`,
@@ -754,6 +789,8 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
   }
 
   for (const row of returns) {
+    const reference = String(row.refundReferenceNo || row.returnNumber || '').trim();
+    if ((reference && postedRefs.has(reference)) || postedRefs.has(String(row._id))) continue;
     if (String(row.refundMethod || '').toLowerCase() === 'credit_note') continue;
     let method = normalizeTreasuryPaymentMethod(row.refundMethod);
     if (method === 'original_payment') {
@@ -761,8 +798,8 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
       method = normalizeTreasuryPaymentMethod(linkedSale?.paymentMethod || 'cash');
     }
     const route = row.refundTreasuryAccountId
-      ? await resolveTreasuryRoute({ treasuryAccountId: String(row.refundTreasuryAccountId) })
-      : await resolveTreasuryRoute({ paymentMethod: method });
+      ? resolveRoute({ treasuryAccountId: String(row.refundTreasuryAccountId) })
+      : resolveRoute({ paymentMethod: method });
     const processedAt = row.refundProcessedAt ? new Date(row.refundProcessedAt) : new Date(row.updatedAt || row.createdAt || new Date());
     results.push({
       key: `return:${row._id}`,
@@ -790,10 +827,11 @@ const getDerivedBookEntriesUntil = async (endDate: Date): Promise<DerivedBookEnt
 
   for (const row of daybookRows) {
     if (row.referenceNo && voucherNumbers.has(String(row.referenceNo))) continue;
+    if ((row.referenceNo && postedRefs.has(String(row.referenceNo))) || postedRefs.has(String(row._id))) continue;
     const route = row.treasuryAccountId
-      ? await resolveTreasuryRoute({ treasuryAccountId: String(row.treasuryAccountId) })
-      : await resolveTreasuryRoute({ paymentMethod: row.paymentMethod });
-    const amount = round2(Number(row.amount || 0));
+      ? resolveRoute({ treasuryAccountId: String(row.treasuryAccountId) })
+      : resolveRoute({ paymentMethod: row.paymentMethod });
+    const amount = round2(Number((row as any).totalAmount || 0) || (Number(row.amount || 0) + Number((row as any).gstAmount || 0)));
     if (amount <= 0) continue;
     const direction: TreasuryDirection = row.entryType === 'income' ? 'inflow' : 'outflow';
     results.push({
@@ -884,6 +922,9 @@ const getBankTransactionStatus = (bankAmount: number, links: any[]) => {
   return { status: 'partial' as const, linkedAmount, difference };
 };
 
+const isManuallyClearedLedgerEntry = (entry: DerivedBookEntry) =>
+  entry.key.startsWith('ledger:') && Boolean((entry.raw as any)?.isReconciled);
+
 export const buildTreasuryDashboard = async (args: { startDate?: string; endDate?: string }) => {
   await ensureTreasuryDefaults();
   const start = startOfDay(args.startDate ? new Date(args.startDate) : addDays(new Date(), -7));
@@ -898,9 +939,16 @@ export const buildTreasuryDashboard = async (args: { startDate?: string; endDate
     const entriesInRange = bookEntries.filter((entry) => entry.treasuryAccountId === accountId && entry.expectedSettlementDate >= start && entry.expectedSettlementDate <= end);
     const bankBefore = bankRows.filter((row) => String(row.treasuryAccountId) === accountId && new Date(row.transactionDate) <= openingCutoff);
     const bankInRange = bankRows.filter((row) => String(row.treasuryAccountId) === accountId && new Date(row.transactionDate) >= start && new Date(row.transactionDate) <= end);
+    const hasLinkedBankMatch = (entry: DerivedBookEntry) => (linksByBookKey.get(entry.key) || []).length > 0;
+    const clearedEntriesBefore = entriesBefore.filter((entry) => isManuallyClearedLedgerEntry(entry) && !hasLinkedBankMatch(entry));
+    const clearedEntriesInRange = entriesInRange.filter((entry) => isManuallyClearedLedgerEntry(entry) && !hasLinkedBankMatch(entry));
 
     const projectedOpening = round2(Number(account.openingBalance || 0) + entriesBefore.reduce((sum, entry) => sum + entry.signedAmount, 0));
-    const actualOpening = round2(Number(account.openingBalance || 0) + bankBefore.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+    const actualOpening = round2(
+      Number(account.openingBalance || 0)
+      + bankBefore.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+      + clearedEntriesBefore.reduce((sum, entry) => sum + entry.signedAmount, 0)
+    );
     const bankRowsWithStatus = bankInRange.map((row) => {
       const links = linksByBankId.get(String(row._id)) || [];
       const summary = row.isIgnored
@@ -919,13 +967,18 @@ export const buildTreasuryDashboard = async (args: { startDate?: string; endDate
     const matchedBankTransactions = bankRowsWithStatus.filter((row) => row.status === 'matched' || row.status === 'refund_linked');
     const unmatchedBookEntries = entriesInRange.filter((entry) => {
       if (entry.expectedSettlementDate > endOfDay(new Date())) return false;
-      if ((linksByBookKey.get(entry.key) || []).length > 0) return false;
+      if (hasLinkedBankMatch(entry)) return false;
+      if (isManuallyClearedLedgerEntry(entry)) return false;
       const state = stateByBookKey.get(`${accountId}::${entry.key}`);
       return !(state && (state.action === 'ignore' || state.action === 'manual_deposit'));
     });
 
     const projectedBalance = round2(projectedOpening + entriesInRange.reduce((sum, entry) => sum + entry.signedAmount, 0));
-    const actualBalance = round2(actualOpening + bankInRange.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+    const actualBalance = round2(
+      actualOpening
+      + bankInRange.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+      + clearedEntriesInRange.reduce((sum, entry) => sum + entry.signedAmount, 0)
+    );
 
     return {
       account: {
@@ -1061,7 +1114,7 @@ export const setBookEntryState = async (args: {
       notes: args.notes,
       createdBy: args.createdBy,
     },
-    { upsert: true, new: true, runValidators: true }
+    { upsert: true, returnDocument: 'after', runValidators: true }
   );
 
 export const createExpenseFromBankTransaction = async (args: {

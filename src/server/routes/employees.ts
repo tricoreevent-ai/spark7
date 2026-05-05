@@ -182,7 +182,7 @@ router.post('/demo-seed', authMiddleware, async (req: AuthenticatedRequest, res:
           ...row,
           createdBy: req.userId,
         },
-        { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+        { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
       );
       saved.push(employee);
     }
@@ -296,7 +296,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       }
     }
 
-    const employee = await Employee.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const employee = await Employee.findByIdAndUpdate(req.params.id, updates, { returnDocument: 'after', runValidators: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
 
     res.json({ success: true, data: employee, message: 'Employee updated' });

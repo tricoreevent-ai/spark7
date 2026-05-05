@@ -6,6 +6,7 @@ import { AccountLedgerEntry } from '../models/AccountLedgerEntry.js';
 import { FixedAsset } from '../models/FixedAsset.js';
 import { JournalEntry } from '../models/JournalEntry.js';
 import { JournalLine } from '../models/JournalLine.js';
+import { PurchaseBill } from '../models/PurchaseBill.js';
 import { Vendor } from '../models/Vendor.js';
 import { AccountGroup } from '../models/AccountGroup.js';
 import { AuditFlag } from '../models/AuditFlag.js';
@@ -25,12 +26,14 @@ import {
   ensureFinancialPeriod,
   importBankStatement,
   listVendorBalances,
+  recalculateLedgerRunningBalancesForAccounts,
   recordExpense,
   recordPayment,
   runAssetDepreciation,
   setFinancialPeriodLock,
   toCsv,
 } from '../services/accountingEngine.js';
+import { buildSupplierPayablesReport } from '../services/procurementPayables.js';
 import { ChartAccount } from '../models/ChartAccount.js';
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js';
 import { executeIdempotentRequest } from '../services/idempotency.js';
@@ -53,6 +56,7 @@ import {
   writeTreasuryAudit,
 } from '../services/treasury.js';
 import { buildBalanceSheetReport, buildProfitLossStatement, buildTrialBalanceReport } from '../services/accountingReports.js';
+import { buildInventoryLedgerSnapshot, reconcileInventoryLedger } from '../services/inventoryLedger.js';
 
 const router = Router();
 const accountingExportRateLimit = createRateLimitMiddleware({
@@ -81,6 +85,23 @@ const requireWriter = (req: AuthenticatedRequest, res: Response): boolean => {
   return false;
 };
 
+const isSuperAdmin = (req: AuthenticatedRequest): boolean =>
+  String(req.userRole || '').trim().toLowerCase() === 'super_admin';
+
+const canModifyCreatedRecord = (req: AuthenticatedRequest, createdBy?: string): boolean =>
+  isSuperAdmin(req) || !createdBy || String(req.userId || '').trim() === String(createdBy || '').trim();
+
+const isEditableConsoleJournal = async (entry: any): Promise<boolean> => {
+  if (String(entry?.status || '').trim().toLowerCase() !== 'posted') return false;
+  const referenceType = String(entry?.referenceType || '').trim().toLowerCase();
+  if (referenceType === 'manual') return true;
+  if (referenceType !== 'payment') return false;
+
+  const referenceNo = String(entry?.referenceNo || '').trim().toUpperCase();
+  if (!referenceNo || !referenceNo.startsWith('PB-')) return false;
+  return Boolean(await PurchaseBill.exists({ billNumber: referenceNo }));
+};
+
 const canUnlockFinancialPeriod = (req: AuthenticatedRequest): boolean => {
   const role = String(req.userRole || '').trim().toLowerCase();
   return ['admin', 'super_admin', 'accountant'].includes(role);
@@ -96,6 +117,43 @@ const parseBoolean = (value: unknown): boolean => {
 };
 const normalizePan = (value: unknown): string => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
 const isValidPan = (value: string): boolean => !value || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
+const normalizeVendorName = (value: unknown): string => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const normalizePhone = (value: unknown): string => String(value || '').replace(/\D/g, '').slice(-10);
+const findVendorDuplicate = async (input: {
+  name?: unknown;
+  gstin?: unknown;
+  pan?: unknown;
+  phone?: unknown;
+  excludeId?: unknown;
+}) => {
+  const clauses: any[] = [];
+  const name = normalizeVendorName(input.name);
+  const gstin = String(input.gstin || '').trim().toUpperCase();
+  const pan = normalizePan(input.pan);
+  const phone = normalizePhone(input.phone);
+  if (name) clauses.push({ name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+  if (gstin) clauses.push({ gstin });
+  if (pan) clauses.push({ pan });
+  if (phone) clauses.push({ phone: { $regex: `${phone}$` } });
+  if (!clauses.length) return null;
+  const filter: any = { isActive: true, $or: clauses };
+  if (input.excludeId) filter._id = { $ne: input.excludeId };
+  const duplicate = await Vendor.findOne(filter).select('name gstin pan phone ledgerAccountId');
+  if (!duplicate) return null;
+  if (gstin && duplicate.gstin === gstin) return { field: 'GSTIN', duplicate };
+  if (pan && duplicate.pan === pan) return { field: 'PAN', duplicate };
+  if (phone && normalizePhone(duplicate.phone) === phone) return { field: 'phone', duplicate };
+  return { field: 'name', duplicate };
+};
+const parseAsOnDate = (value: unknown): Date => {
+  const raw = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    return new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
 
 const toDateWindow = (startDate?: string, endDate?: string): { $gte?: Date; $lte?: Date } | undefined => {
   if (!startDate && !endDate) return undefined;
@@ -257,6 +315,30 @@ router.get('/dashboard', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+router.get('/inventory/recompute-value', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const preview = await buildInventoryLedgerSnapshot(new Date());
+    res.json({ success: true, data: preview });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to preview inventory reconciliation') });
+  }
+});
+
+router.post('/inventory/recompute-value', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+    const asOnDate = req.body?.asOnDate ? parseAsOnDate(req.body.asOnDate) : new Date();
+    const result = await reconcileInventoryLedger({
+      asOnDate,
+      createdBy: req.userId,
+      referenceNo: String(req.body?.referenceNo || `INV-RECON-${asOnDate.toISOString().slice(0, 10)}`),
+    });
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to reconcile inventory value') });
+  }
+});
+
 router.get('/journal-entries', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate, referenceType, status, limit = 100, skip = 0 } = req.query;
@@ -323,6 +405,103 @@ router.post('/journal-entries/:id/cancel', async (req: AuthenticatedRequest, res
     res.json({ success: true, data: result, message: 'Journal entry cancelled with reversal' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to cancel journal entry') });
+  }
+});
+
+router.get('/journal-entries/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const entry = await JournalEntry.findById(String(req.params.id));
+    if (!entry) return res.status(404).json({ success: false, error: 'Journal entry not found' });
+    const lines = await JournalLine.find({ journalId: entry._id }).sort({ lineNumber: 1, createdAt: 1, _id: 1 });
+    const canEdit = await isEditableConsoleJournal(entry);
+    res.json({
+      success: true,
+      data: {
+        entry,
+        lines,
+        capabilities: {
+          canEdit,
+          canCancel: canEdit,
+        },
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to fetch journal entry') });
+  }
+});
+
+router.put('/journal-entries/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+
+    const original = await JournalEntry.findById(String(req.params.id));
+    if (!original) return res.status(404).json({ success: false, error: 'Journal entry not found' });
+    if (!canModifyCreatedRecord(req, original.createdBy)) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to modify this journal entry' });
+    }
+    const canEdit = await isEditableConsoleJournal(original);
+    if (!canEdit) {
+      return res.status(400).json({
+        success: false,
+        error: 'This journal entry is generated by another workflow and cannot be edited directly from the console.',
+      });
+    }
+
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    if (lines.length < 2) {
+      return res.status(400).json({ success: false, error: 'Journal revision requires at least two lines' });
+    }
+
+    const revisionReason = String(req.body?.revisionReason || req.body?.reason || '').trim()
+      || `Revised from accounting console for ${original.entryNumber}`;
+    const reversal = await cancelJournalEntry({
+      journalEntryId: original._id.toString(),
+      reason: revisionReason,
+      createdBy: req.userId,
+      metadata: {
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        revisionOf: original._id.toString(),
+        revisionOfEntryNumber: original.entryNumber,
+      },
+    });
+    const originalReferenceType = String(original.referenceType || '').trim().toLowerCase() === 'payment' ? 'payment' : 'manual';
+    const replacement = await createJournalEntry({
+      entryDate: req.body?.entryDate ? new Date(req.body.entryDate) : new Date(original.entryDate),
+      referenceType: originalReferenceType as 'manual' | 'payment',
+      referenceId: String(req.body?.referenceId ?? original.referenceId ?? '').trim() || undefined,
+      referenceNo: String(req.body?.referenceNo ?? original.referenceNo ?? '').trim() || undefined,
+      description: String(req.body?.description || original.description || '').trim() || original.description,
+      paymentMode: originalReferenceType === 'payment' ? 'bank' : 'adjustment',
+      createdBy: req.userId,
+      metadata: {
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        revisedFromJournalEntryId: original._id.toString(),
+        revisedFromEntryNumber: original.entryNumber,
+        revisionReason,
+        consoleEditableSource: originalReferenceType === 'payment' ? 'purchase_bill_payment' : 'manual',
+      },
+      lines: lines.map((line: any) => ({
+        accountId: String(line?.accountId || '').trim(),
+        debit: Number(line?.debit || 0),
+        credit: Number(line?.credit || 0),
+        description: String(line?.description || '').trim() || undefined,
+      })),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        original: reversal.original,
+        reversal: reversal.reversal,
+        replacement: replacement.entry,
+        lines: replacement.lines,
+      },
+      message: 'Journal entry revised successfully',
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: toClientErrorMessage(error, 'Failed to revise journal entry') });
   }
 });
 
@@ -534,9 +713,35 @@ router.get('/vendors', async (_req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+router.get('/supplier-payables', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate, supplierId = '' } = req.query;
+    const report = await buildSupplierPayablesReport({
+      startDate: startDate ? String(startDate) : undefined,
+      endDate: endDate ? String(endDate) : undefined,
+      supplierId: String(supplierId || '').trim() || undefined,
+    });
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to fetch supplier payables report') });
+  }
+});
+
 router.post('/vendors', async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!requireWriter(req, res)) return;
+    const duplicate = await findVendorDuplicate({
+      name: req.body?.name,
+      gstin: req.body?.gstin,
+      pan: req.body?.pan,
+      phone: req.body?.phone,
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        error: `Duplicate vendor ${duplicate.field} matches "${duplicate.duplicate.name}". Review the existing vendor instead of creating another.`,
+      });
+    }
     const result = await createVendor({
       name: String(req.body?.name || '').trim(),
       groupId: String(req.body?.groupId || '').trim() || undefined,
@@ -579,13 +784,18 @@ router.put('/vendors/:id', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, error: 'Vendor name is required' });
     }
 
-    const escapedName = nextName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const duplicate = await Vendor.findOne({
-      _id: { $ne: vendor._id },
-      name: { $regex: `^${escapedName}$`, $options: 'i' },
+    const duplicate = await findVendorDuplicate({
+      name: nextName,
+      gstin: req.body?.gstin ?? vendor.gstin,
+      pan: req.body?.pan ?? vendor.pan,
+      phone: req.body?.phone ?? vendor.phone,
+      excludeId: vendor._id,
     });
     if (duplicate) {
-      return res.status(409).json({ success: false, error: 'Vendor with this name already exists' });
+      return res.status(409).json({
+        success: false,
+        error: `Duplicate vendor ${duplicate.field} matches "${duplicate.duplicate.name}". Review the existing vendor instead of updating this record.`,
+      });
     }
 
     const before = vendor.toObject();
@@ -1397,7 +1607,9 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
       backdatedEntries: backdatedEntries.length,
       cashTransactionsAboveLimit: cashTransactionsAboveLimit.length,
       cancelledRecords: cancelledRecordsCount,
+      trialBalanceStatus: String(trialBalanceCheck.integrity?.status || ''),
       trialBalanceDifference: round2(Number(trialBalanceCheck.totals?.balanceDifference || 0)),
+      balanceSheetStatus: String(balanceSheetCheck.integrity?.status || ''),
       balanceSheetDifference: round2(Number(balanceSheetCheck.totals?.difference || 0)),
       openingBalanceDifference: round2(Number(balanceSheetCheck.diagnostics?.openingBalanceDifference || 0)),
       legacyClearing: round2(Number(balanceSheetCheck.diagnostics?.legacyClearing || 0)),
@@ -1621,6 +1833,54 @@ router.get('/audit/integrity-check', accountingIntegrityRateLimit, async (req: A
   }
 });
 
+router.post('/audit/recalculate-running-balances', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireWriter(req, res)) return;
+
+    const requestedAccountIds = Array.isArray(req.body?.accountIds)
+      ? req.body.accountIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const requestedSubTypes = Array.isArray(req.body?.accountSubTypes)
+      ? req.body.accountSubTypes.map((item: unknown) => String(item || '').trim().toLowerCase()).filter(Boolean)
+      : ['cash', 'bank'];
+    const safeSubTypes = requestedSubTypes.filter((item: string) => ['cash', 'bank', 'customer', 'supplier', 'stock', 'general'].includes(item));
+
+    const accountIds = requestedAccountIds.length > 0
+      ? requestedAccountIds
+      : (await ChartAccount.find({
+          isActive: true,
+          subType: { $in: safeSubTypes.length ? safeSubTypes : ['cash', 'bank'] },
+        }).select('_id')).map((account) => account._id.toString());
+
+    const result = await recalculateLedgerRunningBalancesForAccounts(accountIds);
+    await writeAuditLog({
+      module: 'accounting',
+      action: 'ledger_running_balances_recalculated',
+      entityType: 'ledger_maintenance',
+      userId: req.userId,
+      ipAddress: req.ip,
+      metadata: {
+        accountIds,
+        accountSubTypes: safeSubTypes,
+        updatedCount: result.reduce((sum, row) => sum + row.updatedCount, 0),
+        userAgent: req.get('user-agent'),
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        accountsChecked: result.length,
+        updatedCount: result.reduce((sum, row) => sum + row.updatedCount, 0),
+        rows: result,
+      },
+      message: 'Ledger running balances recalculated',
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: toClientErrorMessage(error, 'Failed to recalculate ledger running balances') });
+  }
+});
+
 router.get('/exports/:reportType', accountingExportRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const reportType = String(req.params.reportType || '').toLowerCase();
@@ -1655,13 +1915,15 @@ router.get('/exports/:reportType', accountingExportRateLimit, async (req: Authen
       rows = report.rows.map((row) => ({
         accountCode: row.accountCode,
         accountName: row.accountName,
-        accountType: row.accountType,
-        openingBalance: row.openingBalance,
-        debit: row.debit,
-        credit: row.credit,
-        closingBalance: row.closingBalance,
-        debitBalance: row.debitBalance,
-        creditBalance: row.creditBalance,
+        section: row.section,
+        reportHead: row.reportHead,
+        reportGroup: row.reportGroup,
+        groupName: row.groupName,
+        ledgerLabel: row.ledgerLabel,
+        debit: row.debitBalance,
+        credit: row.creditBalance,
+        normalBalanceSide: row.normalBalanceSide,
+        abnormalBalance: row.abnormalBalance ? 'Yes' : 'No',
       }));
     } else if (reportType === 'ledger') {
       const accountId = String(req.query?.accountId || '').trim();
@@ -1693,7 +1955,21 @@ router.get('/exports/:reportType', accountingExportRateLimit, async (req: Authen
         amount: row.amount,
       }));
     } else if (reportType === 'vendors') {
-      rows = await listVendorBalances();
+      rows = (await listVendorBalances()).map((row) => ({
+        name: row.name,
+        groupName: row.groupName || '',
+        contact: row.contact || '',
+        phone: row.phone || '',
+        alternatePhone: row.alternatePhone || '',
+        pan: row.pan || '',
+        gstin: row.gstin || '',
+        tds: row.isTdsApplicable ? `${row.tdsSectionCode || ''} @ ${Number(row.tdsRate || 0)}%` : 'No',
+        email: row.email || '',
+        address: row.address || '',
+        openingBalance: Number(row.openingBalance || 0),
+        openingSide: String(row.openingSide || 'credit').toUpperCase(),
+        linkedLedger: [String(row.ledgerAccountCode || '').trim(), String(row.ledgerAccountName || '').trim()].filter(Boolean).join(' - ') || 'Not linked',
+      }));
     } else {
       return res.status(404).json({ success: false, error: 'Unsupported export type' });
     }

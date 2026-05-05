@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CardTabs } from '../components/CardTabs';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { ReportDataTable } from '../components/ReportDataTable';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings } from '../utils/generalSettings';
 
@@ -933,14 +934,12 @@ export const AttendanceReports: React.FC = () => {
                 >
                   Print Sheet
                 </button>
-                <button
-                  type="button"
+                <ActionIconButton
+                  kind="exportCsv"
                   onClick={exportMonthlyCsv}
                   disabled={!monthlyPayload || monthlyLoading}
-                  className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                >
-                  Export CSV
-                </button>
+                  title="Export CSV"
+                />
               </div>
             </div>
             <p className="mt-3 text-xs text-gray-400">

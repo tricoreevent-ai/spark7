@@ -1,13 +1,26 @@
 import mongoose from 'mongoose';
+import { AccountingInvoice } from '../models/AccountingInvoice.js';
+import { AccountGroup } from '../models/AccountGroup.js';
 import { AccountLedgerEntry } from '../models/AccountLedgerEntry.js';
 import { ChartAccount, type AccountType, type IChartAccount } from '../models/ChartAccount.js';
 import { ContractPayment } from '../models/ContractPayment.js';
 import { DayBookEntry } from '../models/DayBookEntry.js';
+import { JournalEntry } from '../models/JournalEntry.js';
+import { PurchaseBill } from '../models/PurchaseBill.js';
 import { Return } from '../models/Return.js';
 import { SalaryPayment } from '../models/SalaryPayment.js';
 import { Sale } from '../models/Sale.js';
+import {
+  buildBalanceSheetIntegrity,
+  buildBalanceSheetTotals,
+  buildProfitLossSummary,
+  buildTrialBalanceIntegrity,
+  buildTrialBalanceTotals,
+} from './accountingReportMath.js';
+import { getReportEntries } from './reportInclusion.js';
 
 type ProfitLossAccountType = Extract<AccountType, 'income' | 'expense'>;
+type TrialBalanceSection = 'Assets' | 'Liabilities' | 'Equity' | 'Income' | 'Expenses' | 'Diagnostics';
 
 export interface MovementRow {
   _id: string;
@@ -35,8 +48,17 @@ interface AccountSummaryRow {
   accountCode: string;
   accountName: string;
   accountType: AccountType;
+  subType?: string;
   systemKey?: string;
+  section: TrialBalanceSection;
   groupName?: string;
+  parentGroupName?: string;
+  reportHead: string;
+  reportGroup: string;
+  ledgerLabel: string;
+  normalBalanceSide: 'debit' | 'credit';
+  abnormalBalance: boolean;
+  isSubLedger: boolean;
   openingBalance: number;
   debit: number;
   credit: number;
@@ -64,13 +86,204 @@ const signedChartOpening = (account: Pick<IChartAccount, 'openingBalance' | 'ope
   return account.openingSide === 'credit' ? -amount : amount;
 };
 
-const saleRevenueAmount = (sale: any): number => {
+const normalizeLookupKey = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const accountTypeToTrialBalanceSection = (accountType?: string): TrialBalanceSection => {
+  switch (normalizeLookupKey(accountType)) {
+    case 'asset':
+      return 'Assets';
+    case 'liability':
+      return 'Liabilities';
+    case 'income':
+      return 'Income';
+    case 'expense':
+      return 'Expenses';
+    default:
+      return 'Assets';
+  }
+};
+
+const fallbackGroupNameForTrialBalance = (
+  account: Pick<IChartAccount, 'groupName' | 'subType' | 'accountType'>
+) => {
+  if (String(account.groupName || '').trim()) return String(account.groupName || '').trim();
+  if (account.subType === 'cash') return 'Cash-in-hand';
+  if (account.subType === 'bank') return 'Bank Accounts';
+  if (account.subType === 'customer') return 'Sundry Debtors';
+  if (account.subType === 'supplier') return 'Sundry Creditors';
+  if (account.subType === 'stock') return 'Stock in Hand';
+  return accountTypeToTrialBalanceSection(account.accountType);
+};
+
+const deriveTrialBalanceHead = (
+  account: Pick<IChartAccount, 'accountType' | 'subType' | 'systemKey' | 'accountName' | 'groupName'>,
+  groupLookup: Map<string, { groupName?: string; parentGroupName?: string }>
+): {
+  section: TrialBalanceSection;
+  reportHead: TrialBalanceSection;
+  groupName: string;
+  parentGroupName: string;
+  reportGroup: string;
+  ledgerLabel: string;
+  normalBalanceSide: 'debit' | 'credit';
+  isSubLedger: boolean;
+} => {
+  const systemKey = String(account.systemKey || '').trim().toLowerCase();
+  const subType = String(account.subType || '').trim().toLowerCase();
+  const accountName = String(account.accountName || '').trim();
+  const resolvedGroupName = fallbackGroupNameForTrialBalance(account);
+  const groupRow = groupLookup.get(normalizeLookupKey(resolvedGroupName));
+  const parentGroupName = String(groupRow?.parentGroupName || '').trim();
+  const visibleParentGroupName = parentGroupName && parentGroupName !== 'SELF' ? parentGroupName : resolvedGroupName;
+  const classificationHints = `${accountName} ${resolvedGroupName} ${visibleParentGroupName}`.toLowerCase();
+
+  let section = accountTypeToTrialBalanceSection(account.accountType);
+  let reportGroup = visibleParentGroupName || resolvedGroupName || section;
+  let ledgerLabel = section === 'Income'
+    ? 'Income Ledger'
+    : section === 'Expenses'
+      ? 'Expense Ledger'
+      : section === 'Liabilities'
+        ? 'Liability Ledger'
+        : 'Asset Ledger';
+  let isSubLedger = false;
+
+  if (
+    systemKey === 'inventory_opening_reserve'
+    || systemKey === 'opening_balance_equity'
+    || systemKey === 'capital_account'
+    || systemKey === 'retained_earnings'
+    || /opening balance equity|capital account|retained earnings|inventory opening reserve|profit & loss account/.test(classificationHints)
+  ) {
+    section = 'Equity';
+    reportGroup = 'Capital & Reserves';
+    ledgerLabel = systemKey === 'inventory_opening_reserve' ? 'Inventory Reserve' : 'Equity Ledger';
+  } else if (subType === 'customer' || systemKey === 'accounts_receivable') {
+    section = 'Assets';
+    reportGroup = 'Accounts Receivable';
+    ledgerLabel = systemKey === 'accounts_receivable' ? 'Control Account' : 'Customer Sub-ledger';
+    isSubLedger = systemKey !== 'accounts_receivable';
+  } else if (subType === 'supplier' || systemKey === 'accounts_payable') {
+    section = 'Liabilities';
+    reportGroup = 'Accounts Payable';
+    ledgerLabel = systemKey === 'accounts_payable' ? 'Control Account' : 'Vendor Sub-ledger';
+    isSubLedger = systemKey !== 'accounts_payable';
+  } else if (subType === 'cash') {
+    section = 'Assets';
+    reportGroup = 'Current Assets';
+    ledgerLabel = 'Cash Ledger';
+  } else if (subType === 'bank') {
+    section = 'Assets';
+    reportGroup = 'Current Assets';
+    ledgerLabel = 'Bank Ledger';
+  } else if (
+    ['gst_input', 'cgst_input', 'sgst_input', 'igst_input'].includes(systemKey)
+    || /input gst|cgst input|sgst input|igst input|input tax/.test(classificationHints)
+  ) {
+    section = 'Assets';
+    reportGroup = 'Current Assets';
+    ledgerLabel = systemKey === 'gst_input' ? 'Tax Control Account' : 'Input Tax Ledger';
+  } else if (subType === 'stock' || systemKey === 'stock_in_hand' || /stock in hand/.test(classificationHints)) {
+    section = 'Assets';
+    reportGroup = 'Current Assets';
+    ledgerLabel = /opening stock/.test(classificationHints) ? 'Inventory Adjustment Ledger' : 'Inventory Ledger';
+  } else if (systemKey === 'fixed_assets' || systemKey === 'accumulated_depreciation' || /fixed assets?/.test(classificationHints)) {
+    section = 'Assets';
+    reportGroup = 'Fixed Assets';
+    ledgerLabel = systemKey === 'accumulated_depreciation' ? 'Contra Asset' : 'Fixed Asset Ledger';
+  } else if (section === 'Income') {
+    reportGroup = visibleParentGroupName || resolvedGroupName || 'Income';
+    ledgerLabel = ['booking_revenue', 'event_revenue', 'sales_revenue'].includes(systemKey) || /sales|revenue/.test(classificationHints)
+      ? 'Operating Income Ledger'
+      : 'Income Ledger';
+  } else if (section === 'Expenses') {
+    reportGroup = visibleParentGroupName || resolvedGroupName || 'Expenses';
+    ledgerLabel = ['cost_of_goods_sold', 'stock_loss'].includes(systemKey) || /cost of goods sold|stock loss|opening stock/.test(classificationHints)
+      ? 'Direct Expense Ledger'
+      : 'Expense Ledger';
+  } else if (section === 'Liabilities') {
+    reportGroup = visibleParentGroupName || resolvedGroupName || 'Liabilities';
+    ledgerLabel = 'Liability Ledger';
+  } else {
+    reportGroup = visibleParentGroupName || resolvedGroupName || 'Assets';
+    ledgerLabel = 'Asset Ledger';
+  }
+
+  return {
+    section,
+    reportHead: section,
+    groupName: resolvedGroupName,
+    parentGroupName: visibleParentGroupName || resolvedGroupName || section,
+    reportGroup,
+    ledgerLabel,
+    normalBalanceSide: section === 'Assets' || section === 'Expenses' ? 'debit' : 'credit',
+    isSubLedger,
+  };
+};
+
+const isZeroTrialBalanceRow = (row: Pick<AccountSummaryRow, 'openingBalance' | 'debit' | 'credit' | 'closingBalance'>) =>
+  round2(Number(row.openingBalance || 0)) === 0 &&
+  round2(Number(row.debit || 0)) === 0 &&
+  round2(Number(row.credit || 0)) === 0 &&
+  round2(Number(row.closingBalance || 0)) === 0;
+
+const buildTrialBalanceDiagnosticRow = (
+  row: Pick<AccountSummaryRow, 'accountId' | 'accountCode' | 'accountName' | 'accountType' | 'openingBalance' | 'debit' | 'credit' | 'closingBalance'>,
+  ledgerLabel: string
+): AccountSummaryRow => ({
+  ...row,
+  section: 'Diagnostics',
+  groupName: 'Report Diagnostics',
+  parentGroupName: 'Report Diagnostics',
+  reportHead: 'Diagnostics',
+  reportGroup: 'Report Diagnostics',
+  ledgerLabel,
+  normalBalanceSide: 'credit',
+  abnormalBalance: false,
+  isSubLedger: false,
+  debitBalance: row.closingBalance > 0 ? row.closingBalance : 0,
+  creditBalance: row.closingBalance < 0 ? Math.abs(row.closingBalance) : 0,
+});
+
+const collectDuplicateTrialBalanceNames = (rows: AccountSummaryRow[]) => {
+  const byName = new Map<string, AccountSummaryRow[]>();
+  for (const row of rows) {
+    if (String(row.accountId || '').startsWith('synthetic-')) continue;
+    const key = normalizeLookupKey(row.accountName);
+    if (!key) continue;
+    const bucket = byName.get(key) || [];
+    bucket.push(row);
+    byName.set(key, bucket);
+  }
+
+  return Array.from(byName.values())
+    .filter((bucket) => bucket.length > 1)
+    .map((bucket) => ({
+      accountName: bucket[0]?.accountName || 'Unnamed Account',
+      section: bucket[0]?.section || 'Diagnostics',
+      accountCodes: bucket
+        .map((row) => String(row.accountCode || '').trim())
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })),
+    }))
+    .sort((left, right) => left.accountName.localeCompare(right.accountName, undefined, { sensitivity: 'base' }));
+};
+
+export const saleRevenueAmount = (sale: any): number => {
   const itemTaxable = Array.isArray(sale?.items)
     ? sale.items.reduce((sum: number, item: any) => sum + Number(item?.taxableValue || 0), 0)
     : 0;
   if (itemTaxable > 0) return round2(itemTaxable);
   if (sale?.subtotal !== undefined && sale?.subtotal !== null) return round2(Number(sale.subtotal || 0));
-  return round2(Math.max(0, Number(sale?.totalAmount || 0) - Number(sale?.totalGst || 0)));
+  if (sale?.grossTotal !== undefined && sale?.grossTotal !== null) {
+    return round2(Math.max(0, Number(sale.grossTotal || 0) - Number(sale?.totalGst || 0)));
+  }
+  return round2(
+    Math.max(
+      0,
+      Number(sale?.totalAmount || 0) - Number(sale?.totalGst || 0) - Number(sale?.roundOffAmount || 0)
+    )
+  );
 };
 
 const returnRevenueAmount = (row: any): number => {
@@ -108,25 +321,20 @@ const getVoucherNumberSet = async (source: string, start: Date, end: Date): Prom
 
 const categoryFromAccount = (row: any): string => {
   const name = String(row.accountName || row.category || 'Other').trim();
-  if (name) return name;
+  if (name) return name.replace(/^(Income|Expense)\s*-\s*/i, '').trim();
   return row.accountType === 'income' ? 'Income' : 'Expense';
 };
 
-const isSalesIncomeAccount = (row: Partial<MovementRow>) => {
+const isSalesIncomeRow = (row: MovementRow) => {
   const key = String(row.systemKey || '').toLowerCase();
   const name = String(row.accountName || row.category || '').toLowerCase();
   return (
     ['booking_revenue', 'event_revenue', 'sales_revenue'].includes(key) ||
+    row.source === 'legacy_sales' ||
     name.includes('sales') ||
     name.includes('booking revenue') ||
     name.includes('event revenue')
   );
-};
-
-const isExpenseAccount = (row: Partial<MovementRow>, keys: string[], names: string[]) => {
-  const key = String(row.systemKey || '').toLowerCase();
-  const name = String(row.accountName || row.category || '').toLowerCase();
-  return keys.includes(key) || names.some((needle) => name.includes(needle));
 };
 
 const byCategory = (rows: MovementRow[]) => {
@@ -194,7 +402,7 @@ export const getLedgerMovementRows = async (
     { $sort: { entryDate: -1, createdAt: -1, _id: -1 } },
   ]);
 
-  return rows.map((row: any) => {
+  return getReportEntries(rows, { mode: 'default', includeReversal: true }).map((row: any) => {
     const debit = round2(Number(row.debit || 0));
     const credit = round2(Number(row.credit || 0));
     return {
@@ -219,15 +427,45 @@ export const getLedgerMovementRows = async (
 };
 
 const getLegacyIncomeRows = async (start: Date, end: Date): Promise<MovementRow[]> => {
-  const [salesRows, returnRows, dayBookRows, voucherNumbers] = await Promise.all([
+  const [salesRows, returnRows, dayBookRows, voucherNumbers, dayBookSourceIds, migratedLedgerSales, migratedReturnJournals] = await Promise.all([
     Sale.find({ createdAt: { $gte: start, $lte: end }, ...postedSaleMatch }).sort({ createdAt: -1 }),
     Return.find({ createdAt: { $gte: start, $lte: end }, ...approvedReturnMatch }).sort({ createdAt: -1 }),
     DayBookEntry.find({ entryType: 'income', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
     getVoucherNumberSet('voucher', start, end),
+    getSourceIdSet('daybook_entry', start, end),
+    AccountingInvoice.find({
+      referenceType: 'sale',
+      referenceId: { $exists: true, $ne: '' },
+      status: { $ne: 'cancelled' },
+      invoiceDate: { $gte: start, $lte: end },
+    })
+      .select('referenceId')
+      .lean(),
+    JournalEntry.find({
+      referenceType: 'refund',
+      status: { $ne: 'cancelled' },
+      entryDate: { $gte: start, $lte: end },
+      referenceId: { $exists: true, $ne: '' },
+    })
+      .select('referenceId')
+      .lean(),
   ]);
 
   const rows: MovementRow[] = [];
+  const migratedSaleIds = new Set(
+    migratedLedgerSales
+      .map((row: any) => String(row?.referenceId || '').trim())
+      .filter(Boolean)
+  );
+  const migratedReturnIds = new Set(
+    migratedReturnJournals
+      .map((row: any) => String(row?.referenceId || '').trim())
+      .filter(Boolean)
+  );
   for (const row of salesRows) {
+    if (Boolean((row as any).ledgerPosted) || Boolean((row as any).migratedToLedger) || migratedSaleIds.has(String((row as any)._id || ''))) {
+      continue;
+    }
     const amount = saleRevenueAmount(row);
     if (amount <= 0) continue;
     rows.push({
@@ -247,6 +485,9 @@ const getLegacyIncomeRows = async (start: Date, end: Date): Promise<MovementRow[
   }
 
   for (const row of returnRows) {
+    if (migratedReturnIds.has(String((row as any)._id || ''))) {
+      continue;
+    }
     const amount = returnRevenueAmount(row);
     if (amount <= 0) continue;
     rows.push({
@@ -267,6 +508,7 @@ const getLegacyIncomeRows = async (start: Date, end: Date): Promise<MovementRow[
   }
 
   for (const row of dayBookRows) {
+    if (dayBookSourceIds.has(String(row._id))) continue;
     const reference = String(row.referenceNo || '').trim();
     if (reference && voucherNumbers.has(reference)) continue;
     const amount = round2(Number(row.amount || 0));
@@ -291,11 +533,12 @@ const getLegacyIncomeRows = async (start: Date, end: Date): Promise<MovementRow[
 };
 
 const getLegacyExpenseRows = async (start: Date, end: Date): Promise<MovementRow[]> => {
-  const [dayBookRows, salaryRows, contractRows, voucherNumbers, salarySourceIds, contractSourceIds] = await Promise.all([
+  const [dayBookRows, salaryRows, contractRows, voucherNumbers, dayBookSourceIds, salarySourceIds, contractSourceIds] = await Promise.all([
     DayBookEntry.find({ entryType: 'expense', entryDate: { $gte: start, $lte: end }, status: 'active' }).sort({ entryDate: -1 }),
     SalaryPayment.find({ payDate: { $gte: start, $lte: end } }).sort({ payDate: -1 }),
     ContractPayment.find({ paymentDate: { $gte: start, $lte: end }, status: { $in: ['paid', 'partial'] } }).sort({ paymentDate: -1 }),
     getVoucherNumberSet('voucher', start, end),
+    getSourceIdSet('daybook_entry', start, end),
     getSourceIdSet('salary_payment', start, end),
     getSourceIdSet('contract_payment', start, end),
   ]);
@@ -303,6 +546,7 @@ const getLegacyExpenseRows = async (start: Date, end: Date): Promise<MovementRow
   const rows: MovementRow[] = [];
 
   for (const row of dayBookRows) {
+    if (dayBookSourceIds.has(String(row._id))) continue;
     const reference = String(row.referenceNo || '').trim();
     if (reference && voucherNumbers.has(reference)) continue;
     const amount = round2(Number(row.amount || 0));
@@ -403,96 +647,103 @@ export const buildProfitLossStatement = async (start: Date, end: Date) => {
   const report = await buildIncomeExpenseReports(start, end);
   const incomeRows = report.incomeRows;
   const expenseRows = report.expenseRows;
-
-  const grossSalesIncome = sumNumbers(
-    incomeRows.filter((row) => !row.isContraIncome && (isSalesIncomeAccount(row) || row.source === 'legacy_sales')).map((row) => row.amount)
-  );
-  const salesReturnContra = sumNumbers(incomeRows.filter((row) => row.isContraIncome).map((row) => Math.abs(row.amount)));
-  const nonSalesIncome = round2(report.totalIncome - grossSalesIncome + salesReturnContra);
-
-  const salaryExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, ['salary_expense'], ['salary expense', 'salaries', 'wages'])).map((row) => row.amount)
-  );
-  const contractExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, ['contract_expense'], ['contract expense', 'contract payment'])).map((row) => row.amount)
-  );
-  const cogsExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, ['cost_of_goods_sold'], ['cost of goods sold', 'cogs'])).map((row) => row.amount)
-  );
-  const stockLossExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, ['stock_loss'], ['stock loss'])).map((row) => row.amount)
-  );
-  const depreciationExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, ['depreciation_expense'], ['depreciation expense'])).map((row) => row.amount)
-  );
-  const payrollTaxExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, [], ['employer payroll tax'])).map((row) => row.amount)
-  );
-  const benefitsExpense = sumNumbers(
-    expenseRows.filter((row) => isExpenseAccount(row, [], ['employee benefits'])).map((row) => row.amount)
-  );
-
-  const knownExpense = round2(
-    salaryExpense +
-      contractExpense +
-      cogsExpense +
-      stockLossExpense +
-      depreciationExpense +
-      payrollTaxExpense +
-      benefitsExpense
-  );
-  const otherExpense = round2(report.totalExpense - knownExpense);
+  const summary = buildProfitLossSummary(incomeRows, expenseRows);
+  const diagnosticNotes: string[] = [];
+  const nonSalesIncomeCategories = byCategory(
+    incomeRows.filter((row) => !row.isContraIncome && !isSalesIncomeRow(row))
+  ).filter((row) => round2(Number(row.amount || 0)) !== 0);
+  const nonSalesStatementRows =
+    nonSalesIncomeCategories.length > 0
+      ? nonSalesIncomeCategories.map((row) => ({
+          section: 'Income',
+          particulars: row.category,
+          amount: row.amount,
+        }))
+      : [{ section: 'Income', particulars: 'Other Income', amount: summary.nonSalesIncome }];
 
   const statementRows = [
-    { section: 'Income', particulars: 'Sales / Service Income', amount: grossSalesIncome },
-    { section: 'Income', particulars: 'Less: Sales Returns / Refunds', amount: round2(-salesReturnContra), isContra: true },
-    { section: 'Income', particulars: 'Other Income', amount: nonSalesIncome },
-    { section: 'Income', particulars: 'Total Income', amount: report.totalIncome, isTotal: true },
-    { section: 'Expense', particulars: 'Cost of Goods Sold', amount: cogsExpense },
-    { section: 'Expense', particulars: 'Stock Loss / Adjustments', amount: stockLossExpense },
-    { section: 'Expense', particulars: 'Salary Expense', amount: salaryExpense },
-    { section: 'Expense', particulars: 'Employer Payroll Tax Expense', amount: payrollTaxExpense },
-    { section: 'Expense', particulars: 'Employee Benefits Expense', amount: benefitsExpense },
-    { section: 'Expense', particulars: 'Contract Expense', amount: contractExpense },
-    { section: 'Expense', particulars: 'Depreciation Expense', amount: depreciationExpense },
-    { section: 'Expense', particulars: 'Other Ledger / Manual Expense', amount: otherExpense },
-    { section: 'Expense', particulars: 'Total Expense', amount: report.totalExpense, isTotal: true },
+    { section: 'Income', particulars: 'Sales / Service Income', amount: summary.salesIncome },
+    { section: 'Income', particulars: 'Less: Sales Returns / Refunds', amount: round2(-summary.salesReturnContra), isContra: true },
+    ...nonSalesStatementRows,
+    { section: 'Income', particulars: 'Total Income', amount: summary.totalIncome, isTotal: true },
+    { section: 'Expense', particulars: 'Cost of Goods Sold', amount: summary.cogsExpense },
+    { section: 'Expense', particulars: 'Stock Loss / Adjustments', amount: summary.stockLossExpense },
+    { section: 'Expense', particulars: 'Salary Expense', amount: summary.salaryExpense },
+    { section: 'Expense', particulars: 'Employer Payroll Tax Expense', amount: summary.payrollTaxExpense },
+    { section: 'Expense', particulars: 'Employee Benefits Expense', amount: summary.benefitsExpense },
+    { section: 'Expense', particulars: 'Contract Expense', amount: summary.contractExpense },
+    { section: 'Expense', particulars: 'Depreciation Expense', amount: summary.depreciationExpense },
+    { section: 'Expense', particulars: 'Other Ledger / Manual Expense', amount: summary.otherExpense },
+    { section: 'Expense', particulars: 'Total Expense', amount: summary.totalExpense, isTotal: true },
     {
       section: 'Result',
-      particulars: report.totalIncome - report.totalExpense >= 0 ? 'Net Profit' : 'Net Loss',
-      amount: round2(report.totalIncome - report.totalExpense),
+      particulars: summary.netProfit >= 0 ? 'Net Profit' : 'Net Loss',
+      amount: summary.netProfit,
       isTotal: true,
     },
   ];
 
+  if (round2(summary.totalIncome) === 0 && round2(summary.totalExpense) === 0) {
+    const capitalizedPurchases = await PurchaseBill.aggregate([
+      {
+        $match: {
+          status: 'posted',
+          billDate: { $gte: start, $lte: end },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          total: { $sum: '$totalAmount' },
+        },
+      },
+    ]);
+    const purchaseSummary = capitalizedPurchases[0];
+    if (purchaseSummary?.count) {
+      diagnosticNotes.push(
+        `${purchaseSummary.count} purchase bill${purchaseSummary.count > 1 ? 's were' : ' was'} posted in this period for `
+        + `${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(round2(Number(purchaseSummary.total || 0)))}. `
+        + 'Those entries were capitalized to inventory, so Profit & Loss stays at zero until the stock is sold, consumed, or adjusted.'
+      );
+    } else {
+      diagnosticNotes.push('No income or expense postings were found in this period, so Profit & Loss correctly remains at zero.');
+    }
+  }
+
+  if (round2(summary.totalIncome) === 0) {
+    diagnosticNotes.push('No sales, service revenue, or other income postings were found in the selected period.');
+  }
+
   return {
     period: { startDate: start, endDate: end },
     income: {
-      salesIncome: grossSalesIncome,
-      salesReturnContra,
-      nonSalesIncome,
-      totalIncome: report.totalIncome,
+      salesIncome: summary.salesIncome,
+      salesReturnContra: summary.salesReturnContra,
+      nonSalesIncome: summary.nonSalesIncome,
+      totalIncome: summary.totalIncome,
       byCategory: report.incomeByCategory,
     },
     expenses: {
-      cogsExpense,
-      stockLossExpense,
-      salaryExpense,
-      payrollTaxExpense,
-      benefitsExpense,
-      contractExpense,
-      depreciationExpense,
-      manualExpense: otherExpense,
-      otherExpense,
+      cogsExpense: summary.cogsExpense,
+      stockLossExpense: summary.stockLossExpense,
+      salaryExpense: summary.salaryExpense,
+      payrollTaxExpense: summary.payrollTaxExpense,
+      benefitsExpense: summary.benefitsExpense,
+      contractExpense: summary.contractExpense,
+      depreciationExpense: summary.depreciationExpense,
+      manualExpense: summary.otherExpense,
+      otherExpense: summary.otherExpense,
       salesReturnExpense: 0,
-      totalExpense: report.totalExpense,
+      totalExpense: summary.totalExpense,
       byCategory: report.expenseByCategory,
     },
-    netProfit: round2(report.totalIncome - report.totalExpense),
+    netProfit: summary.netProfit,
     rows: statementRows,
     detailRows: { income: incomeRows, expenses: expenseRows },
     sourceSummary: report.sourceSummary,
     legacySummary: report.legacySummary,
+    diagnosticNotes,
     formula: {
       income: 'Income ledger credits minus debits, plus legacy POS/manual income fallbacks, less sales-return contra income. GST collected is excluded from legacy POS revenue.',
       expense: 'Expense ledger debits minus credits, plus legacy manual/payroll/contract fallbacks only when no ledger posting exists.',
@@ -566,14 +817,28 @@ const getReportAccounts = async (end?: Date) => {
   return ChartAccount.find(filter).sort({ accountType: 1, accountCode: 1 });
 };
 
-export const buildTrialBalanceReport = async (start: Date, end: Date) => {
+export const buildTrialBalanceReport = async (
+  start: Date,
+  end: Date,
+  options: { includeDiagnostics?: boolean } = {}
+) => {
   const beforeStart = new Date(start.getTime() - 1);
-  const [accounts, openingLedgerIds, beforeSums, periodSums] = await Promise.all([
+  const [accounts, groups, openingLedgerIds, beforeSums, periodSums] = await Promise.all([
     getReportAccounts(end),
+    AccountGroup.find({ isActive: true }).select('groupName parentGroupName').lean(),
     accountIdsWithOpeningLedger(),
     ledgerSumsByAccount({ entryDate: { $lte: beforeStart } }),
     ledgerSumsByAccount({ entryDate: { $gte: start, $lte: end } }),
   ]);
+  const groupLookup = new Map(
+    groups.map((group: any) => [
+      normalizeLookupKey(group?.groupName),
+      {
+        groupName: String(group?.groupName || '').trim(),
+        parentGroupName: String(group?.parentGroupName || '').trim(),
+      },
+    ])
+  );
 
   const rows: AccountSummaryRow[] = accounts.map((account) => {
     const id = String(account._id);
@@ -584,13 +849,28 @@ export const buildTrialBalanceReport = async (start: Date, end: Date) => {
     const debit = round2(period.debit);
     const credit = round2(period.credit);
     const closing = round2(opening + debit - credit);
+    const head = deriveTrialBalanceHead(account, groupLookup);
+    const abnormalBalance = closing !== 0
+      && (
+        (head.normalBalanceSide === 'debit' && closing < 0)
+        || (head.normalBalanceSide === 'credit' && closing > 0)
+      );
     return {
       accountId: id,
       accountCode: account.accountCode,
       accountName: account.accountName,
       accountType: account.accountType,
+      subType: account.subType,
       systemKey: account.systemKey,
-      groupName: account.groupName,
+      section: head.section,
+      groupName: head.groupName,
+      parentGroupName: head.parentGroupName,
+      reportHead: head.reportHead,
+      reportGroup: head.reportGroup,
+      ledgerLabel: head.ledgerLabel,
+      normalBalanceSide: head.normalBalanceSide,
+      abnormalBalance,
+      isSubLedger: head.isSubLedger,
       openingBalance: opening,
       debit,
       credit,
@@ -605,35 +885,29 @@ export const buildTrialBalanceReport = async (start: Date, end: Date) => {
   if (legacy.rowCount > 0) {
     if (legacy.incomeCredit > 0 || legacy.incomeDebit > 0) {
       const closing = round2(legacy.incomeDebit - legacy.incomeCredit);
-      rows.push({
+      rows.push(buildTrialBalanceDiagnosticRow({
         accountId: 'synthetic-legacy-income',
         accountCode: 'LEGACY-INCOME',
         accountName: 'Legacy Income Not Yet Posted To Ledger',
         accountType: 'income',
-        groupName: 'Report Diagnostics',
         openingBalance: 0,
         debit: legacy.incomeDebit,
         credit: legacy.incomeCredit,
         closingBalance: closing,
-        debitBalance: closing > 0 ? closing : 0,
-        creditBalance: closing < 0 ? Math.abs(closing) : 0,
-      });
+      }, 'Legacy Income Bridge'));
     }
     if (legacy.expenseDebit > 0 || legacy.expenseCredit > 0) {
       const closing = round2(legacy.expenseDebit - legacy.expenseCredit);
-      rows.push({
+      rows.push(buildTrialBalanceDiagnosticRow({
         accountId: 'synthetic-legacy-expense',
         accountCode: 'LEGACY-EXP',
         accountName: 'Legacy Expense Not Yet Posted To Ledger',
         accountType: 'expense',
-        groupName: 'Report Diagnostics',
         openingBalance: 0,
         debit: legacy.expenseDebit,
         credit: legacy.expenseCredit,
         closingBalance: closing,
-        debitBalance: closing > 0 ? closing : 0,
-        creditBalance: closing < 0 ? Math.abs(closing) : 0,
-      });
+      }, 'Legacy Expense Bridge'));
     }
 
     const clearingDiff = round2(legacy.expenseDebit + legacy.incomeDebit - legacy.incomeCredit - legacy.expenseCredit);
@@ -641,19 +915,16 @@ export const buildTrialBalanceReport = async (start: Date, end: Date) => {
       const debit = clearingDiff < 0 ? Math.abs(clearingDiff) : 0;
       const credit = clearingDiff > 0 ? clearingDiff : 0;
       const closing = round2(debit - credit);
-      rows.push({
+      rows.push(buildTrialBalanceDiagnosticRow({
         accountId: 'synthetic-legacy-clearing',
         accountCode: 'LEGACY-CLR',
         accountName: 'Legacy Transaction Clearing (Migration Required)',
         accountType: 'liability',
-        groupName: 'Report Diagnostics',
         openingBalance: 0,
         debit,
         credit,
         closingBalance: closing,
-        debitBalance: closing > 0 ? closing : 0,
-        creditBalance: closing < 0 ? Math.abs(closing) : 0,
-      });
+      }, 'Legacy Clearing'));
     }
   }
 
@@ -665,42 +936,43 @@ export const buildTrialBalanceReport = async (start: Date, end: Date) => {
     const debit = syntheticPeriodDiff > 0 ? syntheticPeriodDiff : 0;
     const credit = syntheticPeriodDiff < 0 ? Math.abs(syntheticPeriodDiff) : 0;
     const closing = round2(syntheticOpening + debit - credit);
-    rows.push({
+    rows.push(buildTrialBalanceDiagnosticRow({
       accountId: 'synthetic-opening-equity',
       accountCode: 'OPEN-EQ',
       accountName: 'Opening Balance Equity / Suspense Difference',
       accountType: 'liability',
-      groupName: 'Report Diagnostics',
       openingBalance: syntheticOpening,
       debit,
       credit,
       closingBalance: closing,
-      debitBalance: closing > 0 ? closing : 0,
-      creditBalance: closing < 0 ? Math.abs(closing) : 0,
-    });
+    }, 'Opening Difference'));
   }
+
+  const diagnosticRows = rows.filter((row) => row.section === 'Diagnostics' || String(row.accountId || '').startsWith('synthetic-'));
+  const visibleRows = rows.filter((row) =>
+    !isZeroTrialBalanceRow(row)
+    && (options.includeDiagnostics || (row.section !== 'Diagnostics' && !String(row.accountId || '').startsWith('synthetic-')))
+  );
+  const duplicateAccountNames = collectDuplicateTrialBalanceNames(rows);
+  const diagnostics = {
+    legacyFallbackRows: legacy.rowCount,
+    legacyNetProfit: legacy.netProfit,
+    syntheticRowsAdded: diagnosticRows.length,
+    diagnosticRows,
+    diagnosticsHidden: !options.includeDiagnostics && diagnosticRows.length > 0,
+    hiddenZeroBalanceRows: rows.length - visibleRows.length,
+    duplicateAccountNames,
+  };
+  const totals = buildTrialBalanceTotals(visibleRows);
+  const integrity = buildTrialBalanceIntegrity(visibleRows, diagnostics);
 
   return {
     period: { startDate: start, endDate: end },
-    rows,
-    totals: {
-      debit: round2(rows.reduce((sum, row) => sum + Number(row.debit || 0), 0)),
-      credit: round2(rows.reduce((sum, row) => sum + Number(row.credit || 0), 0)),
-      debitBalance: round2(rows.reduce((sum, row) => sum + Number(row.debitBalance || 0), 0)),
-      creditBalance: round2(rows.reduce((sum, row) => sum + Number(row.creditBalance || 0), 0)),
-      debitCreditDifference: round2(
-        rows.reduce((sum, row) => sum + Number(row.debit || 0) - Number(row.credit || 0), 0)
-      ),
-      balanceDifference: round2(
-        rows.reduce((sum, row) => sum + Number(row.debitBalance || 0) - Number(row.creditBalance || 0), 0)
-      ),
-    },
-    diagnostics: {
-      legacyFallbackRows: legacy.rowCount,
-      legacyNetProfit: legacy.netProfit,
-      syntheticRowsAdded: rows.filter((row) => String(row.accountId || '').startsWith('synthetic-')).length,
-    },
-    formula: 'Opening balance plus period debits minus period credits. Diagnostic rows expose one-sided openings and legacy records not yet migrated into ledger entries.',
+    rows: visibleRows,
+    totals,
+    diagnostics,
+    integrity,
+    formula: 'Opening balance plus period debits minus period credits. Only rows with non-zero opening, movement, or ending balance are shown. Diagnostic rows expose one-sided openings and legacy records not yet migrated into ledger entries.',
   };
 };
 
@@ -709,7 +981,10 @@ export const buildRetainedEarningsUntil = async (end: Date) => {
   return round2(report.netProfit);
 };
 
-export const buildBalanceSheetReport = async (asOnDate: Date) => {
+export const buildBalanceSheetReport = async (
+  asOnDate: Date,
+  options: { includeDiagnostics?: boolean } = {}
+) => {
   const [accounts, openingLedgerIds, ledgerSums, profitLoss, openingLedgerDifference] = await Promise.all([
     getReportAccounts(asOnDate),
     accountIdsWithOpeningLedger(),
@@ -721,12 +996,47 @@ export const buildBalanceSheetReport = async (asOnDate: Date) => {
 
   const assets: Array<Record<string, any>> = [];
   const liabilities: Array<Record<string, any>> = [];
+  const receivableDetails: Array<Record<string, any>> = [];
+  const payableDetails: Array<Record<string, any>> = [];
+  const customerAdvanceDetails: Array<Record<string, any>> = [];
+  const vendorAdvanceDetails: Array<Record<string, any>> = [];
+  let accountsReceivable = 0;
+  let accountsPayable = 0;
+  let customerAdvances = 0;
+  let vendorAdvances = 0;
+  const receivableControl = accounts.find((account) => account.systemKey === 'accounts_receivable');
+  const payableControl = accounts.find((account) => account.systemKey === 'accounts_payable');
 
   for (const account of accounts) {
     const id = String(account._id);
     const totals = ledgerSums.get(id) || { debit: 0, credit: 0 };
     const chartOpening = openingLedgerIds.has(id) ? 0 : signedChartOpening(account);
     const closing = round2(chartOpening + totals.debit - totals.credit);
+
+    if (account.accountType === 'asset' && (account.subType === 'customer' || account.systemKey === 'accounts_receivable')) {
+      if (closing > 0) {
+        accountsReceivable = round2(accountsReceivable + closing);
+        receivableDetails.push({ accountCode: account.accountCode, accountName: account.accountName, amount: closing });
+      } else if (closing < 0) {
+        const amount = Math.abs(closing);
+        customerAdvances = round2(customerAdvances + amount);
+        customerAdvanceDetails.push({ accountCode: account.accountCode, accountName: account.accountName, amount });
+      }
+      continue;
+    }
+
+    if (account.accountType === 'liability' && (account.subType === 'supplier' || account.systemKey === 'accounts_payable')) {
+      if (closing < 0) {
+        const amount = Math.abs(closing);
+        accountsPayable = round2(accountsPayable + amount);
+        payableDetails.push({ accountCode: account.accountCode, accountName: account.accountName, amount });
+      } else if (closing > 0) {
+        vendorAdvances = round2(vendorAdvances + closing);
+        vendorAdvanceDetails.push({ accountCode: account.accountCode, accountName: account.accountName, amount: closing });
+      }
+      continue;
+    }
+
     if (account.accountType === 'asset' && closing !== 0) {
       assets.push({ accountCode: account.accountCode, accountName: account.accountName, amount: closing });
     }
@@ -736,9 +1046,42 @@ export const buildBalanceSheetReport = async (asOnDate: Date) => {
     }
   }
 
+  if (accountsReceivable !== 0) {
+    assets.push({
+      accountCode: receivableControl?.accountCode || 'AR',
+      accountName: 'Accounts Receivable',
+      amount: accountsReceivable,
+      details: receivableDetails,
+    });
+  }
+  if (vendorAdvances !== 0) {
+    assets.push({
+      accountCode: 'VEND-ADV',
+      accountName: 'Vendor Advances',
+      amount: vendorAdvances,
+      details: vendorAdvanceDetails,
+    });
+  }
+  if (accountsPayable !== 0) {
+    liabilities.push({
+      accountCode: payableControl?.accountCode || 'AP',
+      accountName: 'Accounts Payable',
+      amount: accountsPayable,
+      details: payableDetails,
+    });
+  }
+  if (customerAdvances !== 0) {
+    liabilities.push({
+      accountCode: 'CUST-ADV',
+      accountName: 'Customer Advances',
+      amount: customerAdvances,
+      details: customerAdvanceDetails,
+    });
+  }
+
   const openingBalanceEquity = round2(openingLedgerDifference.difference);
   const legacyClearing = round2(-Number(profitLoss.legacySummary?.netProfit || 0));
-  const equityRows = [
+  const allEquityRows = [
     {
       accountCode: 'P&L',
       accountName: 'Retained Earnings / Current Profit',
@@ -761,36 +1104,40 @@ export const buildBalanceSheetReport = async (asOnDate: Date) => {
         }]
       : []),
   ];
-  const totalEquity = round2(equityRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-  const totalAssets = round2(assets.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-  const totalLiabilities = round2(liabilities.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-  const liabilitiesAndEquity = round2(totalLiabilities + totalEquity);
+  const diagnosticEquityRows = allEquityRows.filter((row) => Boolean((row as any).diagnostic));
+  const equityRows = options.includeDiagnostics
+    ? allEquityRows
+    : allEquityRows.filter((row) => !Boolean((row as any).diagnostic));
+  const totals = buildBalanceSheetTotals(assets, liabilities, equityRows);
+  const diagnostics = {
+    openingBalanceDifference: openingBalanceEquity,
+    openingBalanceLedgerRows: openingLedgerDifference.count,
+    legacyNetProfit: profitLoss.legacySummary?.netProfit || 0,
+    legacyClearing,
+    sourceSummary: profitLoss.sourceSummary,
+    diagnosticRows: diagnosticEquityRows,
+    diagnosticsHidden: !options.includeDiagnostics && diagnosticEquityRows.length > 0,
+    note:
+      openingBalanceEquity !== 0 || legacyClearing !== 0
+        ? 'Diagnostic equity rows are added so the Balance Sheet stays explainable while legacy/opening data is corrected or migrated.'
+        : 'Balance Sheet is fully derived from posted ledger balances and retained earnings.',
+  };
+  const integrity = buildBalanceSheetIntegrity(totals, {
+    openingBalanceDifference: diagnostics.openingBalanceDifference,
+    legacyClearing: diagnostics.legacyClearing,
+    diagnosticRowCount: equityRows.filter((row) => Boolean(row.diagnostic)).length,
+  });
 
   return {
     asOnDate,
     assets,
     liabilities,
-    equity: totalEquity,
+    equity: totals.totalEquity,
     retainedEarnings,
     equityRows,
-    totals: {
-      totalAssets,
-      totalLiabilities,
-      totalEquity,
-      liabilitiesAndEquity,
-      difference: round2(totalAssets - liabilitiesAndEquity),
-    },
-    diagnostics: {
-      openingBalanceDifference: openingBalanceEquity,
-      openingBalanceLedgerRows: openingLedgerDifference.count,
-      legacyNetProfit: profitLoss.legacySummary?.netProfit || 0,
-      legacyClearing,
-      sourceSummary: profitLoss.sourceSummary,
-      note:
-        openingBalanceEquity !== 0 || legacyClearing !== 0
-          ? 'Diagnostic equity rows are added so the Balance Sheet stays explainable while legacy/opening data is corrected or migrated.'
-          : 'Balance Sheet is fully derived from posted ledger balances and retained earnings.',
-    },
+    totals,
+    diagnostics,
+    integrity,
     formula: 'Assets use debit-positive ledger balances; liabilities use credit-positive balances; equity includes retained earnings plus transparent diagnostic clearing rows for one-sided openings or legacy records.',
   };
 };

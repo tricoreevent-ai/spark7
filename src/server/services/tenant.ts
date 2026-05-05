@@ -156,52 +156,54 @@ export const backfillLegacyTenantIds = async (): Promise<string> => {
   const isDuplicateKeyError = (error: any): boolean =>
     Number(error?.code) === 11000 || String(error?.message || '').includes('E11000');
 
+  const updateManySafely = async (
+    collection: mongoose.mongo.Collection,
+    filter: Record<string, any>,
+    update: any
+  ): Promise<{ scanned: number; migrated: number; skipped: number }> => {
+    try {
+      const result = await collection.updateMany(filter, update);
+      return {
+        scanned: Number(result.matchedCount || 0),
+        migrated: Number(result.modifiedCount || 0),
+        skipped: 0,
+      };
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+
+      const cursor = collection.find(filter, { projection: { _id: 1 } });
+      const maxDocs = 50_000;
+      let scanned = 0;
+      let migrated = 0;
+      let skipped = 0;
+
+      // Cursor is async iterable in the Mongo driver.
+      for await (const doc of cursor as any) {
+        if (scanned >= maxDocs) break;
+        scanned += 1;
+
+        try {
+          const res = await collection.updateOne(
+            { $and: [{ _id: doc._id }, filter] } as any,
+            update
+          );
+          migrated += Number(res.modifiedCount || 0);
+        } catch (itemError) {
+          if (!isDuplicateKeyError(itemError)) throw itemError;
+          skipped += 1;
+        }
+      }
+
+      return { scanned, migrated, skipped };
+    }
+  };
+
   const migrateTenantIdSafely = async (
     collection: mongoose.mongo.Collection,
     fromTenantId: string,
     toTenantId: string
-  ): Promise<{ scanned: number; migrated: number }> => {
-    try {
-      const result = await collection.updateMany({ tenantId: fromTenantId }, { $set: { tenantId: toTenantId } });
-      return { scanned: Number(result.matchedCount || 0), migrated: Number(result.modifiedCount || 0) };
-    } catch (error) {
-      if (!isDuplicateKeyError(error)) throw error;
-
-      // Best-effort fallback: update documents one-by-one so a few duplicates don't block the entire migration.
-      const cursor = collection.find({ tenantId: fromTenantId }, { projection: { _id: 1 } });
-      const bulkBatchSize = 250;
-      const maxDocs = 50_000;
-      let scanned = 0;
-      let migrated = 0;
-      let ops: any[] = [];
-
-      // Cursor is async iterable in the Mongo driver.
-      for await (const doc of cursor as any) {
-        scanned += 1;
-        if (scanned > maxDocs) break;
-
-        ops.push({
-          updateOne: {
-            filter: { _id: doc._id, tenantId: fromTenantId },
-            update: { $set: { tenantId: toTenantId } },
-          },
-        });
-
-        if (ops.length >= bulkBatchSize) {
-          const res = await collection.bulkWrite(ops, { ordered: false });
-          migrated += Number(res.modifiedCount || 0);
-          ops = [];
-        }
-      }
-
-      if (ops.length) {
-        const res = await collection.bulkWrite(ops, { ordered: false });
-        migrated += Number(res.modifiedCount || 0);
-      }
-
-      return { scanned, migrated };
-    }
-  };
+  ): Promise<{ scanned: number; migrated: number; skipped: number }> =>
+    updateManySafely(collection, { tenantId: fromTenantId }, { $set: { tenantId: toTenantId } });
 
   const userTenantCounts = await User.aggregate([
     { $match: { tenantId: { $type: 'string', $ne: '' } } },
@@ -253,12 +255,14 @@ export const backfillLegacyTenantIds = async (): Promise<string> => {
       }
 
       // Normalize legacy ObjectId tenant values to string IDs.
-      await collection.updateMany(
+      await updateManySafely(
+        collection,
         { tenantId: { $type: 'objectId' } } as any,
         [{ $set: { tenantId: { $toString: '$tenantId' } } }] as any
       );
 
-      await db.collection(name).updateMany(
+      await updateManySafely(
+        collection,
         {
           $or: [
             { tenantId: { $exists: false } },

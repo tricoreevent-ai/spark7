@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FloatingField } from '../components/FloatingField';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -541,9 +542,7 @@ export const Quotations: React.FC = () => {
             </div>
             <div className="flex flex-wrap gap-2">
               <ManualHelpLink anchor="transaction-quotation" />
-              <button type="button" onClick={() => void loadQuotes()} className={secondaryButtonClass}>
-                Refresh Register
-              </button>
+              <ActionIconButton kind="refresh" onClick={() => void loadQuotes()} title="Refresh Register" />
             </div>
           </div>
 

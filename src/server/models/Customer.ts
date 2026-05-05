@@ -119,7 +119,7 @@ const CustomerPreferencesSchema = new Schema<ICustomerPreferences>(
 
 const CustomerSchema = new Schema<ICustomer>(
   {
-    customerCode: { type: String, required: true, unique: true, uppercase: true, trim: true, index: true },
+    customerCode: { type: String, required: true, uppercase: true, trim: true, index: true },
     name: { type: String, required: true, trim: true, index: true },
     phone: { type: String, trim: true, index: true },
     email: { type: String, trim: true, lowercase: true, index: true },
@@ -156,5 +156,6 @@ const CustomerSchema = new Schema<ICustomer>(
 );
 
 CustomerSchema.index({ phone: 1, email: 1 });
+CustomerSchema.index({ tenantId: 1, customerCode: 1 }, { unique: true });
 
 export const Customer = mongoose.model<ICustomer>('Customer', CustomerSchema);

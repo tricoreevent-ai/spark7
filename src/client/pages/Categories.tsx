@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { useCategories } from '../hooks/useCategories';
 import { Table, Column } from '../components/Table';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -69,9 +70,9 @@ export const Categories: React.FC = () => {
       className: 'text-right',
       sortable: false,
       render: (cat) => (
-        <button onClick={() => handleDelete(cat._id)} className="font-medium text-red-400 hover:text-red-300">
-          Delete
-        </button>
+        <div className="flex justify-end">
+          <ActionIconButton kind="delete" onClick={() => void handleDelete(cat._id)} title={`Delete ${cat.name}`} />
+        </div>
       )
     }
   ];

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { formatCurrency } from '../config';
 import { useProducts } from '../hooks/useProducts';
 import { apiUrl, fetchApiJson } from '../utils/api';
@@ -475,9 +476,7 @@ export const Procurement: React.FC = () => {
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Procurement</h1>
           <p className="text-sm text-gray-300">Suppliers, purchase orders, stock receiving, and purchase returns.</p>
         </div>
-        <button type="button" onClick={() => void refreshAll('Procurement data refreshed.')} className={buttonClass} disabled={loading}>
-          Refresh
-        </button>
+        <ActionIconButton kind="refresh" onClick={() => void refreshAll('Procurement data refreshed.')} disabled={loading} title="Refresh" />
       </div>
 
       {message && <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{message}</div>}

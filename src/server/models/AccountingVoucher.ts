@@ -30,6 +30,7 @@ export interface IAccountingVoucher extends Document {
   counterpartyName?: string;
   notes?: string;
   documentFields?: IAccountingVoucherDocumentFields;
+  metadata?: Record<string, any>;
   totalAmount: number;
   lines: IAccountingVoucherLine[];
   isPrinted: boolean;
@@ -75,6 +76,7 @@ const AccountingVoucherSchema = new Schema<IAccountingVoucher>(
       receivedSign: { type: String, trim: true },
       authorizedSign: { type: String, trim: true },
     },
+    metadata: { type: Schema.Types.Mixed },
     totalAmount: { type: Number, required: true, min: 0 },
     lines: { type: [AccountingVoucherLineSchema], default: [] },
     isPrinted: { type: Boolean, default: false, index: true },

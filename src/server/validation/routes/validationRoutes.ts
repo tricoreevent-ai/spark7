@@ -7,6 +7,7 @@ import { repairValidationReportFindings } from '../services/validationRepair.js'
 import { slugify } from '../validators/helpers.js';
 import { getValidationDbConnection } from '../services/validationDb.js';
 import { getValidationConfig } from '../config/validationConfig.js';
+import { validateAccountingIntegrity } from '../../services/accountingIntegrityValidation.js';
 
 const router = Router();
 
@@ -88,6 +89,24 @@ router.get('/settings', async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error?.message || 'Unable to load validation settings.' });
+  }
+});
+
+router.get('/integrity', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const periodStart = parseDate(req.query?.startDate || req.query?.periodStart, monthStart());
+    const periodEnd = endOfDay(parseDate(req.query?.endDate || req.query?.periodEnd, new Date()));
+    if (periodStart > periodEnd) {
+      return res.status(400).json({ success: false, error: 'startDate must be before endDate.' });
+    }
+    const report = await validateAccountingIntegrity({
+      startDate: periodStart,
+      endDate: periodEnd,
+      includeDiagnostics: String(req.query?.includeDiagnostics || '').toLowerCase() === 'true',
+    });
+    res.json({ success: true, data: report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || 'Unable to run accounting integrity validation.' });
   }
 });
 

@@ -12,6 +12,7 @@ import { Accounting } from './pages/Accounting';
 import { AdminReports } from './pages/AdminReports';
 import { Attendance } from './pages/Attendance';
 import { AttendanceReports } from './pages/AttendanceReports';
+import { BulkProductEntry } from './pages/BulkProductEntry';
 import { EmployeeAttendance } from './pages/EmployeeAttendance';
 import { Categories } from './pages/Categories';
 import { Customers } from './pages/Customers';
@@ -334,6 +335,15 @@ const DashboardHome: React.FC<{
       accent: 'from-sky-500/25 to-sky-400/10',
     },
     {
+      key: 'products',
+      title: 'Bulk Product Entry',
+      desc: 'Download the Excel template and import or update products in batches.',
+      path: '/products/bulk-entry',
+      icon: '📥',
+      category: 'Catalog',
+      accent: 'from-sky-500/25 to-sky-400/10',
+    },
+    {
       key: 'categories',
       title: 'Categories',
       desc: 'Organize catalog with category structure.',
@@ -612,7 +622,7 @@ const DashboardHome: React.FC<{
             <p className="text-sm text-gray-300">{timeLabel}</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-white/10 bg-white/5 p-2">
-                <p className="text-[11px] text-gray-400">Today's Sales</p>
+                <p className="text-[11px] text-gray-400">Today's Net Sales</p>
                 <p className="text-sm font-semibold text-emerald-300">
                   {todaySales !== null ? formatCurrency(todaySales) : 'Loading...'}
                 </p>
@@ -916,6 +926,7 @@ const PRIVATE_TITLE_MATCHERS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/orders$/, title: 'Orders' },
   { match: /^\/products\/catalog$/, title: 'Product Catalog' },
   { match: /^\/products\/alerts$/, title: 'Product Alerts' },
+  { match: /^\/products\/bulk-entry$/, title: 'Bulk Product Entry' },
   { match: /^\/products\/entry$/, title: 'Product Entry' },
   { match: /^\/products\/edit\/.+$/, title: 'Edit Product' },
   { match: /^\/products$/, title: 'Product Center' },
@@ -1365,7 +1376,7 @@ function App() {
               headers: { Authorization: `Bearer ${token}` },
             }
           );
-          setTodaySales(data.data.summary.totalSales);
+          setTodaySales(data.data.summary.netSales);
         } catch (fetchError) {
           console.error(fetchError);
         }
@@ -1741,6 +1752,7 @@ function App() {
               <Route path="/products" element={hasProductWorkspaceAccess ? <ProductCenter /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products/catalog" element={hasProductWorkspaceAccess ? <ProductList /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products/alerts" element={hasProductWorkspaceAccess ? <ProductAlerts /> : <Navigate to={fallbackPath} replace />} />
+              <Route path="/products/bulk-entry" element={hasProductWorkspaceAccess ? <BulkProductEntry /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products/add" element={<Navigate to="/products/entry" replace />} />
               <Route path="/products/entry" element={hasProductWorkspaceAccess ? <AddProduct /> : <Navigate to={fallbackPath} replace />} />
               <Route path="/products/edit/:id" element={hasProductWorkspaceAccess ? <EditProduct /> : <Navigate to={fallbackPath} replace />} />

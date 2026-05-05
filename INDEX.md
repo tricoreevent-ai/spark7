@@ -49,6 +49,19 @@ Start here to understand the project:
    - Quality assurance details
    - Production readiness
 
+### 7. **[USER_MANUAL.md](USER_MANUAL.md)** - Application User Manual
+   - Screen-by-screen functional guide
+   - Sales, catalog, people, operations, accounts, and admin navigation
+   - Field explanations for major forms
+   - Report logic, formulas, and source-data mapping
+   - Direct route links for in-app help and onboarding
+
+### 8. **[docs/ACCOUNTING_TEST_CASES.md](docs/ACCOUNTING_TEST_CASES.md)** - Accounting Validation Scenarios
+   - End-to-end accounting test flows
+   - April 2026 scenario coverage for invoices, vouchers, payroll, GST, TDS, and reconciliation
+   - Expected report impact for Trial Balance, P&L, Balance Sheet, and supporting reports
+   - Useful for regression testing after accounting/reporting changes
+
 ---
 
 ## 🚀 Quick Commands

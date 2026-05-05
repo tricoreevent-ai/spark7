@@ -89,6 +89,6 @@ export const saveTenantGeneralSettingsRow = async (args: {
         updatedBy: args.updatedBy,
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 };

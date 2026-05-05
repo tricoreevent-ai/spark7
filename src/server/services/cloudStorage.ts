@@ -147,7 +147,7 @@ export const saveCloudStorageConfig = async (config: CloudStorageConfig, updated
         updatedBy: trim(updatedBy),
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 };
 

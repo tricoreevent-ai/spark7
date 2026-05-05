@@ -19,7 +19,7 @@ const runSequenceIncrement = async (
   const query = NumberSequence.findOneAndUpdate(
     filter,
     { $inc: { value: 1 } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
   const doc = session ? await query.session(session) : await query;
   return Number(doc.value || 0);
@@ -49,7 +49,7 @@ export const nextSequence = async (key: string, session?: mongoose.ClientSession
         ],
       },
       { $set: { tenantId: currentTenantId } },
-      { sort: { updatedAt: -1 }, new: true }
+      { sort: { updatedAt: -1 }, returnDocument: 'after' }
     );
     if (session) {
       await repairQuery.session(session);

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { ValidationDrilldownResponse } from '../types';
 
 export const DrillDownModal: React.FC<{
@@ -12,6 +13,8 @@ export const DrillDownModal: React.FC<{
   const [reason, setReason] = useState('');
   const [copyLabel, setCopyLabel] = useState('Copy JSON');
   const [saving, setSaving] = useState(false);
+
+  useEscapeKey(onClose, { enabled: open });
 
   if (!open) return null;
 

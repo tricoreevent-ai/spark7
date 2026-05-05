@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
 import { PaginationControls } from '../components/PaginationControls';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import {
   DEFAULT_GENERAL_SETTINGS,
@@ -1691,14 +1692,13 @@ export const Settings: React.FC = () => {
         <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-white">Backup & Restore History</h3>
-            <button
-              type="button"
+            <ActionIconButton
+              kind="refresh"
               onClick={loadBackupRestoreHistory}
               disabled={!isSuperAdmin || backupRestoreHistoryLoading}
-              className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {backupRestoreHistoryLoading ? 'Refreshing...' : 'Refresh'}
-            </button>
+              title={backupRestoreHistoryLoading ? 'Refreshing...' : 'Refresh'}
+              className="h-8 w-8"
+            />
           </div>
           {backupRestoreHistoryError && (
             <div className="mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs text-rose-100">
@@ -1763,14 +1763,12 @@ export const Settings: React.FC = () => {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
+              <ActionIconButton
+                kind="refresh"
                 onClick={loadCloudStorageSettings}
                 disabled={cloudStorageLoading || cloudStorageSaving || cloudStorageTesting || cloudStorageMigrating}
-                className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold text-gray-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {cloudStorageLoading ? 'Refreshing...' : 'Refresh'}
-              </button>
+                title={cloudStorageLoading ? 'Refreshing...' : 'Refresh'}
+              />
               <button
                 type="button"
                 onClick={testCloudStorageSettings}

@@ -8,6 +8,7 @@ import { missingSequenceValidator } from './missingSequenceValidator.js';
 import { orphanRecordsValidator } from './orphanRecordsValidator.js';
 import { periodLockValidator } from './periodLockValidator.js';
 import { roundOffValidator } from './roundOffValidator.js';
+import { salesCogsValidator } from './salesCogsValidator.js';
 import { suspenseAccountValidator } from './suspenseAccountValidator.js';
 import { tdsReconciliationValidator } from './tdsReconciliationValidator.js';
 import { trialBalanceValidator } from './trialBalanceValidator.js';
@@ -17,6 +18,7 @@ export const validationRules: ValidationRule[] = [
   doubleEntryValidator,
   trialBalanceValidator,
   balanceSheetValidator,
+  salesCogsValidator,
   tdsReconciliationValidator,
   gstReconciliationValidator,
   vendorCustomerReconciliationValidator,

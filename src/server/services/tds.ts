@@ -276,7 +276,7 @@ export const saveTdsCompanySettings = async (settings: TdsCompanySettings, updat
   const row = await AppSetting.findOneAndUpdate(
     { key: COMPANY_SETTING_KEY },
     { $set: { value: normalized, updatedBy } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 
   await writeAuditLog({
@@ -317,7 +317,7 @@ export const seedDefaultTdsSections = async (createdBy?: string) => {
     const row = await TdsSection.findOneAndUpdate(
       { sectionCode: payload.sectionCode },
       { $setOnInsert: payload },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
     rows.push(row);
   }
@@ -356,7 +356,7 @@ export const upsertTdsSection = async (input: TdsSectionInput, createdBy?: strin
   const row = await TdsSection.findOneAndUpdate(
     { sectionCode },
     { $set: payload, $setOnInsert: { isSystemDefault: false } },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 
   await writeAuditLog({
@@ -417,7 +417,7 @@ export const upsertDeducteeProfile = async (input: DeducteeProfileInput): Promis
   const row = await TdsDeducteeProfile.findOneAndUpdate(
     query,
     { $set: payload },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 
   await writeAuditLog({
@@ -920,7 +920,7 @@ export const generateTdsReturn = async (input: {
         createdBy: input.createdBy,
       },
     },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 
   await writeAuditLog({

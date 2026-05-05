@@ -265,7 +265,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
     const user = await User.findOneAndUpdate(
       { _id: req.params.id, ...nonDeletedFilter },
       updates,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });

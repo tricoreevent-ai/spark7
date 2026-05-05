@@ -729,7 +729,7 @@ router.post('/challans/generate', authMiddleware, async (req: AuthenticatedReque
         notes: String(req.body?.notes || '').trim(),
         createdBy: req.userId,
       },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     await writeAuditLog({
@@ -1061,7 +1061,7 @@ router.post('/form16/generate', authMiddleware, async (req: AuthenticatedRequest
           notes: String(req.body?.notes || '').trim(),
           createdBy: req.userId,
         },
-        { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+        { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
       );
       generated.push(row);
     }

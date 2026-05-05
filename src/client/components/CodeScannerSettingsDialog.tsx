@@ -4,6 +4,7 @@ import {
   DEFAULT_CODE_SCANNER_SETTINGS,
   mergeCodeScannerSettings,
 } from '../utils/codeScanner';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface CodeScannerSettingsDialogProps {
   open: boolean;
@@ -22,6 +23,8 @@ export const CodeScannerSettingsDialog: React.FC<CodeScannerSettingsDialogProps>
   onSave,
 }) => {
   const [draft, setDraft] = useState<CodeScannerSettings>(settings);
+
+  useEscapeKey(onClose, { enabled: open });
 
   useEffect(() => {
     if (open) {

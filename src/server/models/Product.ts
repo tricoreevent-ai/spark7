@@ -33,7 +33,6 @@ const productSchema = new Schema<IProductDocument>(
     sku: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
     },
     barcode: {
@@ -41,7 +40,6 @@ const productSchema = new Schema<IProductDocument>(
       trim: true,
       uppercase: true,
       sparse: true,
-      unique: true,
       index: true,
     },
     description: String,
@@ -217,6 +215,16 @@ const productSchema = new Schema<IProductDocument>(
     },
   },
   { timestamps: true }
+);
+
+productSchema.index({ tenantId: 1, sku: 1 }, { unique: true, name: 'tenantId_1_sku_1' });
+productSchema.index(
+  { tenantId: 1, barcode: 1 },
+  {
+    unique: true,
+    name: 'tenantId_1_barcode_1',
+    partialFilterExpression: { barcode: { $type: 'string', $gt: '' } },
+  }
 );
 
 export const Product = mongoose.model<IProductDocument>('Product', productSchema);

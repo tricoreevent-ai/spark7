@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { apiUrl, fetchApiJson } from './utils/api';
 import { showAlertDialog } from './utils/appDialogs';
+import { useEscapeKey } from './hooks/useEscapeKey';
+import { ActionIconButton } from './components/ActionIconButton';
 
 interface InventoryItem {
   _id: string;
@@ -38,6 +40,8 @@ export const Inventory = () => {
   const [batchNumber, setBatchNumber] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [error, setError] = useState('');
+
+  useEscapeKey(() => setIsModalOpen(false), { enabled: isModalOpen });
 
   const fetchInventory = async () => {
     try {
@@ -118,7 +122,7 @@ export const Inventory = () => {
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-white sm:text-3xl">Inventory Management</h1>
-        <button className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400" onClick={fetchInventory}>Refresh Data</button>
+        <ActionIconButton kind="refresh" onClick={fetchInventory} title="Refresh Data" />
       </div>
 
       {error && (

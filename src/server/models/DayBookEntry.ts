@@ -4,6 +4,14 @@ export interface IDayBookEntry extends Document {
   entryType: 'income' | 'expense';
   category: string;
   amount: number;
+  taxableAmount?: number;
+  gstRate?: number;
+  gstAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
+  totalAmount?: number;
+  gstTreatment?: 'none' | 'intrastate' | 'interstate';
   paymentMethod: 'cash' | 'card' | 'upi' | 'bank' | 'cheque' | 'online';
   treasuryAccountId?: mongoose.Types.ObjectId;
   treasuryAccountName?: string;
@@ -32,6 +40,18 @@ const DayBookEntrySchema = new Schema<IDayBookEntry>(
     },
     category: { type: String, required: true, trim: true },
     amount: { type: Number, required: true, min: 0 },
+    taxableAmount: { type: Number, min: 0, default: 0 },
+    gstRate: { type: Number, min: 0, default: 0 },
+    gstAmount: { type: Number, min: 0, default: 0 },
+    cgstAmount: { type: Number, min: 0, default: 0 },
+    sgstAmount: { type: Number, min: 0, default: 0 },
+    igstAmount: { type: Number, min: 0, default: 0 },
+    totalAmount: { type: Number, min: 0, default: 0 },
+    gstTreatment: {
+      type: String,
+      enum: ['none', 'intrastate', 'interstate'],
+      default: 'none',
+    },
     paymentMethod: {
       type: String,
       enum: ['cash', 'card', 'upi', 'bank', 'cheque', 'online'],

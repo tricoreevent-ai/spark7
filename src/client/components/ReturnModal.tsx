@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
 interface SaleItemBrief {
@@ -36,6 +37,8 @@ const ReturnModal: React.FC<ReturnModalProps> = ({ open, saleId, saleNumber, ite
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityMessage, setAvailabilityMessage] = useState('');
   const [error, setError] = useState('');
+
+  useEscapeKey(() => onClose(false), { enabled: open });
 
   useEffect(() => {
     if (!open) return;

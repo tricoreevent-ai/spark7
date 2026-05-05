@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from './ManualHelpLink';
+import { ActionIconButton } from './ActionIconButton';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings } from '../utils/generalSettings';
@@ -931,7 +932,7 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => void loadQuotes()} className={buttonClass}>Refresh</button>
+          <ActionIconButton kind="refresh" onClick={() => void loadQuotes()} title="Refresh" />
         </div>
       </div>
 
@@ -1319,15 +1320,11 @@ export const EventQuotationDesk: React.FC<EventQuotationDeskProps> = ({
                       <button type="button" onClick={() => void fetchQuoteDocument(row, 'print')} className="rounded bg-cyan-500/20 px-2 py-1 text-xs text-cyan-200">
                         Print
                       </button>
-                      <button type="button" onClick={() => void fetchQuoteDocument(row, 'download')} className="rounded bg-indigo-500/20 px-2 py-1 text-xs text-indigo-100">
-                        PDF
-                      </button>
+                      <ActionIconButton kind="downloadPdf" onClick={() => void fetchQuoteDocument(row, 'download')} title="Download PDF" className="h-8 w-8" />
                       <button type="button" onClick={() => downloadEventQuotationWord(printable, getGeneralSettings())} className="rounded bg-fuchsia-500/20 px-2 py-1 text-xs text-fuchsia-100">
                         Word
                       </button>
-                      <button type="button" onClick={() => downloadEventQuotationExcel(printable, getGeneralSettings())} className="rounded bg-violet-500/20 px-2 py-1 text-xs text-violet-100">
-                        Excel
-                      </button>
+                      <ActionIconButton kind="exportExcel" onClick={() => downloadEventQuotationExcel(printable, getGeneralSettings())} title="Export Excel" className="h-8 w-8" />
                       <button type="button" onClick={() => void deleteQuote(row)} disabled={isLocked} className="rounded bg-rose-500/20 px-2 py-1 text-xs text-rose-200 disabled:opacity-50">
                         Delete
                       </button>

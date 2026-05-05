@@ -276,7 +276,7 @@ router.post('/day-end/close', authMiddleware, async (req: AuthenticatedRequest, 
         notes,
         closedBy: req.userId,
       },
-      { new: true, upsert: true, runValidators: true }
+      { returnDocument: 'after', upsert: true, runValidators: true }
     );
 
     await writeAuditLog({

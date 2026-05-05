@@ -1018,7 +1018,7 @@ router.put('/preferences', authMiddleware, async (req: AuthenticatedRequest, res
     const user = await User.findOneAndUpdate(
       { _id: req.userId, ...nonDeletedUserFilter },
       { uiPreferences },
-      { new: true }
+      { returnDocument: 'after' }
     ).select('uiPreferences');
 
     if (!user) {
@@ -1061,7 +1061,7 @@ router.put('/profile', authMiddleware, async (req: AuthenticatedRequest, res: Re
         ...(gstin && { gstin }),
         ...(address && { address }),
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!user) {

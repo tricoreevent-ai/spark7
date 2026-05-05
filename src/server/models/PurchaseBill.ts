@@ -17,6 +17,8 @@ export interface IPurchaseBillDocument extends Document {
   purchaseNumber: string;
   supplierId: mongoose.Types.ObjectId | string;
   supplierName: string;
+  accountingVendorId?: mongoose.Types.ObjectId | string;
+  payableLedgerAccountId?: mongoose.Types.ObjectId | string;
   billDate: Date;
   status: 'draft' | 'posted' | 'revised';
   lines: IPurchaseBillLine[];
@@ -52,6 +54,8 @@ const PurchaseBillSchema = new Schema<IPurchaseBillDocument>(
     purchaseNumber: { type: String, required: true, trim: true, uppercase: true, index: true },
     supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true, index: true },
     supplierName: { type: String, required: true, trim: true },
+    accountingVendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
+    payableLedgerAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'ChartAccount', index: true },
     billDate: { type: Date, required: true, default: Date.now, index: true },
     status: { type: String, enum: ['draft', 'posted', 'revised'], default: 'posted', index: true },
     lines: { type: [PurchaseBillLineSchema], default: [] },

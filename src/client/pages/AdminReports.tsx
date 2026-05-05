@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from '../components/CardTabs';
 import { PaginationControls } from '../components/PaginationControls';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { showAlertDialog, showConfirmDialog } from '../utils/appDialogs';
 
@@ -473,18 +474,16 @@ export const AdminReports: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
+          <ActionIconButton
+            kind="refresh"
             onClick={() => {
               void loadOverview();
               if (activeTab === 'audit') void loadAuditLogs(1, auditPagination.limit, true);
               if (activeTab === 'logins') void loadLoginActivity(1, loginPagination.limit, true);
               if (activeTab === 'transactions') void loadTransactionActivity(1, transactionPagination.limit, true);
             }}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-          >
-            Refresh
-          </button>
+            title="Refresh"
+          />
           {overview?.canManageLogs ? (
             <button
               type="button"
@@ -705,13 +704,11 @@ export const AdminReports: React.FC = () => {
                   className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
                 />
               </label>
-              <button
-                type="button"
+              <ActionIconButton
+                kind="exportCsv"
                 onClick={() => void exportReport('audit-logs')}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-                Export CSV
-              </button>
+                title="Export CSV"
+              />
             </div>
           </div>
           {renderTableContainer(
@@ -796,13 +793,11 @@ export const AdminReports: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
+              <ActionIconButton
+                kind="exportCsv"
                 onClick={() => void exportReport('login-activity')}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-                Export CSV
-              </button>
+                title="Export CSV"
+              />
             </div>
           </div>
           {renderTableContainer(
@@ -894,13 +889,11 @@ export const AdminReports: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
+              <ActionIconButton
+                kind="exportCsv"
                 onClick={() => void exportReport('transaction-activity')}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-                Export CSV
-              </button>
+                title="Export CSV"
+              />
             </div>
           </div>
           {renderTableContainer(

@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { Sale } from '../models/Sale.js';
 import { Product } from '../models/Product.js';
+import { InventoryBatch } from '../models/InventoryBatch.js';
+import { StockLedgerEntry } from '../models/StockLedgerEntry.js';
 import { Customer } from '../models/Customer.js';
 import { MemberSubscription } from '../models/MemberSubscription.js';
 import { User } from '../models/User.js';
@@ -11,14 +13,20 @@ import { generateNumber } from '../services/numbering.js';
 import { recalculateCreditNoteStatus } from '../services/creditNotes.js';
 import { postCustomerLedgerEntry } from '../services/customerLedger.js';
 import { maxDiscountForRole } from '../services/discountPolicy.js';
+import { ensureAccountingChart } from '../services/accountingEngine.js';
 import { normalizeProductItemType, productRequiresStock, resolveBaseProductPrice } from '../services/salesPricing.js';
 import { writeAuditLog } from '../services/audit.js';
 import { adjustBatchForStockChange, consumeStockFefo, postCogsJournal } from '../services/inventoryCosting.js';
+import { resolveSaleSerialNumbers } from '../services/productSerials.js';
+import { isValidEmailAddress, sendConfiguredMail } from '../services/mail.js';
+import { recordSalePaymentInAccounting, syncPostedSaleToAccounting } from '../services/salesLedger.js';
+import { buildPosSalesAnalyticsSummary } from '../services/posReporting.js';
 
 const router = Router();
 
 const allowedPaymentMethods = ['cash', 'card', 'upi', 'cheque', 'online', 'bank_transfer'] as const;
 type AllowedPaymentMethod = (typeof allowedPaymentMethods)[number];
+const PRICE_OVERRIDE_TOLERANCE = 0.01;
 
 const roundTo2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
 const normalizePhone = (value: any): string => String(value || '').replace(/\D+/g, '').slice(-10);
@@ -27,6 +35,7 @@ const normalizePhoneStrict = (value: any): string => {
   return phone.length === 10 ? phone : '';
 };
 const normalizeEmail = (value: any): string => String(value || '').trim().toLowerCase();
+const normalizePriceOverrideReason = (value: any): string => String(value || '').trim();
 const parseBoolean = (value: any, fallback = false): boolean => {
   if (value === undefined || value === null) return fallback;
   if (typeof value === 'boolean') return value;
@@ -44,6 +53,16 @@ const normalizeSerialNumbers = (value: any): string[] => {
     )
   );
 };
+const normalizeSku = (value: any): string => String(value || '').trim().toUpperCase();
+const hasMeaningfulPriceDifference = (unitPrice: number, listPrice: number): boolean =>
+  Math.abs(roundTo2(Number(unitPrice || 0) - Number(listPrice || 0))) > PRICE_OVERRIDE_TOLERANCE;
+const escapeHtml = (value: any): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 const normalizeVariantValue = (value: any): string => String(value || '').trim();
 const findVariantMatrixRow = (product: any, size: string, color: string) => {
   const rows = Array.isArray((product as any)?.variantMatrix) ? (product as any).variantMatrix : [];
@@ -58,6 +77,69 @@ const findVariantMatrixRow = (product: any, size: string, color: string) => {
 };
 const isDuplicateKeyError = (error: any): boolean =>
   Number(error?.code) === 11000 || String(error?.message || '').includes('E11000');
+
+const describeRequestedProduct = (item: any): string => {
+  const name = String(item?.productName || '').trim();
+  const sku = normalizeSku(item?.sku);
+  if (name && sku) return `${name} (SKU ${sku})`;
+  if (name) return name;
+  if (sku) return `SKU ${sku}`;
+  const productId = String(item?.productId || '').trim();
+  return productId || 'the selected product';
+};
+
+const missingProductError = (item: any): Error =>
+  new Error(
+    `Product not found in catalog for ${describeRequestedProduct(item)}. Remove the item and add it again, then retry.`
+  );
+
+const loadRequestedProducts = async (items: any[]) => {
+  const productIds = Array.from(
+    new Set(
+      items
+        .map((item) => String(item?.productId || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const productSkus = Array.from(
+    new Set(
+      items
+        .map((item) => normalizeSku(item?.sku))
+        .filter(Boolean)
+    )
+  );
+
+  const [productsByIdRows, productsBySkuRows] = await Promise.all([
+    productIds.length ? Product.find({ _id: { $in: productIds } }) : Promise.resolve([]),
+    productSkus.length ? Product.find({ sku: { $in: productSkus } }) : Promise.resolve([]),
+  ]);
+
+  return {
+    byId: new Map(productsByIdRows.map((product) => [String(product._id), product])),
+    bySku: new Map(productsBySkuRows.map((product) => [normalizeSku((product as any).sku), product])),
+  };
+};
+
+const resolveRequestedProduct = (
+  item: any,
+  lookup: {
+    byId: Map<string, any>;
+    bySku: Map<string, any>;
+  }
+) => {
+  const requestedId = String(item?.productId || '').trim();
+  if (requestedId) {
+    const productById = lookup.byId.get(requestedId);
+    if (productById) return productById;
+  }
+
+  const requestedSku = normalizeSku(item?.sku);
+  if (requestedSku) {
+    return lookup.bySku.get(requestedSku) || null;
+  }
+
+  return null;
+};
 
 const toSimpleSalesError = (error: any, fallback: string): string => {
   const message = String(error?.message || '');
@@ -77,6 +159,180 @@ const normalizePaymentMethod = (value: any): AllowedPaymentMethod => {
   const method = String(value || 'cash').toLowerCase().trim();
   if (allowedPaymentMethods.includes(method as AllowedPaymentMethod)) return method as AllowedPaymentMethod;
   return 'cash';
+};
+
+const normalizePaymentSplits = (value: any): Array<{
+  id: string;
+  method: AllowedPaymentMethod;
+  amount: number;
+  receivedAmount: number;
+  note?: string;
+}> =>
+  Array.isArray(value)
+    ? value
+      .map((row: any, index: number) => ({
+        id: String(row?.id || `split-${index + 1}`),
+        method: normalizePaymentMethod(row?.method),
+        amount: roundTo2(Math.max(0, Number(row?.amount || 0))),
+        receivedAmount: roundTo2(Math.max(0, Number(row?.receivedAmount || row?.amount || 0))),
+        note: String(row?.note || '').trim() || undefined,
+      }))
+      .filter((row) => row.amount > 0)
+    : [];
+
+const formatInr = (value: number): string =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(roundTo2(Number(value || 0)));
+
+const runAuditLogInBackground = (payload: any) => {
+  void writeAuditLog(payload).catch((error) => {
+    console.error('Sales audit log write failed:', error);
+  });
+};
+
+const syncSaleAccountingSafely = async (
+  sale: any,
+  userId?: string,
+  options: { chartPrepared?: boolean } = {}
+) => {
+  try {
+    const result = await syncPostedSaleToAccounting(sale, {
+      userId,
+      markMigrated: true,
+      chartPrepared: options.chartPrepared,
+    });
+    if (result?.diagnostics) {
+      console.info(
+        `POS accounting summary for ${sale?.invoiceNumber || sale?.saleNumber || sale?._id}:`,
+        result.diagnostics
+      );
+    }
+    return result as any;
+  } catch (error: any) {
+    console.error(`Sales accounting sync failed for ${sale?.invoiceNumber || sale?.saleNumber || sale?._id}:`, error);
+    return { synced: false, error: String(error?.message || error || 'Unknown accounting sync failure') };
+  }
+};
+
+const syncSalePaymentAccountingSafely = async (
+  sale: any,
+  input: { amount: number; mode?: AllowedPaymentMethod; userId?: string; paymentDate?: Date; notes?: string }
+) => {
+  try {
+    const result = await recordSalePaymentInAccounting(sale, input);
+    if (result?.diagnostics) {
+      console.info(
+        `POS payment accounting summary for ${sale?.invoiceNumber || sale?.saleNumber || sale?._id}:`,
+        result.diagnostics
+      );
+    }
+    return result as any;
+  } catch (error: any) {
+    console.error(`Sales payment accounting sync failed for ${sale?.invoiceNumber || sale?.saleNumber || sale?._id}:`, error);
+    return { synced: false, error: String(error?.message || error || 'Unknown accounting payment sync failure') };
+  }
+};
+
+const sendSaleInvoiceEmail = async (sale: any) => {
+  const recipient = normalizeEmail(sale?.customerEmail);
+  if (!recipient || !isValidEmailAddress(recipient)) return;
+
+  const invoiceNumber = String(sale?.invoiceNumber || sale?.saleNumber || '-').trim() || '-';
+  const invoiceDate = sale?.createdAt ? new Date(sale.createdAt) : new Date();
+  const customerName = String(sale?.customerName || 'Customer').trim() || 'Customer';
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+  const itemRows = items
+    .map((item: any) => {
+      const productName = escapeHtml(String(item?.productName || 'Item'));
+      const variant = [item?.variantSize, item?.variantColor].map((part: any) => String(part || '').trim()).filter(Boolean).join(' / ');
+      const secondary = [
+        String(item?.sku || '').trim() ? `SKU: ${escapeHtml(item.sku)}` : '',
+        variant ? `Variant: ${escapeHtml(variant)}` : '',
+      ].filter(Boolean).join(' | ');
+      return `
+        <tr>
+          <td style="padding:8px 10px;border:1px solid #d7deea;vertical-align:top">
+            <div style="font-weight:600;color:#111827">${productName}</div>
+            ${secondary ? `<div style="margin-top:3px;font-size:12px;color:#64748b">${secondary}</div>` : ''}
+          </td>
+          <td style="padding:8px 10px;border:1px solid #d7deea;text-align:right;white-space:nowrap">${Number(item?.quantity || 0)}</td>
+          <td style="padding:8px 10px;border:1px solid #d7deea;text-align:right;white-space:nowrap">${formatInr(Number(item?.unitPrice || 0))}</td>
+          <td style="padding:8px 10px;border:1px solid #d7deea;text-align:right;white-space:nowrap">${formatInr(Number(item?.lineTotal || 0))}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  await sendConfiguredMail({
+    recipients: [recipient],
+    subject: `Invoice ${invoiceNumber} from SPARK AI`,
+    text: [
+      `Hello ${customerName},`,
+      '',
+      `Your invoice ${invoiceNumber} has been generated on ${invoiceDate.toLocaleString('en-IN')}.`,
+      `Payment method: ${String(sale?.paymentMethod || 'cash').toUpperCase()}`,
+      `Subtotal: ${formatInr(Number(sale?.subtotal || 0))}`,
+      `GST: ${formatInr(Number(sale?.totalGst || 0))}`,
+      `Discount: ${formatInr(Number(sale?.discountAmount || 0))}`,
+      `Grand Total: ${formatInr(Number(sale?.totalAmount || 0))}`,
+      Number(sale?.outstandingAmount || 0) > 0 ? `Outstanding: ${formatInr(Number(sale?.outstandingAmount || 0))}` : 'Status: Paid',
+      sale?.notes ? `Notes: ${String(sale.notes)}` : '',
+      '',
+      'Thank you for your purchase.',
+    ].filter(Boolean).join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.55">
+        <h2 style="margin:0 0 10px 0;color:#0f172a">Your Invoice Is Ready</h2>
+        <p style="margin:0 0 12px 0">Hello ${escapeHtml(customerName)},</p>
+        <p style="margin:0 0 14px 0">
+          Thank you for your purchase. Invoice <strong>${escapeHtml(invoiceNumber)}</strong> was generated on
+          <strong>${escapeHtml(invoiceDate.toLocaleString('en-IN'))}</strong>.
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 16px 0">
+          <div style="border:1px solid #d7deea;border-radius:12px;padding:12px;background:#f8fafc">
+            <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px">Invoice</div>
+            <div><strong>Invoice No:</strong> ${escapeHtml(invoiceNumber)}</div>
+            <div><strong>Payment:</strong> ${escapeHtml(String(sale?.paymentMethod || 'cash').toUpperCase())}</div>
+            <div><strong>Status:</strong> ${Number(sale?.outstandingAmount || 0) > 0 ? 'Partly / Not Paid' : 'Paid'}</div>
+          </div>
+          <div style="border:1px solid #d7deea;border-radius:12px;padding:12px;background:#f8fafc">
+            <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px">Totals</div>
+            <div><strong>Subtotal:</strong> ${formatInr(Number(sale?.subtotal || 0))}</div>
+            <div><strong>GST:</strong> ${formatInr(Number(sale?.totalGst || 0))}</div>
+            <div><strong>Discount:</strong> ${formatInr(Number(sale?.discountAmount || 0))}</div>
+            <div><strong>Grand Total:</strong> ${formatInr(Number(sale?.totalAmount || 0))}</div>
+            ${Number(sale?.outstandingAmount || 0) > 0 ? `<div><strong>Outstanding:</strong> ${formatInr(Number(sale?.outstandingAmount || 0))}</div>` : ''}
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+          <thead>
+            <tr style="background:#e2e8f0;color:#0f172a">
+              <th style="padding:8px 10px;border:1px solid #d7deea;text-align:left">Item</th>
+              <th style="padding:8px 10px;border:1px solid #d7deea;text-align:right">Qty</th>
+              <th style="padding:8px 10px;border:1px solid #d7deea;text-align:right">Rate</th>
+              <th style="padding:8px 10px;border:1px solid #d7deea;text-align:right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemRows || `<tr><td colspan="4" style="padding:10px;border:1px solid #d7deea;color:#64748b">No line items available.</td></tr>`}
+          </tbody>
+        </table>
+        ${sale?.notes ? `<div style="border:1px solid #d7deea;border-radius:12px;padding:12px;background:#f8fafc"><strong>Notes:</strong> ${escapeHtml(String(sale.notes))}</div>` : ''}
+      </div>
+    `,
+  });
+};
+
+const queueSaleInvoiceEmail = (sale: any) => {
+  if (String(sale?.invoiceStatus || '').toLowerCase() !== 'posted') return;
+  if (!normalizeEmail(sale?.customerEmail)) return;
+  void sendSaleInvoiceEmail(sale).catch((error) => {
+    console.error('Sales invoice email failed:', error);
+  });
 };
 
 const applyRoundOffIfNeeded = (grossTotal: number, applyRoundOff: boolean) => {
@@ -136,7 +392,7 @@ const hasItemLevelPriceChange = (items: any[] = []): boolean =>
     const unitPrice = Number(item.unitPrice || 0);
     const discountAmount = Number(item.discountAmount || 0);
     const discountPercentage = Number(item.discountPercentage || 0);
-    return unitPrice !== listPrice || discountAmount > 0 || discountPercentage > 0;
+    return hasMeaningfulPriceDifference(unitPrice, listPrice) || discountAmount > 0 || discountPercentage > 0;
   });
 
 const processItems = async (
@@ -161,12 +417,13 @@ const processItems = async (
   let priceOverrideRequired = false;
   const itemDiscountPercentages: number[] = [];
   const processedItems: any[] = [];
+  const productLookup = await loadRequestedProducts(items);
 
-    for (const item of items) {
-      const product = await Product.findById(item.productId);
-      if (!product) {
-        throw new Error(`Product not found: ${item.productId}`);
-      }
+  for (const item of items) {
+    const product = resolveRequestedProduct(item, productLookup);
+    if (!product) {
+      throw missingProductError(item);
+    }
 
     const quantity = Number(item.quantity || 0);
     if (quantity <= 0) {
@@ -177,45 +434,52 @@ const processItems = async (
     if (expiryRequired && !item.expiryDate) {
       throw new Error(`Expiry date is required for product ${product.name}`);
     }
-      if (item.expiryDate) {
-        const exp = new Date(item.expiryDate);
-        if (exp.getTime() < Date.now()) {
-          throw new Error(`Cannot sell expired stock for product ${product.name}`);
-        }
+    if (item.expiryDate) {
+      const exp = new Date(item.expiryDate);
+      if (exp.getTime() < Date.now()) {
+        throw new Error(`Cannot sell expired stock for product ${product.name}`);
+      }
+    }
+
+    let serialNumbers = normalizeSerialNumbers(item.serialNumbers);
+    const serialTrackingEnabled = Boolean((product as any).serialNumberTracking) && parseBoolean(item?.serialTrackingEnabled, false);
+    if (serialTrackingEnabled) {
+      const serialResolution = await resolveSaleSerialNumbers({
+        productId: String(product._id),
+        productName: product.name,
+        quantity,
+        serialNumbers,
+      });
+      serialNumbers = serialResolution.serialNumbers;
+    }
+
+    const variantSize = normalizeVariantValue(item.variantSize);
+    const variantColor = normalizeVariantValue(item.variantColor);
+    const variantRow = findVariantMatrixRow(product, variantSize, variantColor);
+    if ((variantSize || variantColor) && !variantRow) {
+      throw new Error(`Selected size/color combination is not configured for product ${product.name}`);
+    }
+
+    const listPrice = (() => {
+      if (options.pricingMode === 'customer') {
+        const customerPrice = customerPriceForProduct(options.customer, String(product._id));
+        if (customerPrice !== null && customerPrice > 0) return customerPrice;
       }
 
-      const serialNumbers = normalizeSerialNumbers(item.serialNumbers);
-      if (Boolean((product as any).serialNumberTracking)) {
-        if (serialNumbers.length !== quantity) {
-          throw new Error(`Enter exactly ${quantity} serial number(s) for product ${product.name}`);
-        }
-      }
+      const basePrice = resolveBaseProductPrice({
+        product,
+        quantity,
+        pricingMode: options.pricingMode,
+        customerTier: String(options.customer?.pricingTier || '').trim(),
+      });
+      const variantPrice = Number((variantRow as any)?.price || 0);
+      return variantPrice > 0 ? variantPrice : basePrice;
+    })();
 
-      const variantSize = normalizeVariantValue(item.variantSize);
-      const variantColor = normalizeVariantValue(item.variantColor);
-      const variantRow = findVariantMatrixRow(product, variantSize, variantColor);
-      if ((variantSize || variantColor) && !variantRow) {
-        throw new Error(`Selected size/color combination is not configured for product ${product.name}`);
-      }
-
-      const listPrice = (() => {
-        if (options.pricingMode === 'customer') {
-          const customerPrice = customerPriceForProduct(options.customer, String(product._id));
-          if (customerPrice !== null && customerPrice > 0) return customerPrice;
-        }
-
-        const basePrice = resolveBaseProductPrice({
-          product,
-          quantity,
-          pricingMode: options.pricingMode,
-          customerTier: String(options.customer?.pricingTier || '').trim(),
-        });
-        const variantPrice = Number((variantRow as any)?.price || 0);
-        return variantPrice > 0 ? variantPrice : basePrice;
-      })();
-
-    let unitPrice = Number(item.unitPrice ?? listPrice);
-    if (unitPrice < listPrice) {
+    const enteredUnitPrice = Number(item.unitPrice ?? listPrice);
+    const priceOverrideAmount = roundTo2(enteredUnitPrice - listPrice);
+    let unitPrice = enteredUnitPrice;
+    if (hasMeaningfulPriceDifference(enteredUnitPrice, listPrice)) {
       priceOverrideRequired = true;
     }
 
@@ -265,21 +529,22 @@ const processItems = async (
     const sgst = taxType === 'gst' ? roundTo2(taxAmount / 2) : 0;
     const vatAmount = taxType === 'vat' ? taxAmount : 0;
 
-      processedItems.push({
-        productId: product._id,
-        productName: product.name,
-        sku: product.sku,
-        category: (product as any).category || '',
-        subcategory: (product as any).subcategory || '',
-        itemType: normalizeProductItemType((product as any).itemType),
-        hsnCode: item.hsnCode || product.hsnCode || '',
-        batchNo: item.batchNo || '',
-        expiryDate: item.expiryDate || undefined,
-        serialNumbers,
-        variantSize,
-        variantColor,
-        quantity,
-        listPrice: roundTo2(listPrice),
+    processedItems.push({
+      productId: product._id,
+      productName: product.name,
+      sku: product.sku,
+      category: (product as any).category || '',
+      subcategory: (product as any).subcategory || '',
+      itemType: normalizeProductItemType((product as any).itemType),
+      hsnCode: item.hsnCode || product.hsnCode || '',
+      batchNo: item.batchNo || '',
+      expiryDate: item.expiryDate || undefined,
+      serialNumbers,
+      variantSize,
+      variantColor,
+      quantity,
+      listPrice: roundTo2(listPrice),
+      priceOverrideAmount,
       unitPrice: roundTo2(unitPrice),
       discountAmount: roundTo2(itemDiscountAmount),
       discountPercentage: roundTo2(itemDiscountPercentage),
@@ -306,12 +571,26 @@ const processItems = async (
   };
 };
 
-const issueStockForSale = async (sale: any, items: any[], userId?: string) => {
+const issueStockForSale = async (
+  sale: any,
+  items: any[],
+  userId?: string,
+  options: { skipChartEnsure?: boolean } = {}
+) => {
   let totalCogs = 0;
   const issuedItems: any[] = [];
+  const productIds = Array.from(
+    new Set(
+      items
+        .map((item) => String(item?.productId || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const products = await Product.find({ _id: { $in: productIds } }).select('name sku itemType allowNegativeStock');
+  const productById = new Map(products.map((product) => [String(product._id), product]));
 
   for (const item of items) {
-    const product = await Product.findById(item.productId).select('name sku itemType allowNegativeStock');
+    const product = productById.get(String(item.productId || ''));
     if (!product || !productRequiresStock(product)) {
       issuedItems.push(item);
       continue;
@@ -347,7 +626,7 @@ const issueStockForSale = async (sale: any, items: any[], userId?: string) => {
         saleNumber: sale.saleNumber,
         invoiceNumber: sale.invoiceNumber,
       },
-    });
+    }, { skipChartEnsure: options.skipChartEnsure });
   }
 
   return { items: issuedItems, cogsValue: totalCogs };
@@ -361,6 +640,123 @@ const quantityMapFromItems = (items: any[] = []): Map<string, number> => {
     map.set(productId, Number((Number(map.get(productId) || 0) + qty).toFixed(4)));
   }
   return map;
+};
+
+const saleItemCostingKey = (item: any): string => [
+  String(item?.productId || '').trim(),
+  String(item?.batchNo || '').trim(),
+  String(item?.variantSize || '').trim(),
+  String(item?.variantColor || '').trim(),
+  roundTo2(Number(item?.quantity || 0)).toFixed(2),
+].join('|');
+
+const carryForwardPostedSaleCosting = (processedItems: any[] = [], previousItems: any[] = []) => {
+  const previousBuckets = new Map<string, any[]>();
+  for (const item of previousItems) {
+    const key = saleItemCostingKey(item);
+    if (!previousBuckets.has(key)) previousBuckets.set(key, []);
+    previousBuckets.get(key)?.push(item);
+  }
+
+  return processedItems.map((item) => {
+    const key = saleItemCostingKey(item);
+    const bucket = previousBuckets.get(key);
+    const previous = bucket?.shift();
+    if (!previous) return item;
+    return {
+      ...item,
+      batchAllocations:
+        Array.isArray(item.batchAllocations) && item.batchAllocations.length > 0
+          ? item.batchAllocations
+          : Array.isArray(previous.batchAllocations)
+            ? previous.batchAllocations.map((allocation: any) => ({ ...(allocation?.toObject?.() || allocation) }))
+            : [],
+      cogsAmount:
+        Number(item.cogsAmount || 0) > 0
+          ? roundTo2(Number(item.cogsAmount || 0))
+          : roundTo2(Number(previous.cogsAmount || 0)),
+    };
+  });
+};
+
+const restorePostedSaleCostingFromStockLedger = async (sale: any, processedItems: any[] = []) => {
+  const referenceId = String(sale?._id || '').trim();
+  const referenceNo = String(sale?.invoiceNumber || sale?.saleNumber || '').trim();
+  if (!referenceId && !referenceNo) return processedItems;
+
+  const candidateIndexByProductId = new Map<string, number[]>();
+  processedItems.forEach((item, index) => {
+    const productId = String(item?.productId || '').trim();
+    const itemType = normalizeProductItemType(item?.itemType);
+    const needsRecovery = productId
+      && itemType === 'inventory'
+      && Number(item?.cogsAmount || 0) <= 0
+      && (!Array.isArray(item?.batchAllocations) || item.batchAllocations.length === 0);
+    if (!needsRecovery) return;
+    if (!candidateIndexByProductId.has(productId)) candidateIndexByProductId.set(productId, []);
+    candidateIndexByProductId.get(productId)?.push(index);
+  });
+
+  const recoverableProductIds = Array.from(candidateIndexByProductId.entries())
+    .filter(([, indexes]) => indexes.length === 1)
+    .map(([productId]) => productId);
+  if (!recoverableProductIds.length) return processedItems;
+
+  const stockLedgerRows = await StockLedgerEntry.find({
+    productId: { $in: recoverableProductIds },
+    transactionType: 'sale_invoice',
+    $or: [
+      ...(referenceId ? [{ referenceId }] : []),
+      ...(referenceNo ? [{ referenceNo }] : []),
+    ],
+  }).lean();
+  if (!stockLedgerRows.length) return processedItems;
+
+  const batchIds = Array.from(
+    new Set(
+      stockLedgerRows
+        .map((row: any) => String(row?.batchId || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const batches = batchIds.length
+    ? await InventoryBatch.find({ _id: { $in: batchIds } }).select('batchNumber locationId locationCode expiryDate').lean()
+    : [];
+  const batchById = new Map<string, any>(batches.map((batch: any) => [String(batch._id), batch]));
+  const rowsByProductId = new Map<string, any[]>();
+  for (const row of stockLedgerRows as any[]) {
+    const productId = String(row?.productId || '').trim();
+    if (!productId) continue;
+    if (!rowsByProductId.has(productId)) rowsByProductId.set(productId, []);
+    rowsByProductId.get(productId)?.push(row);
+  }
+
+  return processedItems.map((item, index) => {
+    const productId = String(item?.productId || '').trim();
+    const candidateIndexes = candidateIndexByProductId.get(productId);
+    if (!candidateIndexes || candidateIndexes[0] !== index) return item;
+    const rows = rowsByProductId.get(productId) || [];
+    if (!rows.length) return item;
+    const recoveredCogsAmount = roundTo2(rows.reduce((sum, row: any) => sum + Number(row?.valueOut || 0), 0));
+    const recoveredAllocations = rows.map((row: any) => {
+      const batch = batchById.get(String(row?.batchId || '').trim());
+      return {
+        batchId: String(row?.batchId || '').trim() || undefined,
+        batchNumber: batch?.batchNumber,
+        locationId: batch?.locationId?.toString?.() || row?.locationId?.toString?.() || String(row?.locationId || ''),
+        locationCode: batch?.locationCode,
+        expiryDate: batch?.expiryDate,
+        quantity: roundTo2(Number(row?.quantityOut || 0)),
+        unitCost: roundTo2(Number(row?.unitCost || 0)),
+        valueOut: roundTo2(Number(row?.valueOut || 0)),
+      };
+    });
+    return {
+      ...item,
+      batchAllocations: recoveredAllocations,
+      cogsAmount: recoveredCogsAmount,
+    };
+  });
 };
 
 const createReceipt = async (input: {
@@ -471,27 +867,28 @@ const postSaleFinancials = async (sale: any, opts: { userId?: string; paidAmount
   }
 
   if (paidAmount > 0) {
-    await createReceipt({
-      amount: paidAmount,
-      mode: normalizePaymentMethod(sale.paymentMethod),
-      sale,
-      customerId: sale.customerId || undefined,
-      customerName: sale.customerName,
-      createdBy: opts.userId,
-      notes: 'Invoice payment',
-    });
-
-    await postCustomerLedgerEntry({
-      customerId: sale.customerId,
-      entryType: 'payment',
-      referenceType: 'sale',
-      referenceId: sale._id.toString(),
-      referenceNo: sale.invoiceNumber || sale.saleNumber,
-      narration: 'Payment received against invoice',
-      debit: 0,
-      credit: paidAmount,
-      createdBy: opts.userId,
-    });
+    await Promise.all([
+      createReceipt({
+        amount: paidAmount,
+        mode: normalizePaymentMethod(sale.paymentMethod),
+        sale,
+        customerId: sale.customerId || undefined,
+        customerName: sale.customerName,
+        createdBy: opts.userId,
+        notes: 'Invoice payment',
+      }),
+      postCustomerLedgerEntry({
+        customerId: sale.customerId,
+        entryType: 'payment',
+        referenceType: 'sale',
+        referenceId: sale._id.toString(),
+        referenceNo: sale.invoiceNumber || sale.saleNumber,
+        narration: 'Payment received against invoice',
+        debit: 0,
+        credit: paidAmount,
+        createdBy: opts.userId,
+      }),
+    ]);
   }
 };
 
@@ -615,9 +1012,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       customerPhone,
       customerEmail,
       customerAddress,
+      isWalkInCustomer = false,
       notes,
       discountAmount,
       discountPercentage,
+      paymentSplits,
       invoiceType = 'cash',
       invoiceStatus = 'posted',
       invoiceNumber,
@@ -634,6 +1033,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       allowNegativeStock = false,
       allowCreditLimitOverride = false,
       overrideApprovedBy,
+      priceOverrideReason,
       creditNoteId,
       creditNoteAmount,
     } = req.body;
@@ -642,27 +1042,49 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ success: false, error: 'Sales must have at least one item' });
     }
 
+    const rawCustomerPhone = String(customerPhone || '').trim();
     const normalizedCustomerPhone = normalizePhoneStrict(customerPhone);
-    if (!normalizedCustomerPhone) {
-      return res.status(400).json({ success: false, error: 'A valid 10-digit customer phone number is required' });
+    const walkInSale =
+      parseBoolean(isWalkInCustomer, false)
+      || (!rawCustomerPhone && String(customerName || '').trim().toLowerCase() === 'walk-in customer');
+    if (!walkInSale && !normalizedCustomerPhone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Customer phone is required unless the sale is marked as walk-in. Enter a valid 10-digit phone number or switch to walk-in billing.',
+      });
+    }
+    if (rawCustomerPhone && !normalizedCustomerPhone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter a valid 10-digit customer phone number or remove it before saving the sale.',
+      });
     }
 
     const userRole = await getRequestUserRole(req.userId);
     const normalizedInvoiceType = String(invoiceType || 'cash').toLowerCase() === 'credit' ? 'credit' : 'cash';
     const normalizedInvoiceStatus = String(invoiceStatus || 'posted').toLowerCase() === 'draft' ? 'draft' : 'posted';
     const shouldPost = normalizedInvoiceStatus === 'posted';
+    const requestedCreditNoteAmount = Math.max(0, Number(creditNoteAmount || 0));
+    const normalizedPaymentSplits = normalizePaymentSplits(paymentSplits);
+    const primaryPaymentMethod = normalizedPaymentSplits[0]?.method || normalizePaymentMethod(paymentMethod);
 
-    const customer = await resolveCustomer({
-      customerId,
-      customerName,
-      customerPhone: normalizedCustomerPhone,
-      customerEmail,
-      customerAddress,
-      createdBy: req.userId,
-    });
-    if (!customer) {
-      return res.status(400).json({ success: false, error: 'Customer could not be created from the provided phone number' });
+    if (normalizedInvoiceType === 'credit' && requestedCreditNoteAmount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Store credit or credit notes can only be used on Paid Now invoices. Remove the credit note or switch the invoice type to Paid Now.',
+      });
     }
+
+    const customer = (customerId || normalizedCustomerPhone)
+      ? await resolveCustomer({
+        customerId,
+        customerName,
+        customerPhone: normalizedCustomerPhone,
+        customerEmail,
+        customerAddress,
+        createdBy: req.userId,
+      })
+      : null;
     if (customer?.isBlocked) {
       return res.status(403).json({ success: false, error: 'Customer account is blocked for billing' });
     }
@@ -691,13 +1113,23 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     const parsedDiscountAmount = Number(discountAmount || 0);
     const parsedDiscountPercentage = Number(discountPercentage || 0);
+    const normalizedPriceOverrideReason = normalizePriceOverrideReason(priceOverrideReason);
     const policy = enforceDiscountPolicy(userRole, itemDiscountPercentages, parsedDiscountPercentage);
     const requiresApproval = !policy.allowed || priceOverrideRequired;
+
+    if (priceOverrideRequired && !normalizedPriceOverrideReason) {
+      return res.status(400).json({
+        success: false,
+        error: 'Price override reason is required because one or more invoice prices differ from the catalog price.',
+      });
+    }
 
     if (requiresApproval && !overrideApprovedBy) {
       return res.status(403).json({
         success: false,
-        error: policy.message || 'Price override approval is required before posting this invoice',
+        error: priceOverrideRequired
+          ? 'Price override approval is required because one or more invoice prices differ from the catalog price.'
+          : policy.message || 'Price override approval is required before posting this invoice',
         data: { requiresApproval: true, maxDiscountAllowed: policy.maxAllowed },
       });
     }
@@ -765,7 +1197,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         grossTotal: totals.grossTotal,
         roundOffAmount: totals.roundOffAmount,
         totalAmount: totals.totalAmount,
-        paymentMethod: normalizePaymentMethod(paymentMethod),
+        paymentMethod: primaryPaymentMethod,
+        paymentSplits: normalizedPaymentSplits,
         paymentStatus: outstandingAmount > 0 ? 'pending' : 'completed',
         saleStatus: shouldPost ? 'completed' : 'draft',
         outstandingAmount,
@@ -773,13 +1206,14 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         dueDate: finalDueDate,
         customerId: customer?._id?.toString() || undefined,
         customerCode: customer?.customerCode || customerCode,
-        customerName: customer?.name || customerName || `Customer ${normalizedCustomerPhone}`,
-        customerPhone: customer?.phone || normalizedCustomerPhone,
+        customerName: customer?.name || String(customerName || '').trim() || (normalizedCustomerPhone ? `Customer ${normalizedCustomerPhone}` : 'Walk-in Customer'),
+        customerPhone: customer?.phone || normalizedCustomerPhone || undefined,
         customerEmail: customer?.email || normalizeEmail(customerEmail) || undefined,
         notes,
         discountAmount: parsedDiscountAmount || 0,
         discountPercentage: parsedDiscountPercentage || 0,
         priceOverrideRequired: requiresApproval && !overrideApprovedBy,
+        priceOverrideReason: normalizedPriceOverrideReason || undefined,
         priceOverrideApprovedBy: overrideApprovedBy || undefined,
         postedAt: shouldPost ? new Date() : undefined,
         postedBy: shouldPost ? req.userId : undefined,
@@ -810,17 +1244,24 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       throw new Error('Could not save invoice. Please try again.');
     }
 
+    let accountingSync: any = null;
     if (shouldPost) {
       const creditApplied = await applyCreditNoteToSale({
         sale,
         creditNoteId: creditNoteId ? String(creditNoteId) : undefined,
-        requestedAmount: Number(creditNoteAmount || 0),
+        requestedAmount: requestedCreditNoteAmount,
         userId: req.userId,
       });
 
-      const stockIssue = await issueStockForSale(sale, processedItems, req.userId);
+      await ensureAccountingChart(req.userId);
+      const stockIssue = await issueStockForSale(sale, processedItems, req.userId, { skipChartEnsure: true });
       sale.items = stockIssue.items;
       await postSaleFinancials(sale, { userId: req.userId, paidAmount: paid });
+      accountingSync = await syncSaleAccountingSafely(sale, req.userId, { chartPrepared: true });
+      if (!accountingSync?.synced && Number(sale.outstandingAmount || 0) <= 0) {
+        sale.paymentStatus = 'pending';
+        await sale.save();
+      }
       if (creditApplied.applied > 0 && sale.customerId) {
         await postCustomerLedgerEntry({
           customerId: sale.customerId,
@@ -837,14 +1278,23 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       await sale.save();
     }
 
-    await writeAuditLog({
+    const saleSnapshot = sale.toObject();
+    res.status(201).json({
+      success: true,
+      message: shouldPost ? 'Invoice posted successfully' : 'Draft invoice created',
+      data: sale,
+      accountingDiagnostics: accountingSync?.diagnostics,
+      accountingSyncError: accountingSync?.error,
+    });
+
+    runAuditLogInBackground({
       module: 'sales',
       action: shouldPost ? 'invoice_posted' : 'invoice_draft_created',
       entityType: 'sale',
       entityId: sale._id.toString(),
       referenceNo: sale.invoiceNumber || sale.saleNumber,
       userId: req.userId,
-      after: sale.toObject(),
+      after: saleSnapshot,
     });
 
     if (
@@ -854,7 +1304,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       requiresApproval ||
       Boolean(overrideApprovedBy)
     ) {
-      await writeAuditLog({
+      runAuditLogInBackground({
         module: 'price_changes',
         action: 'invoice_pricing_applied',
         entityType: 'sale',
@@ -866,16 +1316,13 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
           billDiscountAmount: parsedDiscountAmount,
           billDiscountPercentage: parsedDiscountPercentage,
           requiresOverrideApproval: requiresApproval,
+          priceOverrideReason: normalizedPriceOverrideReason || undefined,
           overrideApprovedBy: overrideApprovedBy || undefined,
         },
       });
     }
 
-    res.status(201).json({
-      success: true,
-      message: shouldPost ? 'Invoice posted successfully' : 'Draft invoice created',
-      data: sale,
-    });
+    queueSaleInvoiceEmail(saleSnapshot);
   } catch (error: any) {
     const msg = toSimpleSalesError(error, 'Failed to create invoice');
     const raw = String(error?.message || '');
@@ -938,9 +1385,17 @@ router.post('/:id/post', authMiddleware, async (req: AuthenticatedRequest, res: 
       return res.status(400).json({ success: false, error: 'Price override approval pending' });
     }
 
-    for (const item of sale.items as any[]) {
-      const product = await Product.findById(item.productId);
-      if (!product) return res.status(404).json({ success: false, error: `Product not found: ${item.productId}` });
+    const saleItems = Array.isArray(sale.items) ? (sale.items as any[]) : [];
+    const productLookup = await loadRequestedProducts(saleItems);
+    let normalizedProductIds = false;
+
+    for (const item of saleItems) {
+      const product = resolveRequestedProduct(item, productLookup);
+      if (!product) return res.status(404).json({ success: false, error: missingProductError(item).message });
+      if (String(item.productId || '') !== String(product._id || '')) {
+        item.productId = String(product._id || '');
+        normalizedProductIds = true;
+      }
       if (!productRequiresStock(product)) continue;
 
       const allowNegative = Boolean((product as any).allowNegativeStock);
@@ -952,7 +1407,12 @@ router.post('/:id/post', authMiddleware, async (req: AuthenticatedRequest, res: 
       }
     }
 
-    const stockIssue = await issueStockForSale(sale, sale.items as any[], req.userId);
+    if (normalizedProductIds) {
+      sale.markModified('items');
+    }
+
+    await ensureAccountingChart(req.userId);
+    const stockIssue = await issueStockForSale(sale, saleItems, req.userId, { skipChartEnsure: true });
     sale.items = stockIssue.items;
 
     sale.invoiceStatus = 'posted';
@@ -971,6 +1431,11 @@ router.post('/:id/post', authMiddleware, async (req: AuthenticatedRequest, res: 
     await sale.save();
     const paidAmount = Math.max(0, Number(sale.totalAmount || 0) - Number(sale.outstandingAmount || 0));
     await postSaleFinancials(sale, { userId: req.userId, paidAmount });
+    const accountingSync: any = await syncSaleAccountingSafely(sale, req.userId, { chartPrepared: true });
+    if (!accountingSync?.synced && Number(sale.outstandingAmount || 0) <= 0) {
+      sale.paymentStatus = 'pending';
+      await sale.save();
+    }
 
     await writeAuditLog({
       module: 'sales',
@@ -982,7 +1447,13 @@ router.post('/:id/post', authMiddleware, async (req: AuthenticatedRequest, res: 
       after: sale.toObject(),
     });
 
-    res.json({ success: true, message: 'Draft posted and invoice locked', data: sale });
+    res.json({
+      success: true,
+      message: 'Draft posted and invoice locked',
+      data: sale,
+      accountingDiagnostics: accountingSync?.diagnostics,
+      accountingSyncError: accountingSync?.error,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to post draft' });
   }
@@ -1036,6 +1507,18 @@ router.post('/:id/payments', authMiddleware, async (req: AuthenticatedRequest, r
       });
     }
 
+    const paymentSync: any = await syncSalePaymentAccountingSafely(sale, {
+      amount: usable,
+      mode: normalizePaymentMethod(paymentMethod),
+      userId: req.userId,
+      paymentDate: new Date(),
+      notes,
+    });
+    if (!paymentSync?.synced && Number(sale.outstandingAmount || 0) <= 0) {
+      sale.paymentStatus = 'pending';
+      await sale.save();
+    }
+
     await writeAuditLog({
       module: 'sales',
       action: 'invoice_payment',
@@ -1046,7 +1529,13 @@ router.post('/:id/payments', authMiddleware, async (req: AuthenticatedRequest, r
       metadata: { paymentAmount: usable, paymentMethod: sale.paymentMethod, receiptVoucher: receipt?.voucherNumber },
     });
 
-    res.json({ success: true, data: { sale, receipt }, message: 'Payment recorded successfully' });
+    res.json({
+      success: true,
+      data: { sale, receipt },
+      message: 'Payment recorded successfully',
+      accountingDiagnostics: paymentSync?.diagnostics,
+      accountingSyncError: paymentSync?.error,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Failed to record payment' });
   }
@@ -1071,6 +1560,7 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
       customerEmail,
       customerAddress,
       paymentMethod,
+      paymentSplits,
       discountAmount,
       discountPercentage,
       applyRoundOff = true,
@@ -1079,7 +1569,12 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
       isGstBill = sale.isGstBill !== false,
       allowNegativeStock = false,
       overrideApprovedBy = sale.priceOverrideApprovedBy,
+      priceOverrideReason = sale.priceOverrideReason,
     } = req.body;
+    const normalizedPaymentSplits = paymentSplits === undefined
+      ? normalizePaymentSplits(sale.paymentSplits)
+      : normalizePaymentSplits(paymentSplits);
+    const primaryPaymentMethod = normalizedPaymentSplits[0]?.method || normalizePaymentMethod(paymentMethod || sale.paymentMethod);
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, error: 'items are required to update invoice' });
@@ -1108,11 +1603,20 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
     const oldQtyMap = quantityMapFromItems((sale.items as any[]) || []);
     const newQtyMap = quantityMapFromItems(processedItems);
     const allProductIds = Array.from(new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]));
+    const itemDescriptorByProductId = new Map<string, any>();
+    for (const item of [...((sale.items as any[]) || []), ...processedItems]) {
+      const productId = String(item?.productId || '').trim();
+      if (!productId || itemDescriptorByProductId.has(productId)) continue;
+      itemDescriptorByProductId.set(productId, item);
+    }
 
     for (const productId of allProductIds) {
       const product = await Product.findById(productId);
       if (!product) {
-        return res.status(404).json({ success: false, error: `Product not found: ${productId}` });
+        return res.status(404).json({
+          success: false,
+          error: missingProductError(itemDescriptorByProductId.get(productId) || { productId }).message,
+        });
       }
       if (!productRequiresStock(product)) continue;
       const oldQty = Number(oldQtyMap.get(productId) || 0);
@@ -1130,12 +1634,21 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
     let grossTotal = subtotal + totalTax;
     const parsedDiscountAmount = Number(discountAmount || 0);
     const parsedDiscountPercentage = Number(discountPercentage || 0);
+    const normalizedPriceOverrideReason = normalizePriceOverrideReason(priceOverrideReason);
     const policy = enforceDiscountPolicy(userRole, itemDiscountPercentages, parsedDiscountPercentage);
     const requiresApproval = !policy.allowed || priceOverrideRequired;
+    if (priceOverrideRequired && !normalizedPriceOverrideReason) {
+      return res.status(400).json({
+        success: false,
+        error: 'Price override reason is required because one or more invoice prices differ from the catalog price.',
+      });
+    }
     if (requiresApproval && !overrideApprovedBy) {
       return res.status(403).json({
         success: false,
-        error: policy.message || 'Price override approval is required',
+        error: priceOverrideRequired
+          ? 'Price override approval is required because one or more invoice prices differ from the catalog price.'
+          : policy.message || 'Price override approval is required',
       });
     }
 
@@ -1167,7 +1680,10 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
     const paidSoFar = Math.max(0, oldTotal - oldOutstanding);
     const newOutstanding = Math.max(0, totals.totalAmount - paidSoFar);
 
-    sale.items = processedItems;
+    sale.items = await restorePostedSaleCostingFromStockLedger(
+      sale,
+      carryForwardPostedSaleCosting(processedItems, (sale.items as any[]) || [])
+    );
     sale.subtotal = subtotal;
     sale.totalGst = totalTax;
     sale.grossTotal = totals.grossTotal;
@@ -1179,7 +1695,8 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
     sale.customerName = customer?.name || customerName || sale.customerName || 'Walk-in Customer';
     sale.customerPhone = customer?.phone || normalizePhoneStrict(customerPhone) || sale.customerPhone;
     sale.customerEmail = customer?.email || normalizeEmail(customerEmail) || sale.customerEmail;
-    sale.paymentMethod = normalizePaymentMethod(paymentMethod || sale.paymentMethod);
+    sale.paymentMethod = primaryPaymentMethod;
+    sale.paymentSplits = normalizedPaymentSplits;
     sale.discountAmount = parsedDiscountAmount || 0;
     sale.discountPercentage = parsedDiscountPercentage || 0;
     sale.outstandingAmount = roundTo2(newOutstanding);
@@ -1188,9 +1705,16 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
     sale.taxMode = String(taxMode) === 'inclusive' ? 'inclusive' : 'exclusive';
     sale.isGstBill = parseBoolean(isGstBill, sale.isGstBill !== false);
     sale.priceOverrideRequired = requiresApproval && !overrideApprovedBy;
+    sale.priceOverrideReason = normalizedPriceOverrideReason || undefined;
     sale.priceOverrideApprovedBy = overrideApprovedBy || undefined;
 
     await sale.save();
+    await ensureAccountingChart(req.userId);
+    const accountingSync: any = await syncSaleAccountingSafely(sale, req.userId, { chartPrepared: true });
+    if (!accountingSync?.synced && Number(sale.outstandingAmount || 0) <= 0) {
+      sale.paymentStatus = 'pending';
+      await sale.save();
+    }
 
     await writeAuditLog({
       module: 'sales',
@@ -1224,12 +1748,19 @@ router.put('/:id/edit-posted', authMiddleware, async (req: AuthenticatedRequest,
           billDiscountAmount: parsedDiscountAmount,
           billDiscountPercentage: parsedDiscountPercentage,
           requiresOverrideApproval: requiresApproval,
+          priceOverrideReason: normalizedPriceOverrideReason || undefined,
           overrideApprovedBy: overrideApprovedBy || undefined,
         },
       });
     }
 
-    res.json({ success: true, message: 'Posted invoice updated successfully', data: sale });
+    res.json({
+      success: true,
+      message: 'Posted invoice updated successfully',
+      data: sale,
+      accountingDiagnostics: accountingSync?.diagnostics,
+      accountingSyncError: accountingSync?.error,
+    });
   } catch (error: any) {
     const msg = error?.message || 'Failed to update posted invoice';
     const status = msg.includes('Product not found') || msg.includes('Invalid quantity') || msg.includes('Insufficient stock') ? 400 : 500;
@@ -1330,47 +1861,14 @@ router.get('/customer/history', async (req: AuthenticatedRequest, res: Response)
 router.get('/analytics/summary', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
-    const matchStage: any = {};
-    if (startDate || endDate) {
-      matchStage.createdAt = {};
-      if (startDate) matchStage.createdAt.$gte = new Date(startDate as string);
-      if (endDate) matchStage.createdAt.$lte = new Date(endDate as string);
-    }
-
-    const summary = await Sale.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: '$totalAmount' },
-          totalGst: { $sum: '$totalGst' },
-          totalTransactions: { $sum: 1 },
-          averageValue: { $avg: '$totalAmount' },
-          totalRoundOff: { $sum: '$roundOffAmount' },
-          totalOutstanding: { $sum: '$outstandingAmount' },
-          totalCreditInvoices: { $sum: { $cond: [{ $eq: ['$invoiceType', 'credit'] }, 1, 0] } },
-        },
-      },
-    ]);
-
-    const paymentSummary = await Sale.aggregate([
-      { $match: matchStage },
-      { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$totalAmount' } } },
-    ]);
-
+    const start = startDate ? new Date(startDate as string) : new Date('2000-01-01T00:00:00.000Z');
+    const end = endDate ? new Date(endDate as string) : new Date();
+    const report = await buildPosSalesAnalyticsSummary(start, end);
     res.json({
       success: true,
       data: {
-        summary: summary[0] || {
-          totalSales: 0,
-          totalGst: 0,
-          totalTransactions: 0,
-          averageValue: 0,
-          totalRoundOff: 0,
-          totalOutstanding: 0,
-          totalCreditInvoices: 0,
-        },
-        byPaymentMethod: paymentSummary,
+        summary: report.summary,
+        byPaymentMethod: report.byPaymentMethod,
       },
     });
   } catch (error: any) {
@@ -1427,6 +1925,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       customerEmail,
       customerAddress,
       paymentMethod,
+      paymentSplits,
       discountAmount,
       discountPercentage,
       applyRoundOff = true,
@@ -1435,7 +1934,12 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       isGstBill = sale.isGstBill !== false,
       allowNegativeStock = false,
       overrideApprovedBy = sale.priceOverrideApprovedBy,
+      priceOverrideReason = sale.priceOverrideReason,
     } = req.body;
+    const normalizedPaymentSplits = paymentSplits === undefined
+      ? normalizePaymentSplits(sale.paymentSplits)
+      : normalizePaymentSplits(paymentSplits);
+    const primaryPaymentMethod = normalizedPaymentSplits[0]?.method || normalizePaymentMethod(paymentMethod || sale.paymentMethod);
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, error: 'items are required to update draft' });
@@ -1464,12 +1968,21 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     let grossTotal = subtotal + totalTax;
     const parsedDiscountAmount = Number(discountAmount || 0);
     const parsedDiscountPercentage = Number(discountPercentage || 0);
+    const normalizedPriceOverrideReason = normalizePriceOverrideReason(priceOverrideReason);
     const policy = enforceDiscountPolicy(userRole, itemDiscountPercentages, parsedDiscountPercentage);
     const requiresApproval = !policy.allowed || priceOverrideRequired;
+    if (priceOverrideRequired && !normalizedPriceOverrideReason) {
+      return res.status(400).json({
+        success: false,
+        error: 'Price override reason is required because one or more invoice prices differ from the catalog price.',
+      });
+    }
     if (requiresApproval && !overrideApprovedBy) {
       return res.status(403).json({
         success: false,
-        error: policy.message || 'Price override approval is required',
+        error: priceOverrideRequired
+          ? 'Price override approval is required because one or more invoice prices differ from the catalog price.'
+          : policy.message || 'Price override approval is required',
       });
     }
 
@@ -1490,7 +2003,8 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     sale.customerName = customer?.name || customerName || sale.customerName || 'Walk-in Customer';
     sale.customerPhone = customer?.phone || normalizePhoneStrict(customerPhone) || sale.customerPhone;
     sale.customerEmail = customer?.email || normalizeEmail(customerEmail) || sale.customerEmail;
-    sale.paymentMethod = normalizePaymentMethod(paymentMethod || sale.paymentMethod);
+    sale.paymentMethod = primaryPaymentMethod;
+    sale.paymentSplits = normalizedPaymentSplits;
     sale.discountAmount = parsedDiscountAmount || 0;
     sale.discountPercentage = parsedDiscountPercentage || 0;
     sale.outstandingAmount = sale.invoiceType === 'credit' ? totals.totalAmount : 0;
@@ -1498,6 +2012,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     sale.taxMode = String(taxMode) === 'inclusive' ? 'inclusive' : 'exclusive';
     sale.isGstBill = parseBoolean(isGstBill, sale.isGstBill !== false);
     sale.priceOverrideRequired = requiresApproval && !overrideApprovedBy;
+    sale.priceOverrideReason = normalizedPriceOverrideReason || undefined;
     sale.priceOverrideApprovedBy = overrideApprovedBy || undefined;
 
     await sale.save();
@@ -1529,6 +2044,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
           billDiscountAmount: parsedDiscountAmount,
           billDiscountPercentage: parsedDiscountPercentage,
           requiresOverrideApproval: requiresApproval,
+          priceOverrideReason: normalizedPriceOverrideReason || undefined,
           overrideApprovedBy: overrideApprovedBy || undefined,
         },
         before: {

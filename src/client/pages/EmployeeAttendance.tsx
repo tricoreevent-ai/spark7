@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ManualHelpLink } from '../components/ManualHelpLink';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
 interface EmployeeAttendanceSummary {
@@ -202,14 +203,12 @@ export const EmployeeAttendance: React.FC = () => {
                 >
                   {actionLoading === 'check-out' ? 'Checking out...' : 'Check Out Now'}
                 </button>
-                <button
-                  type="button"
+                <ActionIconButton
+                  kind="refresh"
                   disabled={loading || Boolean(actionLoading)}
                   onClick={() => void loadSummary()}
-                  className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Refresh
-                </button>
+                  title="Refresh"
+                />
               </div>
             </section>
 

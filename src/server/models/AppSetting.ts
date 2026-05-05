@@ -13,7 +13,6 @@ const appSettingSchema = new Schema<IAppSettingDocument>(
     key: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       lowercase: true,
       index: true,
@@ -30,5 +29,7 @@ const appSettingSchema = new Schema<IAppSettingDocument>(
   },
   { timestamps: true }
 );
+
+appSettingSchema.index({ tenantId: 1, key: 1 }, { unique: true });
 
 export const AppSetting = mongoose.model<IAppSettingDocument>('AppSetting', appSettingSchema);

@@ -37,6 +37,7 @@ import settlementRoutes from './routes/settlements.js';
 import gstRoutes from './routes/gst.js';
 import settingsRoutes from './routes/settings.js';
 import generalSettingsRoutes from './routes/generalSettings.js';
+import uatRoutes from './routes/uat.js';
 import publicRoutes from './routes/public.js';
 import validationRoutes from './validation/routes/validationRoutes.js';
 import { authMiddleware } from './middleware/auth.js';
@@ -45,6 +46,7 @@ import { detectManagedImageMimeType } from './services/assetStorage.js';
 import { bootstrapDatabaseOnStartup } from './services/databaseBootstrap.js';
 import { redactSensitiveData } from './utils/redaction.js';
 import { startValidationScheduler } from './validation/jobs/scheduler.js';
+import { startSalesLedgerScheduler } from './services/salesLedger.js';
 
 const entryDir = process.argv[1]
   ? path.dirname(path.resolve(process.argv[1]))
@@ -304,6 +306,7 @@ app.use('/api/gst', authMiddleware, requireAnyPageAccess(['accounting', 'custome
 app.use('/api/settings', authMiddleware, requirePageAccess('settings'), settingsRoutes);
 app.use('/api/general-settings', authMiddleware, generalSettingsRoutes);
 app.use('/api/validate', authMiddleware, requirePageAccess('accounting'), validationRoutes);
+app.use('/api/uat', authMiddleware, uatRoutes);
 
 app.use('/api', (req: Request, res: Response) => {
   const detail = `API endpoint not found: ${req.method} ${req.originalUrl}`;
@@ -356,6 +359,7 @@ const startServer = async () => {
       console.log(`CORS allowed origins: ${allowedCorsOrigins.join(', ')}`);
     }
     startValidationScheduler();
+    startSalesLedgerScheduler();
   });
 
   void connectDbWithRetry().then(() => {

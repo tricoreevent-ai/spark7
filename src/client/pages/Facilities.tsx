@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { formatCurrency } from '../config';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { consumeCrmConversionDraft, CrmConversionDraft } from '../utils/crmDrafts';
 
@@ -146,6 +147,8 @@ export const Facilities: React.FC = () => {
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [crmDraft, setCrmDraft] = useState<CrmConversionDraft | null>(null);
+
+  useEscapeKey(() => setShowCustomerDialog(false), { enabled: showCustomerDialog });
 
   const headers = useMemo(() => {
     const token = localStorage.getItem('token');

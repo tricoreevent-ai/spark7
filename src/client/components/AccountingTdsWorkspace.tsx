@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CardTabs } from './CardTabs';
 import { ReportDataTable } from './ReportDataTable';
+import { ActionIconButton } from './ActionIconButton';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
 
@@ -571,9 +572,7 @@ export const AccountingTdsWorkspace: React.FC = () => {
               Configure PAN/TAN, maintain sections and deductees, calculate deductions, track challans, prepare draft returns, and reconcile with government records without disturbing existing accounting entries.
             </p>
           </div>
-          <button type="button" className={secondaryButtonClass} disabled={loading} onClick={() => runAction(load, 'TDS workspace refreshed')}>
-            Refresh TDS
-          </button>
+          <ActionIconButton kind="refresh" disabled={loading} onClick={() => runAction(load, 'TDS workspace refreshed')} title="Refresh TDS" />
         </div>
         {data.warnings?.length > 0 && (
           <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">

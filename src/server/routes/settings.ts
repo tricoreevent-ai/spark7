@@ -194,10 +194,19 @@ router.get('/database-backup', async (req: AuthenticatedRequest, res: Response) 
       return res.status(500).json({ success: false, error: 'Database connection not ready' });
     }
 
+    const requestedCollections = String(req.query?.collections || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const requestedSet = new Set(requestedCollections);
     const collectionsList = await db.listCollections({}, { nameOnly: true }).toArray();
     const names = collectionsList
       .map((entry) => String(entry.name || ''))
-      .filter((name) => Boolean(name) && !name.startsWith(RESERVED_COLLECTION_PREFIX));
+      .filter((name) =>
+        Boolean(name)
+        && !name.startsWith(RESERVED_COLLECTION_PREFIX)
+        && (!requestedSet.size || requestedSet.has(name))
+      );
 
     const collections: Record<string, any[]> = {};
     for (const name of names) {

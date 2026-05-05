@@ -11,6 +11,9 @@ export interface ISupplierDocument extends Document {
   notes?: string;
   isActive: boolean;
   performanceScore: number;
+  accountingVendorId?: mongoose.Types.ObjectId | string;
+  payableLedgerAccountId?: mongoose.Types.ObjectId | string;
+  accountingLinkedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -71,6 +74,19 @@ const supplierSchema = new Schema<ISupplierDocument>(
       min: 0,
       max: 100,
       default: 100,
+    },
+    accountingVendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Vendor',
+      index: true,
+    },
+    payableLedgerAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChartAccount',
+      index: true,
+    },
+    accountingLinkedAt: {
+      type: Date,
     },
   },
   { timestamps: true }

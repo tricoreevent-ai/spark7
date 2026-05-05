@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ManualHelpLink } from '../components/ManualHelpLink';
 import { PaginationControls } from '../components/PaginationControls';
 import { FloatingField } from '../components/FloatingField';
+import { ActionIconButton } from '../components/ActionIconButton';
 import { usePaginatedRows } from '../hooks/usePaginatedRows';
 import { jsPDF } from 'jspdf';
 import { formatCurrency } from '../config';
@@ -462,8 +463,8 @@ export const Payroll: React.FC = () => {
           <button onClick={generate} disabled={loading} className="rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-70">
             {loading ? 'Generating...' : 'Generate'}
           </button>
-          <button onClick={exportCsv} className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400">Export CSV</button>
-          <button onClick={exportPdf} className="rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-400">Export PDF</button>
+          <ActionIconButton kind="exportCsv" onClick={exportCsv} title="Export CSV" />
+          <ActionIconButton kind="exportPdf" onClick={exportPdf} title="Export PDF" />
         </div>
       </div>
 
@@ -609,9 +610,7 @@ export const Payroll: React.FC = () => {
             {form16Rows.slice(0, 8).map((row) => (
               <div key={row._id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span className="text-gray-200">{row.employeeCode} - {row.employeeName} | Taxable {formatCurrency(row.taxableIncome || 0)} | TDS {formatCurrency(row.tdsDeducted || 0)}</span>
-                <button className="text-xs font-semibold text-cyan-300 hover:text-cyan-200" onClick={() => void downloadFile(`/api/payroll/form16/${row._id}/download`, `form16-${row.employeeCode}.pdf`)}>
-                  Download PDF
-                </button>
+                <ActionIconButton kind="downloadPdf" onClick={() => void downloadFile(`/api/payroll/form16/${row._id}/download`, `form16-${row.employeeCode}.pdf`)} title="Download PDF" className="h-8 w-8" />
               </div>
             ))}
             {!form16Rows.length && <p className="py-3 text-sm text-gray-400">No Form 16 drafts generated yet.</p>}

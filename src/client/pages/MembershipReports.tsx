@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../config';
 import { apiUrl, fetchApiJson } from '../utils/api';
+import { ActionIconButton } from '../components/ActionIconButton';
 
 interface ReminderChannelStats {
   sent: number;
@@ -94,7 +95,7 @@ export const MembershipReports: React.FC = () => {
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Membership Reports</h1>
           <p className="text-sm text-gray-300">Dedicated analytics for lifecycle, renewals, reminder channels, and POS benefits usage.</p>
         </div>
-        <button onClick={() => void loadReports()} className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400">Refresh</button>
+        <ActionIconButton kind="refresh" onClick={() => void loadReports()} title="Refresh" />
       </div>
 
       {error && <div className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}

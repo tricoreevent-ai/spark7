@@ -179,7 +179,7 @@ export const updateRolePermissions = async (
       permissions: mergedPermissions,
       isSystemRole: DEFAULT_ROLES.includes(normalizedRole as (typeof DEFAULT_ROLES)[number]),
     },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 
   return {

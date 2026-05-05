@@ -83,10 +83,30 @@ const escapeHtml = (value: unknown): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const resolvePublicBaseUrl = (): string => {
+  const configured = String(process.env.FRONTEND_URL || '').trim();
+  if (/^https?:\/\//i.test(configured)) {
+    return configured.replace(/\/+$/, '');
+  }
+
+  const firstCorsOrigin = String(process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((item) => item.trim())
+    .find((item) => /^https?:\/\//i.test(item));
+  if (firstCorsOrigin) {
+    return firstCorsOrigin.replace(/\/+$/, '');
+  }
+
+  return '';
+};
+
 const normalizeLogoUrl = (value: unknown): string => {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  return raw;
+  if (raw.startsWith('data:') || /^https?:\/\//i.test(raw)) return raw;
+  const publicBaseUrl = resolvePublicBaseUrl();
+  if (!publicBaseUrl) return raw;
+  return `${publicBaseUrl}${raw.startsWith('/') ? raw : `/${raw}`}`;
 };
 
 const businessAddress = (business: any): string => {

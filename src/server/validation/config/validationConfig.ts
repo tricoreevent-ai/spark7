@@ -44,6 +44,8 @@ export interface ValidationConfig {
     accountingVouchers: string;
     accountingInvoices: string;
     accountingPayments: string;
+    purchaseBills: string;
+    suppliers: string;
     sales: string;
     vendors: string;
     customers: string;
@@ -181,6 +183,8 @@ export const buildValidationConfig = (): ValidationConfig => ({
     accountingVouchers: 'accountingvouchers',
     accountingInvoices: 'accountinginvoices',
     accountingPayments: 'accountingpayments',
+    purchaseBills: 'purchasebills',
+    suppliers: 'suppliers',
     sales: 'sales',
     vendors: 'vendors',
     customers: 'customers',

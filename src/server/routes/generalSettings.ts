@@ -126,7 +126,7 @@ const migrateLegacyGeneralSettings = async (req: AuthenticatedRequest) => {
         updatedBy: row.updatedBy || req.userId,
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
   await AppSetting.deleteMany(
     tenantFilter(req, {

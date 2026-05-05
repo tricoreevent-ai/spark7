@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { ActionIconButton } from '../../components/ActionIconButton';
 import { ValidationCheckDetail, ValidationReport } from '../types';
 import { formatAmount, formatDate, statusClass } from '../utils';
 
@@ -58,12 +59,8 @@ export const DetailedReport: React.FC<{
           >
             {repairing ? 'Fixing Database...' : 'Fix Repairable Issues'}
           </button>
-          <button onClick={onExportPdf} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">
-            Export PDF
-          </button>
-          <button onClick={onExportExcel} className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-black text-slate-950 hover:bg-cyan-300">
-            Export Excel
-          </button>
+          <ActionIconButton kind="exportPdf" onClick={onExportPdf} title="Export PDF" />
+          <ActionIconButton kind="exportExcel" onClick={onExportExcel} title="Export Excel" />
         </div>
       </div>
 

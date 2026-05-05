@@ -243,7 +243,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       updates.supplierCode = nextCode;
     }
 
-    const updated = await Supplier.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const updated = await Supplier.findByIdAndUpdate(req.params.id, updates, { returnDocument: 'after', runValidators: true });
 
     await writeAuditLog({
       module: 'inventory',

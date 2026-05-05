@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { showConfirmDialog } from '../utils/appDialogs';
+import { ActionIconButton } from './ActionIconButton';
 import { FloatingField } from './FloatingField';
 import {
   CustomerCampaignAudienceMode,
@@ -453,9 +454,7 @@ export const CustomerCampaignManager: React.FC<CustomerCampaignManagerProps> = (
             <p className={sectionTitleClass}>Campaign History</p>
             <h2 className="mt-2 text-xl font-semibold text-white">Saved drafts and sent brochure campaigns</h2>
           </div>
-          <button type="button" onClick={() => void loadCampaigns()} className="rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/5">
-            Refresh
-          </button>
+          <ActionIconButton kind="refresh" onClick={() => void loadCampaigns()} title="Refresh" className="h-8 w-8" />
         </div>
 
         <div className="mt-4 max-h-[820px] space-y-3 overflow-y-auto pr-1">

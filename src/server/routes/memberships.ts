@@ -581,7 +581,7 @@ router.put('/plans/:id', authMiddleware, async (req: AuthenticatedRequest, res: 
 
     const updates = withPlanDefaults({ ...before.toObject(), ...req.body });
     const plan = await MembershipPlan.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     }).populate('facilityIds', 'name location active');
     if (!plan) return res.status(404).json({ success: false, error: 'Membership plan not found' });
@@ -636,7 +636,7 @@ router.put('/plans/:id/archive', authMiddleware, async (req: AuthenticatedReques
         active: false,
         archivedAt: new Date(),
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!plan) return res.status(404).json({ success: false, error: 'Membership plan not found' });
 
@@ -667,7 +667,7 @@ router.put('/plans/:id/status', authMiddleware, async (req: AuthenticatedRequest
         active: status === 'active',
         ...(status === 'archived' ? { archivedAt: new Date() } : {}),
       },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!plan) return res.status(404).json({ success: false, error: 'Membership plan not found' });
 
@@ -1033,7 +1033,7 @@ router.put('/subscriptions/:id/profile', authMiddleware, async (req: Authenticat
     }
 
     const sub = await MemberSubscription.findByIdAndUpdate(subscriptionId, updates, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     }).populate({
       path: 'planId',
@@ -2326,7 +2326,7 @@ router.put('/subscriptions/:id/status', authMiddleware, async (req: Authenticate
     }
 
     const sub = await MemberSubscription.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     }).populate('planId', 'name');
 

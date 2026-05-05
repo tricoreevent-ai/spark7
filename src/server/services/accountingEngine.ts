@@ -19,6 +19,7 @@ import {
   buildDepreciationPostingPlan,
   buildInvoicePostingPlan,
   buildRefundPostingPlan,
+  buildGstSetoffSummary,
   paymentModeToAccountKey,
   round2,
   toPeriodKey,
@@ -35,6 +36,10 @@ type SystemAccountKey =
   | 'bank_account'
   | 'accounts_receivable'
   | 'stock_in_hand'
+  | 'gst_input'
+  | 'cgst_input'
+  | 'sgst_input'
+  | 'igst_input'
   | 'fixed_assets'
   | 'accumulated_depreciation'
   | 'liabilities'
@@ -44,19 +49,26 @@ type SystemAccountKey =
   | 'sgst_payable'
   | 'igst_payable'
   | 'tds_payable'
+  | 'opening_balance_equity'
+  | 'capital_account'
+  | 'retained_earnings'
   | 'income'
   | 'booking_revenue'
   | 'event_revenue'
   | 'sales_revenue'
+  | 'round_off_income'
   | 'other_income'
   | 'stock_gain'
   | 'expenses'
   | 'cost_of_goods_sold'
+  | 'sales_discount'
+  | 'round_off_expense'
   | 'stock_loss'
   | 'general_expense'
   | 'salary_expense'
   | 'contract_expense'
-  | 'depreciation_expense';
+  | 'depreciation_expense'
+  | 'inventory_opening_reserve';
 
 interface SystemAccountDefinition {
   key: SystemAccountKey;
@@ -96,6 +108,8 @@ interface CreateInvoiceInput {
   referenceId?: string;
   description?: string;
   baseAmount: number;
+  discountAmount?: number;
+  roundOffAmount?: number;
   gstAmount?: number;
   gstRate?: number;
   gstTreatment?: GstTreatment;
@@ -182,6 +196,7 @@ interface CreateFixedAssetInput {
 interface TransactionOptions {
   session?: mongoose.ClientSession;
   skipTransaction?: boolean;
+  skipChartEnsure?: boolean;
 }
 
 const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
@@ -190,6 +205,10 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
   { key: 'bank_account', code: '1020', name: 'Bank Account', type: 'asset', subType: 'bank', parentKey: 'assets' },
   { key: 'accounts_receivable', code: '1100', name: 'Accounts Receivable', type: 'asset', subType: 'customer', parentKey: 'assets' },
   { key: 'stock_in_hand', code: '1150', name: 'Stock In Hand', type: 'asset', subType: 'stock', parentKey: 'assets' },
+  { key: 'gst_input', code: '1160', name: 'Input GST', type: 'asset', parentKey: 'assets' },
+  { key: 'cgst_input', code: '1161', name: 'CGST Input', type: 'asset', parentKey: 'gst_input' },
+  { key: 'sgst_input', code: '1162', name: 'SGST Input', type: 'asset', parentKey: 'gst_input' },
+  { key: 'igst_input', code: '1163', name: 'IGST Input', type: 'asset', parentKey: 'gst_input' },
   { key: 'fixed_assets', code: '1200', name: 'Fixed Assets', type: 'asset', parentKey: 'assets' },
   { key: 'accumulated_depreciation', code: '1210', name: 'Accumulated Depreciation', type: 'asset', parentKey: 'assets' },
   { key: 'liabilities', code: '2000', name: 'Liabilities', type: 'liability' },
@@ -199,20 +218,63 @@ const SYSTEM_ACCOUNTS: SystemAccountDefinition[] = [
   { key: 'sgst_payable', code: '2220', name: 'SGST Payable', type: 'liability', parentKey: 'gst_payable' },
   { key: 'igst_payable', code: '2230', name: 'IGST Payable', type: 'liability', parentKey: 'gst_payable' },
   { key: 'tds_payable', code: '2240', name: 'TDS Payable', type: 'liability', parentKey: 'liabilities' },
+  { key: 'opening_balance_equity', code: '2290', name: 'Opening Balance Equity', type: 'liability', parentKey: 'liabilities' },
+  { key: 'inventory_opening_reserve', code: '2295', name: 'Inventory Opening Reserve', type: 'liability', parentKey: 'liabilities' },
+  { key: 'capital_account', code: '2300', name: 'Capital Account', type: 'liability', parentKey: 'liabilities' },
+  { key: 'retained_earnings', code: '2310', name: 'Retained Earnings', type: 'liability', parentKey: 'liabilities' },
   { key: 'income', code: '3000', name: 'Income', type: 'income' },
   { key: 'booking_revenue', code: '3100', name: 'Booking Revenue', type: 'income', parentKey: 'income' },
   { key: 'event_revenue', code: '3110', name: 'Event Revenue', type: 'income', parentKey: 'income' },
   { key: 'sales_revenue', code: '3120', name: 'Sales Revenue', type: 'income', parentKey: 'income' },
+  { key: 'round_off_income', code: '3185', name: 'Round Off Income', type: 'income', parentKey: 'income' },
   { key: 'other_income', code: '3190', name: 'Other Income', type: 'income', parentKey: 'income' },
   { key: 'stock_gain', code: '3195', name: 'Stock Gain', type: 'income', parentKey: 'income' },
   { key: 'expenses', code: '4000', name: 'Expenses', type: 'expense' },
   { key: 'cost_of_goods_sold', code: '4050', name: 'Cost of Goods Sold', type: 'expense', parentKey: 'expenses' },
+  { key: 'sales_discount', code: '4055', name: 'Sales Discount', type: 'expense', parentKey: 'expenses' },
+  { key: 'round_off_expense', code: '4058', name: 'Round Off Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'stock_loss', code: '4060', name: 'Stock Loss', type: 'expense', parentKey: 'expenses' },
   { key: 'general_expense', code: '4100', name: 'General Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'salary_expense', code: '4110', name: 'Salary Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'contract_expense', code: '4120', name: 'Contract Expense', type: 'expense', parentKey: 'expenses' },
   { key: 'depreciation_expense', code: '4130', name: 'Depreciation Expense', type: 'expense', parentKey: 'expenses' },
 ];
+
+const SYSTEM_ACCOUNT_GROUPS: Partial<Record<SystemAccountKey, string>> = {
+  cash_in_hand: 'Cash-in-hand',
+  bank_account: 'Bank Accounts',
+  accounts_receivable: 'Sundry Debtors',
+  stock_in_hand: 'Stock in Hand',
+  gst_input: 'Current Assets',
+  cgst_input: 'Current Assets',
+  sgst_input: 'Current Assets',
+  igst_input: 'Current Assets',
+  fixed_assets: 'Fixed Assets',
+  accumulated_depreciation: 'Fixed Assets',
+  accounts_payable: 'Sundry Creditors',
+  gst_payable: 'Duties & Taxes',
+  cgst_payable: 'Duties & Taxes',
+  sgst_payable: 'Duties & Taxes',
+  igst_payable: 'Duties & Taxes',
+  tds_payable: 'Duties & Taxes',
+  opening_balance_equity: 'Capital Account',
+  capital_account: 'Capital Account',
+  retained_earnings: 'Profit & Loss Account',
+  inventory_opening_reserve: 'Capital Account',
+  booking_revenue: 'Sales Accounts',
+  event_revenue: 'Sales Accounts',
+  sales_revenue: 'Sales Accounts',
+  round_off_income: 'Indirect Incomes',
+  other_income: 'Indirect Incomes',
+  stock_gain: 'Indirect Incomes',
+  cost_of_goods_sold: 'Direct Expenses',
+  round_off_expense: 'Indirect Expenses',
+  stock_loss: 'Direct Expenses',
+  general_expense: 'Indirect Expenses',
+  salary_expense: 'Indirect Expenses',
+  contract_expense: 'Indirect Expenses',
+  depreciation_expense: 'Indirect Expenses',
+};
 
 const normalizePaymentMode = (value?: string): AccountingPaymentMode => {
   const mode = String(value || 'cash').trim().toLowerCase();
@@ -296,6 +358,7 @@ const postLedgerEntry = async (input: {
   credit: number;
   description?: string;
   createdBy?: string;
+  metadata?: Record<string, any>;
   session?: mongoose.ClientSession;
 }) => {
   const runningBalance = round2(
@@ -316,6 +379,7 @@ const postLedgerEntry = async (input: {
     runningBalance,
     createdBy: input.createdBy,
     metadata: {
+      ...(input.metadata || {}),
       source: 'journal_entry',
       sourceId: input.journalEntryId.toString(),
       referenceType: input.referenceType,
@@ -323,6 +387,45 @@ const postLedgerEntry = async (input: {
     },
     input.session
   );
+};
+
+export const recalculateLedgerRunningBalancesForAccounts = async (
+  accountIds: Array<mongoose.Types.ObjectId | string>,
+  options: TransactionOptions = {}
+): Promise<Array<{ accountId: string; entryCount: number; updatedCount: number; closingBalance: number }>> => {
+  const uniqueIds = Array.from(
+    new Set(
+      (accountIds || [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const summaries: Array<{ accountId: string; entryCount: number; updatedCount: number; closingBalance: number }> = [];
+
+  for (const accountId of uniqueIds) {
+    const rows = await withOptionalSession(
+      AccountLedgerEntry.find({ accountId, isDeleted: { $ne: true } }).sort({ entryDate: 1, createdAt: 1, _id: 1 }),
+      options.session
+    );
+    let runningBalance = 0;
+    let updatedCount = 0;
+    for (const row of rows) {
+      runningBalance = round2(runningBalance + Number(row.debit || 0) - Number(row.credit || 0));
+      if (round2(Number(row.runningBalance || 0)) !== runningBalance) {
+        row.runningBalance = runningBalance;
+        await row.save(options.session ? { session: options.session } : undefined);
+        updatedCount += 1;
+      }
+    }
+    summaries.push({
+      accountId,
+      entryCount: rows.length,
+      updatedCount,
+      closingBalance: runningBalance,
+    });
+  }
+
+  return summaries;
 };
 
 const escapeRegex = (value: string): string => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -380,6 +483,23 @@ const allocateSystemAccountCode = async (preferredCode: string): Promise<string>
   return generateNumber('chart_account_system', { prefix: 'SYS-', padTo: 5 });
 };
 
+const resolveSystemAccountGroup = async (definition: SystemAccountDefinition) => {
+  const fallbackGroupName = SYSTEM_ACCOUNT_GROUPS[definition.key];
+  if (!fallbackGroupName) {
+    return { groupId: undefined, groupName: undefined };
+  }
+
+  const group = await AccountGroup.findOne({
+    groupName: { $regex: `^${escapeRegex(fallbackGroupName)}$`, $options: 'i' },
+    isActive: true,
+  }).select('_id groupName');
+
+  return {
+    groupId: group?._id,
+    groupName: String(group?.groupName || fallbackGroupName).trim() || undefined,
+  };
+};
+
 export const ensureAccountingChart = async (createdBy?: string): Promise<Map<string, IChartAccount>> => {
   const resolved = new Map<string, IChartAccount>();
 
@@ -388,12 +508,15 @@ export const ensureAccountingChart = async (createdBy?: string): Promise<Map<str
       ? resolved.get(definition.parentKey) || await findSystemAccountByKey(definition.parentKey)
       : null;
     const parentAccountId = parentAccount?._id;
+    const group = await resolveSystemAccountGroup(definition);
     const payload: Record<string, any> = {
       accountCode: definition.code,
       accountName: definition.name,
       accountType: definition.type,
       subType: definition.subType || 'general',
       parentAccountId,
+      ...(group.groupId ? { groupId: group.groupId } : {}),
+      ...(group.groupName ? { groupName: group.groupName } : {}),
       systemKey: definition.key,
       isSystem: true,
       isActive: true,
@@ -429,6 +552,8 @@ export const ensureAccountingChart = async (createdBy?: string): Promise<Map<str
           || account.accountCode !== safePayload.accountCode
           || account.accountName !== definition.name
           || String(account.parentAccountId || '') !== String(parentAccountId || '')
+          || String(account.groupId || '') !== String(group.groupId || '')
+          || String(account.groupName || '') !== String(group.groupName || '')
           || account.accountType !== definition.type
           || account.subType !== (definition.subType || 'general')
           || !account.isSystem;
@@ -436,7 +561,7 @@ export const ensureAccountingChart = async (createdBy?: string): Promise<Map<str
           account = await ChartAccount.findByIdAndUpdate(
             account._id,
             { $set: safePayload, $setOnInsert: { createdBy } },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
           );
         }
       } else {
@@ -463,7 +588,7 @@ export const ensureAccountingChart = async (createdBy?: string): Promise<Map<str
                 },
                 $setOnInsert: { createdBy },
               },
-              { new: true, runValidators: true }
+              { returnDocument: 'after', runValidators: true }
             );
           } catch {
             account = await findSystemAccountByKey(definition.key);
@@ -512,7 +637,7 @@ export const ensureFinancialPeriod = async (month: number, year: number, created
         createdBy,
       },
     },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 };
 
@@ -591,9 +716,7 @@ const resolveAccount = async (input: {
   });
   if (existing) return existing;
 
-  const accountCode = await generateNumber('chart_account_manual', { prefix: 'AC-', padTo: 5 });
-  return ChartAccount.create({
-    accountCode,
+  const payload = {
     accountName: String(input.fallbackName).trim(),
     accountType: input.fallbackType,
     subType: input.fallbackSubType || 'general',
@@ -603,7 +726,28 @@ const resolveAccount = async (input: {
     isSystem: false,
     isActive: true,
     createdBy: input.createdBy,
-  });
+  };
+
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const accountCode = await generateNumber('chart_account_manual', { prefix: 'AC-', padTo: 5 });
+    const duplicateByCode = await findAccountByCode(accountCode);
+    if (duplicateByCode) {
+      continue;
+    }
+    try {
+      return await ChartAccount.create({
+        accountCode,
+        ...payload,
+      });
+    } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(`Unable to allocate a unique chart account code for ${String(input.fallbackName).trim()}`);
 };
 
 const buildAuditAfterSnapshot = (
@@ -674,7 +818,9 @@ export const createJournalEntry = async (
 }> => {
   const entryDate = input.entryDate ? new Date(input.entryDate) : new Date();
   await assertPeriodOpen(entryDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   const execute = async (session?: mongoose.ClientSession): Promise<{
     entry: IJournalEntry;
@@ -781,9 +927,14 @@ export const createJournalEntry = async (
         credit: line.credit,
         description: line.description || input.description,
         createdBy: input.createdBy,
+        metadata: input.metadata,
         session,
       });
     }
+    await recalculateLedgerRunningBalancesForAccounts(
+      resolvedLines.map((line) => line.account._id as mongoose.Types.ObjectId),
+      { session, skipTransaction: true }
+    );
 
     await writeAuditLog({
       session,
@@ -918,7 +1069,9 @@ export const createInvoice = async (
 }> => {
   const invoiceDate = input.invoiceDate ? new Date(input.invoiceDate) : new Date();
   await assertPeriodOpen(invoiceDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   const execute = async (session?: mongoose.ClientSession): Promise<{
     invoice: IAccountingInvoice;
@@ -927,6 +1080,8 @@ export const createInvoice = async (
   }> => {
     const postingPlan = buildInvoicePostingPlan({
       baseAmount: input.baseAmount,
+      discountAmount: input.discountAmount,
+      roundOffAmount: input.roundOffAmount,
       gstAmount: input.gstAmount,
       gstRate: input.gstRate,
       gstTreatment: input.gstTreatment,
@@ -942,7 +1097,7 @@ export const createInvoice = async (
       padTo: 5,
     }, session);
 
-    const requestedPaymentAmount = Math.min(round2(Number(input.paymentAmount || 0)), postingPlan.gst.totalAmount);
+    const requestedPaymentAmount = Math.min(round2(Number(input.paymentAmount || 0)), postingPlan.collectibleTotal);
     const initialPaidAmount = postingPlan.postingMode === 'cash_sale' ? requestedPaymentAmount : 0;
     const deferredPaymentAmount = postingPlan.postingMode === 'invoice_plus_payment' ? requestedPaymentAmount : 0;
     const invoice = await createDocument<IAccountingInvoice>(
@@ -957,14 +1112,15 @@ export const createInvoice = async (
         referenceId: input.referenceId,
         description: input.description,
         baseAmount: postingPlan.gst.baseAmount,
+        discountAmount: postingPlan.discountAmount,
         gstAmount: postingPlan.gst.gstAmount,
         cgstAmount: postingPlan.gst.cgstAmount,
         sgstAmount: postingPlan.gst.sgstAmount,
         igstAmount: postingPlan.gst.igstAmount,
-        totalAmount: postingPlan.gst.totalAmount,
+        totalAmount: postingPlan.collectibleTotal,
         paidAmount: initialPaidAmount,
-        balanceAmount: round2(Math.max(0, postingPlan.gst.totalAmount - initialPaidAmount)),
-        status: buildInvoiceStatus(initialPaidAmount, postingPlan.gst.totalAmount),
+        balanceAmount: round2(Math.max(0, postingPlan.collectibleTotal - initialPaidAmount)),
+        status: buildInvoiceStatus(initialPaidAmount, postingPlan.collectibleTotal),
         gstTreatment: postingPlan.gst.gstTreatment,
         createdBy: input.createdBy,
         metadata: {
@@ -994,7 +1150,7 @@ export const createInvoice = async (
         credit: line.credit,
         description: line.description,
       })),
-    }, { session, skipTransaction: true });
+    }, { session, skipTransaction: true, skipChartEnsure: true });
 
     invoice.journalEntryId = invoiceJournal.entry._id as mongoose.Types.ObjectId;
     await invoice.save(session ? { session } : undefined);
@@ -1030,7 +1186,7 @@ export const createInvoice = async (
         createdBy: input.createdBy,
         paymentDate: invoiceDate,
         metadata: { initialInvoicePayment: true },
-      }, { session, skipTransaction: true });
+      }, { session, skipTransaction: true, skipChartEnsure: true });
       payment = recorded.payment;
     }
 
@@ -1087,7 +1243,9 @@ export const recordPayment = async (
 }> => {
   const paymentDate = input.paymentDate ? new Date(input.paymentDate) : new Date();
   await assertPeriodOpen(paymentDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   const execute = async (session?: mongoose.ClientSession): Promise<{
     invoice: IAccountingInvoice;
@@ -1123,7 +1281,7 @@ export const recordPayment = async (
         { accountKey: cashAccountKey, debit: amount, credit: 0, description: 'Payment received' },
         { accountKey: 'accounts_receivable', debit: 0, credit: amount, description: 'Reduce receivable' },
       ],
-    }, { session, skipTransaction: true });
+    }, { session, skipTransaction: true, skipChartEnsure: true });
 
     const paymentNumber = await generateNumber('accounting_payment', { prefix: 'PAY-', datePart: true, padTo: 5 }, session);
     const payment = await createDocument<IAccountingPayment>(
@@ -1203,7 +1361,9 @@ export const recordExpense = async (
 }> => {
   const expenseDate = input.expenseDate ? new Date(input.expenseDate) : new Date();
   await assertPeriodOpen(expenseDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   let vendor: IVendor | null = null;
   if (input.vendorId) {
@@ -1264,7 +1424,7 @@ export const recordExpense = async (
         ...input.metadata,
       },
       lines: expenseLines,
-    }, { session, skipTransaction: true });
+    }, { session, skipTransaction: true, skipChartEnsure: true });
 
     let paymentEntry: IJournalEntry | null = null;
     if (paidAmount > 0 && paidAmount < amount) {
@@ -1284,7 +1444,7 @@ export const recordExpense = async (
           { accountId: payableAccount._id, debit: paidAmount, credit: 0, description: 'Reduce payable' },
           { accountKey: settlementKey, debit: 0, credit: paidAmount, description: 'Vendor payment' },
         ],
-      }, { session, skipTransaction: true });
+      }, { session, skipTransaction: true, skipChartEnsure: true });
 
       paymentEntry = paymentJournal.entry;
 
@@ -1355,12 +1515,17 @@ export const recordExpense = async (
   return runInAccountingTransaction(execute);
 };
 
-export const recordRefund = async (input: RecordRefundInput): Promise<{
+export const recordRefund = async (
+  input: RecordRefundInput,
+  options: TransactionOptions = {}
+): Promise<{
   journalEntry: IJournalEntry;
 }> => {
   const refundDate = input.refundDate ? new Date(input.refundDate) : new Date();
   await assertPeriodOpen(refundDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   const plan = buildRefundPostingPlan({
     baseAmount: input.baseAmount,
@@ -1386,6 +1551,10 @@ export const recordRefund = async (input: RecordRefundInput): Promise<{
       credit: line.credit,
       description: line.description,
     })),
+  }, {
+    session: options.session,
+    skipTransaction: options.skipTransaction,
+    skipChartEnsure: true,
   });
 
   return { journalEntry: journal.entry };
@@ -1587,7 +1756,9 @@ export const runAssetDepreciation = async (
 ) => {
   const postingDate = input.postingDate ? new Date(input.postingDate) : new Date();
   await assertPeriodOpen(postingDate);
-  await ensureAccountingChart(input.createdBy);
+  if (!options.skipChartEnsure) {
+    await ensureAccountingChart(input.createdBy);
+  }
 
   const execute = async (session?: mongoose.ClientSession) => {
     const assetQuery = FixedAsset.findById(assetId);
@@ -1619,7 +1790,7 @@ export const runAssetDepreciation = async (
           description: 'Accumulated depreciation',
         },
       ],
-    }, { session, skipTransaction: true });
+    }, { session, skipTransaction: true, skipChartEnsure: true });
 
     asset.totalDepreciationPosted = round2(Number(asset.totalDepreciationPosted || 0) + plan.monthlyDepreciation);
     asset.lastDepreciationDate = postingDate;
@@ -1654,6 +1825,8 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
       const totalPayable = round2(Number(totalCredits[0]?.total || 0) + (openingSide === 'credit' ? openingBalance : 0));
       const paid = round2(Number(totalDebits[0]?.total || 0) + (openingSide === 'debit' ? openingBalance : 0));
       const signedOpening = openingSide === 'credit' ? -openingBalance : openingBalance;
+      const ledgerAccountCode = String((ledgerAccount as any)?.accountCode || (vendor as any)?.ledgerAccountId?.accountCode || '').trim();
+      const ledgerAccountName = String((ledgerAccount as any)?.accountName || (vendor as any)?.ledgerAccountId?.accountName || '').trim();
       return {
         _id: vendor._id,
         name: vendor.name,
@@ -1673,6 +1846,8 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
         openingSide,
         address: vendor.address,
         ledgerAccountId: vendor.ledgerAccountId,
+        ledgerAccountCode,
+        ledgerAccountName,
         totalPayable,
         paid,
         balance: round2(Math.abs(closing + signedOpening)),
@@ -1683,19 +1858,46 @@ export const listVendorBalances = async (): Promise<Array<Record<string, any>>> 
 };
 
 export const importBankStatement = async (statementRows: ReconciliationStatementRow[]) => {
-  const bankAccount = await resolveAccount({ accountKey: 'bank_account' });
+  await ensureAccountingChart();
+  const bankAccounts = await ChartAccount.find({ subType: 'bank', isActive: true }).select('_id');
+  const bankAccountIds = bankAccounts.map((account) => account._id);
+  if (!bankAccountIds.length) {
+    return buildBankReconciliationMatches(statementRows, []);
+  }
+  const datedRows = statementRows
+    .map((row) => ({ ...row, parsedDate: new Date(row.date) }))
+    .filter((row) => !Number.isNaN(row.parsedDate.getTime()));
+  const dateFilter: Record<string, any> = {};
+  if (datedRows.length) {
+    const minDate = new Date(Math.min(...datedRows.map((row) => row.parsedDate.getTime())));
+    const maxDate = new Date(Math.max(...datedRows.map((row) => row.parsedDate.getTime())));
+    minDate.setHours(0, 0, 0, 0);
+    maxDate.setHours(23, 59, 59, 999);
+    dateFilter.entryDate = { $gte: minDate, $lte: maxDate };
+  }
+  const statementAmounts = statementRows.map((row) => Math.abs(round2(Number(row.amount || 0)))).filter((amount) => amount > 0);
+  const isPlausibleStatementAmount = (ledgerAmount: number): boolean => {
+    if (!statementAmounts.length) return true;
+    return statementAmounts.some((statementAmount) => {
+      const tolerance = Math.max(1, round2(statementAmount * 0.1), 250);
+      return Math.abs(round2(Math.abs(ledgerAmount) - statementAmount)) <= tolerance;
+    });
+  };
   const ledgerRows = await AccountLedgerEntry.find({
-    accountId: bankAccount._id,
+    accountId: { $in: bankAccountIds },
     isReconciled: false,
+    ...dateFilter,
   }).sort({ entryDate: 1, createdAt: 1 });
 
-  const normalizedLedger: ReconciliationLedgerRow[] = ledgerRows.map((row) => ({
-    id: row._id.toString(),
-    entryDate: row.entryDate,
-    debit: row.debit,
-    credit: row.credit,
-    narration: row.narration,
-  }));
+  const normalizedLedger: ReconciliationLedgerRow[] = ledgerRows
+    .filter((row) => isPlausibleStatementAmount(Math.max(Number(row.debit || 0), Number(row.credit || 0))))
+    .map((row) => ({
+      id: row._id.toString(),
+      entryDate: row.entryDate,
+      debit: row.debit,
+      credit: row.credit,
+      narration: row.narration,
+    }));
 
   return buildBankReconciliationMatches(statementRows, normalizedLedger);
 };
@@ -1736,7 +1938,7 @@ export const buildDashboardSummary = async (options: { startDate?: Date; endDate
     : new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 0, 0, 0, 0);
   const startOfMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
 
-  const [selectedIncome, monthIncome, selectedExpense, gstPayableAgg] = await Promise.all([
+  const [selectedIncome, monthIncome, selectedExpense, gstOutputAgg, gstInputAgg] = await Promise.all([
     JournalLine.aggregate([
       { $match: { entryDate: { $gte: normalizedStart, $lte: endDate } } },
       { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
@@ -1765,12 +1967,21 @@ export const buildDashboardSummary = async (options: { startDate?: Date; endDate
       { $match: { 'account.systemKey': { $in: ['cgst_payable', 'sgst_payable', 'igst_payable'] } } },
       { $group: { _id: null, credit: { $sum: '$creditAmount' }, debit: { $sum: '$debitAmount' } } },
     ]),
+    JournalLine.aggregate([
+      { $match: { entryDate: { $lte: endDate } } },
+      { $lookup: { from: 'chartaccounts', localField: 'accountId', foreignField: '_id', as: 'account' } },
+      { $unwind: '$account' },
+      { $match: { 'account.systemKey': { $in: ['cgst_input', 'sgst_input', 'igst_input'] } } },
+      { $group: { _id: null, debit: { $sum: '$debitAmount' }, credit: { $sum: '$creditAmount' } } },
+    ]),
   ]);
 
   const selectedRevenue = round2(Number(selectedIncome[0]?.total || 0));
   const monthToDateRevenue = round2(Number(monthIncome[0]?.total || 0));
   const expenses = round2(Number(selectedExpense[0]?.total || 0));
-  const gstPayable = round2(Number(gstPayableAgg[0]?.credit || 0) - Number(gstPayableAgg[0]?.debit || 0));
+  const outputTax = round2(Number(gstOutputAgg[0]?.credit || 0) - Number(gstOutputAgg[0]?.debit || 0));
+  const inputTax = round2(Number(gstInputAgg[0]?.debit || 0) - Number(gstInputAgg[0]?.credit || 0));
+  const gstSetoff = buildGstSetoffSummary({ outputTax, inputTax });
 
   return {
     todayRevenue: selectedRevenue,
@@ -1779,7 +1990,11 @@ export const buildDashboardSummary = async (options: { startDate?: Date; endDate
     monthToDateRevenue,
     expenses,
     profit: round2(selectedRevenue - expenses),
-    gstPayable,
+    gstPayable: gstSetoff.gstPayable,
+    gstReceivable: gstSetoff.gstReceivable,
+    gstOutputTax: gstSetoff.outputTax,
+    gstInputTax: gstSetoff.inputTax,
+    gstNetBalance: gstSetoff.netBalance,
     periodKey: toPeriodKey(endDate),
     selectedStartDate: normalizedStart.toISOString(),
     selectedEndDate: endDate.toISOString(),

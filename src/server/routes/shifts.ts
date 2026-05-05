@@ -61,7 +61,7 @@ router.post('/assign', authMiddleware, async (req: AuthenticatedRequest, res: Re
         notes,
         createdBy: req.userId,
       },
-      { upsert: true, new: true, runValidators: true }
+      { upsert: true, returnDocument: 'after', runValidators: true }
     );
 
     res.json({ success: true, data: shift, message: 'Shift assigned' });

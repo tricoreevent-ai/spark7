@@ -461,7 +461,7 @@ router.post('/locations', authMiddleware, async (req: AuthenticatedRequest, res:
         isActive: parseBoolean(req.body?.isActive, true),
         createdBy: req.userId,
       },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     res.status(201).json({ success: true, message: 'Stock location saved', data: row });
@@ -594,7 +594,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         ...(adjustmentReason !== undefined && { adjustmentReason }),
         lastRestockDate: new Date(),
       },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     await writeInventoryAudit({
@@ -707,7 +707,7 @@ router.put('/bulk-update', authMiddleware, async (req: AuthenticatedRequest, res
             ...(row?.adjustmentReason !== undefined && { adjustmentReason: row.adjustmentReason }),
             lastRestockDate: new Date(),
           },
-          { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+          { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
         );
 
         await writeInventoryAudit({
@@ -936,7 +936,7 @@ router.post('/import/products', authMiddleware, async (req: AuthenticatedRequest
         if (barcode) payload.barcode = barcode;
 
         if (product) {
-          product = await Product.findByIdAndUpdate(product._id, payload, { new: true, runValidators: true });
+          product = await Product.findByIdAndUpdate(product._id, payload, { returnDocument: 'after', runValidators: true });
         } else {
           product = await Product.create(payload);
         }
@@ -956,7 +956,7 @@ router.post('/import/products', authMiddleware, async (req: AuthenticatedRequest
             adjustmentReason: 'Bulk import',
             lastRestockDate: new Date(),
           },
-          { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+          { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
         );
 
         imported.push({
@@ -1066,7 +1066,7 @@ router.post('/transfer', authMiddleware, async (req: AuthenticatedRequest, res: 
         shelfLocation: String(toShelfLocation || '').trim(),
         adjustmentReason: String(reason || '').trim() || 'Stock location transfer',
       },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     await writeAuditLog({
@@ -1241,7 +1241,7 @@ router.put('/:productId', authMiddleware, async (req: AuthenticatedRequest, res:
         ...(adjustmentReason !== undefined && { adjustmentReason }),
         lastRestockDate: new Date(),
       },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     await writeInventoryAudit({

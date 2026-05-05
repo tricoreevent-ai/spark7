@@ -1,5 +1,5 @@
 import { formatCurrency } from '../config';
-import { GeneralSettings, PrintProfile } from './generalSettings';
+import { GeneralSettings, PrintProfile, resolveGeneralSettingsAssetUrl } from './generalSettings';
 
 export interface InvoiceLineItem {
   productName: string;
@@ -75,6 +75,19 @@ const businessAddress = (settings: GeneralSettings) => {
     .join(', ');
 };
 
+const resolveInvoiceLogoUrl = (settings: GeneralSettings): string =>
+  (() => {
+    const resolved = resolveGeneralSettingsAssetUrl(
+      settings.business.invoiceLogoDataUrl || settings.business.reportLogoDataUrl || ''
+    );
+    if (!resolved) return '';
+    if (resolved.startsWith('data:') || /^https?:\/\//i.test(resolved)) return resolved;
+    if (typeof window !== 'undefined') {
+      return new URL(resolved, window.location.origin).toString();
+    }
+    return resolved;
+  })();
+
 const buildThermal58Html = (sale: PrintableSale, settings: GeneralSettings): string => {
   const invoiceDate = sale.createdAt ? new Date(sale.createdAt) : new Date();
   const invoiceNumber = sale.invoiceNumber || sale.saleNumber || '-';
@@ -84,8 +97,9 @@ const buildThermal58Html = (sale: PrintableSale, settings: GeneralSettings): str
   const gstLine = settings.invoice.showBusinessGstin && settings.business.gstin && isGstBill
     ? `<div class="line"><span>GSTIN</span><span>${escapeHtml(settings.business.gstin)}</span></div>`
     : '';
-  const logo = settings.business.invoiceLogoDataUrl
-    ? `<div class="logo-wrap"><img src="${settings.business.invoiceLogoDataUrl}" alt="Logo" class="logo" /></div>`
+  const invoiceLogoUrl = resolveInvoiceLogoUrl(settings);
+  const logo = invoiceLogoUrl
+    ? `<div class="logo-wrap"><img src="${invoiceLogoUrl}" alt="Logo" class="logo" /></div>`
     : '';
   const notes = sale.notes || settings.invoice.terms || '';
   const footerNote = settings.invoice.footerNote || 'Thank you for your business.';
@@ -121,6 +135,7 @@ const buildThermal58Html = (sale: PrintableSale, settings: GeneralSettings): str
 <html>
 <head>
   <meta charset="utf-8" />
+  <base href="${typeof window !== 'undefined' ? window.location.origin : ''}/" />
   <title>Invoice ${escapeHtml(invoiceNumber)}</title>
   <style>
     @page { size: 58mm auto; margin: 0; }
@@ -250,11 +265,11 @@ export const buildInvoiceHtml = (sale: PrintableSale, settings: GeneralSettings)
 
   const customerBlock = settings.invoice.showCustomerDetails
     ? `
-      <div class="meta-group">
+      <div class="meta-group customer-group">
         <h4>Customer Details</h4>
         <p><strong>Name:</strong> ${escapeHtml(sale.customerName || '-')}</p>
         <p><strong>Phone:</strong> ${escapeHtml(sale.customerPhone || '-')}</p>
-        <p><strong>Email:</strong> ${escapeHtml(sale.customerEmail || '-')}</p>
+        ${sale.customerEmail ? `<p><strong>Email:</strong> ${escapeHtml(sale.customerEmail)}</p>` : ''}
       </div>
     `
     : '';
@@ -263,61 +278,114 @@ export const buildInvoiceHtml = (sale: PrintableSale, settings: GeneralSettings)
     ? `<p><strong>GSTIN:</strong> ${escapeHtml(settings.business.gstin)}</p>`
     : '';
 
-  const invoiceLogo = settings.business.invoiceLogoDataUrl
-    ? `<img src="${settings.business.invoiceLogoDataUrl}" alt="Business Logo" class="logo-img" />`
+  const invoiceLogoUrl = resolveInvoiceLogoUrl(settings);
+  const invoiceLogo = invoiceLogoUrl
+    ? `<img src="${escapeHtml(invoiceLogoUrl)}" alt="Business Logo" class="logo-img" />`
     : '';
+  const businessName = settings.business.tradeName || settings.business.legalName || 'Business';
+  const legalName = settings.business.legalName && settings.business.legalName !== businessName
+    ? settings.business.legalName
+    : '';
+  const contactLine = [
+    settings.business.phone ? `Phone: ${settings.business.phone}` : '',
+    settings.business.email ? `Email: ${settings.business.email}` : '',
+  ].filter(Boolean).join(' | ');
+  const taxLine = [
+    settings.business.gstin ? `GSTIN: ${settings.business.gstin}` : '',
+    settings.business.pan ? `PAN: ${settings.business.pan}` : '',
+  ].filter(Boolean).join(' | ') || 'GST / PAN details can be configured in Settings';
+  const addressLine = businessAddress(settings) || 'Business address can be configured in Settings';
 
   return `
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
+  <base href="${typeof window !== 'undefined' ? window.location.origin : ''}/" />
   <title>Invoice ${escapeHtml(invoiceNumber)}</title>
   <style>
-    @page { size: ${css.page}; margin: 10mm; }
+    @page { size: ${css.page}; margin: 12mm 12mm 14mm; }
     * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; font-size: ${css.fontSize}; color: #111; margin: 0; background: #fff; }
-    .container { width: ${css.width}; margin: 0 auto; }
-    .top { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #0f172a; padding: 10px 0 12px; margin-bottom: 12px; }
-    .brandline { display: flex; gap: 10px; align-items: flex-start; }
-    .logo-box { width: 90px; min-width: 90px; height: 90px; border: none; border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent; }
+    .container { width: ${css.width}; margin: 0 auto; padding: 0 1mm 4mm; }
+    .top { display: grid; grid-template-columns: minmax(0, 1.55fr) 250px; gap: 18px; align-items: start; border-bottom: 2px solid #0f172a; padding: 8px 0 14px; margin-bottom: 14px; }
+    .brandline { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .brand-head { display: grid; grid-template-columns: ${invoiceLogo ? '96px minmax(0, 1fr)' : 'minmax(0, 1fr)'}; gap: 14px; align-items: center; }
+    .logo-box { width: 96px; min-width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent; padding: 0; }
     .logo-img { width: 100%; height: 100%; object-fit: contain; }
-    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 0.4px; color: #0f172a; }
-    h2 { margin: 0; font-size: 16px; }
+    .brandcopy { min-width: 0; }
+    .eyebrow { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #475569; }
+    .subtitle { margin: 2px 0 0; color: #334155; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+    h1 { margin: 4px 0 0; font-size: 22px; letter-spacing: 0.4px; color: #0f172a; }
+    h2 { margin: 10px 0 0; font-size: 18px; }
+    .legal-name { color: #475569; margin-top: 3px; }
     h3 { margin: 0 0 6px; font-size: 14px; }
     h4 { margin: 0 0 4px; font-size: 13px; }
     p { margin: 2px 0; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #94a3b8; padding: 7px; text-align: left; vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #94a3b8; padding: 8px; text-align: left; vertical-align: top; }
     th { background: #e2e8f0; color: #0f172a; font-weight: 700; }
     .num { text-align: right; white-space: nowrap; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
-    .meta-group { border: 1px solid #cbd5e1; padding: 9px; border-radius: 8px; background: #f8fafc; }
-    .totals { margin-top: 8px; margin-left: auto; width: 320px; }
+    .brand-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; padding: 2px 0 0; }
+    .brand-meta-card { min-width: 0; }
+    .brand-meta-label { display: block; margin-bottom: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #64748b; }
+    .brand-meta-value { font-size: 12px; line-height: 1.45; color: #0f172a; word-break: break-word; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .meta-group { padding: 0; min-height: 0; }
+    .invoice-info { padding: 0; }
+    .invoice-info p { margin: 5px 0; }
+    .notes-copy { white-space: pre-wrap; line-height: 1.6; color: #334155; }
+    .totals { margin-top: 12px; margin-left: auto; width: 332px; }
     .totals table td { border: 1px solid #94a3b8; }
     .totals .grand td { background: #e2e8f0; }
-    .foot { margin-top: 10px; border-top: 1px dashed #888; padding-top: 8px; }
+    .foot { margin-top: 18px; border-top: 1px dashed #888; padding-top: 10px; }
     .center { text-align: center; }
     .invoice-badge { display: inline-block; margin-top: 2px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: ${isGstBill ? '#dbeafe' : '#fef3c7'}; color: ${isGstBill ? '#1e3a8a' : '#92400e'}; }
+    .section-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #eef2ff; color: #3730a3; }
+    @media print {
+      .logo-box, .brand-meta, .meta-group, .invoice-info { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="top">
       <div class="brandline">
-        ${invoiceLogo ? `<div class="logo-box">${invoiceLogo}</div>` : ''}
-        <div>
-          <h1>${escapeHtml(invoiceTitle)}</h1>
-          <p>${escapeHtml(invoiceSubtitle)}</p>
-          <span class="invoice-badge">${isGstBill ? 'GST BILL' : 'NON-GST BILL'}</span>
-          <h2>${escapeHtml(settings.business.tradeName || settings.business.legalName)}</h2>
-          <p>${escapeHtml(settings.business.legalName)}</p>
-          ${gstLine}
-          <p>${escapeHtml(businessAddress(settings) || '-')}</p>
-          <p><strong>Phone:</strong> ${escapeHtml(settings.business.phone || '-')} | <strong>Email:</strong> ${escapeHtml(settings.business.email || '-')}</p>
+        <div class="brand-head">
+          ${invoiceLogo ? `<div class="logo-box">${invoiceLogo}</div>` : ''}
+          <div class="brandcopy">
+            <p class="eyebrow">${escapeHtml(isGstBill ? 'GST Invoice' : 'Sales Invoice')}</p>
+            <h1>${escapeHtml(invoiceTitle)}</h1>
+            <p class="subtitle">${escapeHtml(invoiceSubtitle || '')}</p>
+            <div class="badge-row">
+              <span class="invoice-badge">${isGstBill ? 'GST BILL' : 'NON-GST BILL'}</span>
+              <span class="section-chip">${escapeHtml((sale.paymentMethod || 'cash').toUpperCase())}</span>
+            </div>
+            <h2>${escapeHtml(businessName)}</h2>
+            ${legalName ? `<p class="legal-name">${escapeHtml(legalName)}</p>` : ''}
+          </div>
+        </div>
+        <div class="brand-meta">
+          <div class="brand-meta-card">
+            <span class="brand-meta-label">Tax Details</span>
+            <div class="brand-meta-value">${escapeHtml(taxLine)}</div>
+          </div>
+          <div class="brand-meta-card">
+            <span class="brand-meta-label">Contact</span>
+            <div class="brand-meta-value">${escapeHtml(contactLine || 'Phone and email can be configured in Settings')}</div>
+          </div>
+          <div class="brand-meta-card">
+            <span class="brand-meta-label">Address</span>
+            <div class="brand-meta-value">${escapeHtml(addressLine)}</div>
+          </div>
+          <div class="brand-meta-card">
+            <span class="brand-meta-label">Customer</span>
+            <div class="brand-meta-value">${escapeHtml(sale.customerName || 'Walk-in Customer')}</div>
+          </div>
         </div>
       </div>
-      <div>
+      <div class="invoice-info">
         <h3>Invoice Info</h3>
         <p><strong>Invoice No:</strong> ${escapeHtml(invoiceNumber)}</p>
         <p><strong>Date:</strong> ${invoiceDate.toLocaleDateString('en-IN')} ${invoiceDate.toLocaleTimeString('en-IN')}</p>
@@ -327,9 +395,9 @@ export const buildInvoiceHtml = (sale: PrintableSale, settings: GeneralSettings)
 
     <div class="meta">
       ${customerBlock}
-      <div class="meta-group">
+      <div class="meta-group notes-group">
         <h4>Invoice Notes</h4>
-        <p>${escapeHtml(sale.notes || settings.invoice.terms || '-')}</p>
+        <p class="notes-copy">${escapeHtml(sale.notes || settings.invoice.terms || '-')}</p>
       </div>
     </div>
 

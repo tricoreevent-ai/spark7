@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from '../config';
 import { Table, Column } from '../components/Table';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { apiUrl, fetchApiJson } from '../utils/api';
 import { getGeneralSettings } from '../utils/generalSettings';
 import { printInvoice, PrintableSale } from '../utils/invoicePrint';
@@ -523,6 +524,8 @@ export const Orders: React.FC = () => {
     setCustomerMatches([]);
     setSearchingCustomers(false);
   };
+
+  useEscapeKey(closeEditModal, { enabled: Boolean(editingRow) });
 
   const updateEditItem = (index: number, field: keyof EditItem, value: string) => {
     setEditForm((prev) => {

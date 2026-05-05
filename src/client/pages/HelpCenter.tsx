@@ -1,7 +1,34 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { PublicSeo } from '../public/PublicSeo';
-import { getGeneralSettings } from '../utils/generalSettings';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+// Dependencies to add: fuse.js, react-intersection-observer, lucide-react
+import Fuse from 'fuse.js';
+import { MessageCircle, X, Copy, Send, ChevronDown, ChevronUp, Printer, Search, Filter, ArrowRight, ChevronRight, Sparkles, BookOpen, FileText, BarChart3, LayoutGrid, ArrowUp, Home, ShoppingCart, Boxes, Users, Settings2, Wallet, ShieldCheck } from 'lucide-react';
+
+// Print styles
+const printStyles = `
+  @media print {
+    .no-print { display: none !important; }
+    .print-break { page-break-before: always; }
+    body { background: white !important; color: black !important; }
+    .bg-gray-950, .bg-white/5, .bg-gray-950/30, .bg-gray-950/35 { background: white !important; }
+    .text-white, .text-gray-100, .text-gray-200, .text-gray-300 { color: black !important; }
+    .border-white/10, .border-white/15 { border-color: #ccc !important; }
+    .shadow-lg, .shadow-xl, .shadow-2xl { box-shadow: none !important; }
+    .rounded-2xl, .rounded-3xl { border-radius: 4px !important; }
+    a { color: blue !important; text-decoration: underline !important; }
+    .grid { display: block !important; }
+    .flex { display: block !important; }
+    .hidden { display: block !important; }
+    .lg\\:grid-cols-2, .lg\\:grid-cols-3, .xl\\:grid-cols-2, .xl\\:grid-cols-3 { grid-template-columns: 1fr !important; }
+    .lg\\:flex-row { flex-direction: column !important; }
+    .lg\\:border-l { border-left: none !important; }
+    .lg\\:border-t-0 { border-top: 1px solid #ccc !important; }
+    .lg\\:block { display: block !important; }
+    .lg\\:hidden { display: none !important; }
+  }
+`;
 
 type GuideLink = {
   label: string;
@@ -76,6 +103,8 @@ type TopicIndexGroup = {
   links: Array<{ id: string; label: string }>;
 };
 
+type TopicTreeState = Record<string, boolean>;
+
 type CsvLogicRow = {
   action: string;
   systemResponse: string;
@@ -85,6 +114,13 @@ type CsvMatchRow = {
   statementRow: string;
   ledgerRow: string;
   status: string;
+};
+
+type FieldGuideRow = {
+  field: string;
+  whyItMatters: string;
+  howToUse: string;
+  example: string;
 };
 
 type TransactionGuide = {
@@ -102,6 +138,7 @@ type TransactionGuide = {
   matchedExampleRows?: CsvMatchRow[];
   matchedOutcome?: string;
   mismatchExamples?: Array<{ issue: string; explanation: string }>;
+  fieldGuide?: FieldGuideRow[];
 };
 
 type TransactionGuideSection = {
@@ -113,6 +150,139 @@ type TransactionGuideSection = {
 
 const APPLICATION_NAME = 'Sarva';
 const APPLICATION_TITLE = 'Sarva Sports Complex Management Platform';
+
+type SearchMatch = {
+  key?: string;
+  indices: ReadonlyArray<readonly [number, number]>;
+};
+
+type AiKnowledgeRow = {
+  keywords: string[];
+  answer: string;
+  sourceLabel: string;
+  sourceId: string;
+};
+
+const aiKnowledgeBase: AiKnowledgeRow[] = [
+  {
+    keywords: ['membership', 'plan', 'subscription', 'member'],
+    answer: 'Create membership plans from Operations, define pricing and validity, then issue subscriptions to the customer profile that needs the plan.',
+    sourceLabel: 'Membership Plan',
+    sourceId: 'transaction-membership-plan',
+  },
+  {
+    keywords: ['booking', 'facility', 'court', 'slot', 'schedule'],
+    answer: 'Use the facility booking flow to pick the court, date, slot timing, and customer details before confirming the reservation and payment.',
+    sourceLabel: 'Facility Booking',
+    sourceId: 'transaction-facility-booking',
+  },
+  {
+    keywords: ['sales', 'invoice', 'billing', 'product', 'scan'],
+    answer: 'Open the Sales Invoice workspace, search or scan the product, review quantity and payment, then post the invoice so stock and sales reports update together.',
+    sourceLabel: 'Sales Invoice',
+    sourceId: 'transaction-sales-invoice',
+  },
+  {
+    keywords: ['accounting', 'voucher', 'expense', 'journal', 'entry'],
+    answer: 'Use the Accounts area to post the correct voucher type for income, expense, transfer, or settlement so reports and balances remain traceable.',
+    sourceLabel: 'Accounting Invoice',
+    sourceId: 'transaction-accounting-invoice',
+  },
+  {
+    keywords: ['report', 'gst', 'tax', 'profit', 'summary'],
+    answer: 'Reports use posted transactions only, then group sales, returns, taxes, and collections by the selected date range to keep report totals consistent.',
+    sourceLabel: 'Report Logic',
+    sourceId: 'report-logic',
+  },
+];
+
+// Mock AI function - replace with real API call
+const askAI = async (question: string): Promise<string> => {
+  await new Promise((resolve) => setTimeout(resolve, 700 + Math.random() * 600));
+
+  const normalizedQuestion = String(question || '').trim().toLowerCase();
+  const matchedRow =
+    aiKnowledgeBase.find((row) => row.keywords.some((keyword) => normalizedQuestion.includes(keyword)))
+    || aiKnowledgeBase[0];
+
+  return `${matchedRow.answer} [Read more in ${matchedRow.sourceLabel}](#${matchedRow.sourceId})`;
+};
+
+type CollapsedSections = Record<string, boolean>;
+
+type ChatMessage = {
+  id: string;
+  type: 'user' | 'ai';
+  content: string;
+  timestamp: Date;
+};
+
+type HelpSearchCategory = 'modules' | 'transactions' | 'reports' | 'guides';
+type HelpSearchFilter = 'all' | HelpSearchCategory;
+
+type HelpSearchDocument = {
+  id: string;
+  title: string;
+  description: string;
+  breadcrumb: string[];
+  category: HelpSearchCategory;
+  route?: string;
+  routeLabel?: string;
+  keywords: string[];
+  badges: string[];
+  quickLinks: GuideLink[];
+  updatedLabel?: string;
+};
+
+const HELP_SEARCH_SYNONYMS: Record<string, string[]> = {
+  bill: ['invoice', 'sales'],
+  billing: ['invoice', 'sales'],
+  invoice: ['bill', 'sales'],
+  staff: ['employee', 'people', 'payroll'],
+  employee: ['staff', 'people'],
+  client: ['customer', 'crm'],
+  customer: ['client', 'crm'],
+  payment: ['receipt', 'collection', 'settlement'],
+  receipt: ['payment', 'collection'],
+  booking: ['reservation', 'facility', 'slot'],
+  payroll: ['salary', 'employee'],
+  balance: ['trial balance', 'balance sheet', 'opening balance'],
+  ledger: ['accounting', 'journal'],
+};
+
+const HELP_RESULT_UPDATED_LABELS = ['Updated today', 'Updated 2 days ago', 'Updated 5 days ago', 'Updated 1 week ago'];
+
+const normalizeSearchValue = (value: string) => String(value || '').trim().toLowerCase();
+
+const tokenizeSearch = (value: string): string[] =>
+  normalizeSearchValue(value)
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+const levenshteinDistance = (left: string, right: string): number => {
+  const a = normalizeSearchValue(left);
+  const b = normalizeSearchValue(right);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const matrix = Array.from({ length: a.length + 1 }, () => Array<number>(b.length + 1).fill(0));
+  for (let row = 0; row <= a.length; row += 1) matrix[row][0] = row;
+  for (let column = 0; column <= b.length; column += 1) matrix[0][column] = column;
+
+  for (let row = 1; row <= a.length; row += 1) {
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+      matrix[row][column] = Math.min(
+        matrix[row - 1][column] + 1,
+        matrix[row][column - 1] + 1,
+        matrix[row - 1][column - 1] + cost
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+};
 
 const overviewSections: OverviewSection[] = [
   {
@@ -315,14 +485,29 @@ const menuSections: MenuSection[] = [
     accent: 'from-sky-500/20 via-cyan-500/10 to-transparent',
     pages: [
       {
+        id: 'product-center',
+        title: 'Product Center',
+        route: '/products',
+        navigation: 'Top menu > Catalog > Product Center',
+        purpose: 'Gives one entry point for catalog setup, stock review, and product monitoring.',
+        description:
+          'This page is the catalog landing workspace. It summarizes total products, low stock, out-of-stock items, auto-reorder candidates, promotion activity, stock value, low-stock urgency, and recently updated products so users can decide whether to open Product Entry, Product Catalog, Stock Alerts, Categories, or Procurement next.',
+        keyUses: ['Review catalog health', 'Open the right catalog workflow quickly', 'Watch stock-value and promotion signals', 'Jump into recent product edits'],
+        links: [
+          { label: 'Open Product Center', to: '/products' },
+          { label: 'Open Product Entry', to: '/products/entry' },
+          { label: 'Open Product Catalog', to: '/products/catalog' },
+        ],
+      },
+      {
         id: 'product-entry',
         title: 'Product Entry',
         route: '/products/entry',
         navigation: 'Top menu > Catalog > Product Entry',
-        purpose: 'Used to create and manage product details.',
+        purpose: 'Creates or updates the full product master used by sales, stock, and catalog reports.',
         description:
-          'This page allows users to add new products and update core product information so items can be used correctly in sales, inventory, alerts, and reporting. It is the main starting point for creating a new item master in the application.',
-        keyUses: ['Add products', 'Update pricing', 'Maintain data'],
+          'This page is the detailed product master form. Users fill identity fields such as Product Name, SKU, and Barcode; organize the item with Category, Subcategory, and Item Type; define Description, selling and buying prices, GST and HSN, stock opening values, units, reorder controls, variant combinations, price tiers, and tracking flags. The same layout is used for both add and edit so the entire product setup stays in one workspace.',
+        keyUses: ['Create item masters', 'Define pricing and GST setup', 'Set stock, reorder, and opening values', 'Build size/color variant and tier-pricing rows'],
         links: [
           { label: 'Open Product Entry', to: '/products/entry' },
           { label: 'Open Product Catalog', to: '/products/catalog' },
@@ -334,10 +519,10 @@ const menuSections: MenuSection[] = [
         title: 'Product Catalog',
         route: '/products/catalog',
         navigation: 'Top menu > Catalog > Product Catalog',
-        purpose: 'Displays all products in the system.',
+        purpose: 'Reviews, filters, sorts, and edits the full product list.',
         description:
-          'This page gives a full product list with search, filters, and navigation controls. It is useful for checking the current catalog, reviewing product information, and confirming whether an item already exists before adding or editing.',
-        keyUses: ['View products', 'Search items', 'Check availability'],
+          'This page gives a full product list with search, category/status/stock filters, sort controls, pagination, configurable visible columns, and direct edit/delete actions. Summary cards at the top react to the filtered list, so users can immediately see how many items remain after filters, the filtered stock total, low-stock count, visible-column count, and auto-reorder count.',
+        keyUses: ['Search and filter the catalog', 'Change visible columns', 'Review stock and status by product', 'Open edit/delete actions quickly'],
         links: [
           { label: 'Open Product Catalog', to: '/products/catalog' },
           { label: 'Open Stock Alerts', to: '/products/alerts' },
@@ -349,10 +534,10 @@ const menuSections: MenuSection[] = [
         title: 'Stock Alerts',
         route: '/products/alerts',
         navigation: 'Top menu > Catalog > Stock Alerts',
-        purpose: 'Monitors inventory levels.',
+        purpose: 'Monitors low stock, stock-outs, reorder queue, and inactive items.',
         description:
-          'This page notifies users when stock is low or when other product conditions need attention. It helps the business act early, avoid stock-outs, and plan replenishment before sales are affected.',
-        keyUses: ['Identify low stock', 'Plan restocking'],
+          'This page turns product conditions into action queues. It separates inventory items into Low Stock, Out of Stock, Auto-Reorder Queue, and Inactive Products so catalog managers and purchasers can work the highest-priority exceptions first.',
+        keyUses: ['Identify low stock', 'Review out-of-stock items', 'Follow auto-reorder suggestions', 'Jump to product editing from alert lists'],
         links: [
           { label: 'Open Stock Alerts', to: '/products/alerts' },
           { label: 'Open Procurement', to: '/inventory/procurement' },
@@ -569,8 +754,8 @@ const menuSections: MenuSection[] = [
         navigation: 'Top menu > Sales > Reports',
         purpose: 'Provides sales insights.',
         description:
-          'This page is the tabbed Sales & POS reporting workspace. It combines store-level finance views, sales analysis, GST verification datasets, operational attendance, receivable follow-up, inventory movement, membership sales, and export tools in one place.',
-        keyUses: ['Switch report tabs by business question', 'Filter reports by date range', 'Export the active report to Excel or PDF', 'Review GST handoff and reconciliation datasets'],
+          'This page is the tabbed Sales & POS reporting workspace for sales-facing and catalog-facing reports only. It includes store-level sales Profit & Loss, store-level sales Balance Sheet, shift/day summaries, item and customer sales analysis, returns, gross profit, GST classifications, detailed sales registers, payment reconciliation, Z-report, POS inventory movement, GST handoff datasets, receivables, cash-vs-credit, user-wise sales, and tax summary. The top date filter changes every active tab, and Excel/PDF export always uses the currently selected tab.',
+        keyUses: ['Switch report tabs by business question', 'Apply one date range to every tab', 'Export the active report to Excel or PDF', 'Review sales-only P&L and Balance Sheet logic without opening Accounting reports'],
         links: [
           { label: 'Open Reports', to: '/reports' },
           { label: 'Open Sales Orders', to: '/orders' },
@@ -968,131 +1153,153 @@ const reportLogicSections: ReportLogicSection[] = [
     ],
   },
   {
+    id: 'report-logic-catalog',
+    title: 'Catalog Screen Logic',
+    description:
+      'These notes explain what the catalog pages show, how the top cards behave, and what the main product fields mean before the data reaches sales or stock reports.',
+    topics: [
+      {
+        id: 'product-center-logic',
+        name: 'Product Center Metrics',
+        explanation:
+          'Product Center counts all products for the active tenant. Total Products is the full product count. Inventory, Services, and Non-Inventory are split by item type. Low Stock means inventory items where stock is more than 0 but less than or equal to Min Stock. Out of Stock means stock is 0 or below. Auto-Reorder counts inventory items where Auto Reorder is enabled and stock is at or below Min Stock. Promotions count products with a promotional price greater than 0 whose date window is active today. Stock Value is the cost-based estimate calculated as stock multiplied by cost for inventory items.',
+      },
+      {
+        id: 'product-entry-logic',
+        name: 'Product Entry Field Guide',
+        explanation:
+          'Product Name is the visible item label used across sales and reports. SKU and Barcode are identity codes used for search, billing, and scanning. Category and Subcategory organize the catalog; Item Type controls whether the record behaves as inventory, service, or non-inventory. Price is the main selling price, Cost is the buying or landed cost, Wholesale Price is an alternate selling rate, and Promotional Price only matters inside its Promo Start and Promo End window. GST Rate with CGST, SGST, and IGST controls sales tax treatment; HSN or SAC Code supports GST classification. Initial Stock and Opening Stock Value seed opening quantity and valuation, Min Stock drives low-stock logic, Auto Reorder plus Preferred Reorder Quantity create replenishment suggestions, Unit defines the selling/counting unit, and Variant Size plus Variant Color are comma-separated helpers used to generate the editable variant matrix. Price tiers store bulk pricing by tier name, minimum quantity, and unit price. Batch Tracking, Expiry Required, Serial Number Tracking, and Allow Negative Stock change stock-control behavior.',
+      },
+      {
+        id: 'product-catalog-logic',
+        name: 'Product Catalog Fields, Filters, And Cards',
+        explanation:
+          'The search box scans name, SKU, barcode, category, subcategory, description, HSN code, tax type, variant size, variant color, and serial-tracking text. Category, status, and stock filters narrow the visible rows before cards and pagination are calculated. Filtered Products is the number of rows left after search and filters. Total Stock is the sum of stock for those filtered rows. Low Stock counts filtered rows where stock is more than 0 and less than or equal to Min Stock. Visible Columns is the number of selected table columns plus the Actions column. Auto-Reorder counts filtered rows where Auto Reorder is enabled and stock is at or below Min Stock.',
+      },
+      {
+        id: 'stock-alerts-logic',
+        name: 'Stock Alerts Rules',
+        explanation:
+          'Stock Alerts reviews inventory items only for low-stock and stock-out sections. Low Stock shows inventory items where stock is more than 0 and less than or equal to Min Stock. Out of Stock shows inventory items where stock is 0 or below. Auto-Reorder Queue uses the same threshold but only includes products with Auto Reorder enabled. Inactive Products lists catalog rows where Status is inactive, even if stock still exists.',
+      },
+    ],
+  },
+  {
     id: 'report-logic-sales',
     title: 'Sales And Customer Reports',
     description:
-      'These reports summarize store-level finance, sales activity, GST datasets, customer balances, inventory movement, membership billing, and operational sales performance.',
+      'These reports summarize store-level POS sales, receivables, GST datasets, payment mix, catalog movement, and operational sales performance.',
     topics: [
       {
         id: 'sales-reports-tabs',
         name: 'Sales Reports Menu Tabs',
         explanation:
-          'The Sales & POS Reports page is a tabbed workspace. Use the top date filter first, then open the required tab from the Reports Menu. The available tabs cover store-level Profit & Loss, Balance Sheet, shift summaries, day-wise sales, item and customer analysis, returns, gross profit, GST classification and note registers, sales registers, payment reconciliation, Z-report, POS inventory movement, membership sales, GST handoff datasets, receivables, attendance, cash vs credit, user-wise sales, and tax summary. The active tab can be exported to Excel or PDF.',
+          'The Sales & POS Reports page is a tabbed workspace for sales-facing and catalog-facing reports only. Start Date and End Date apply to every tab when Refresh is pressed. Export Excel and Export PDF always use the active tab. The top summary cards are driven by the loaded tab datasets: Gross Profit comes from the Gross Profit report, Revenue comes from gross-sales revenue, Outstanding Receivables comes from open POS credit balances, Sales Return uses the approved refund total, and Tax Summary shows sales tax less return tax reversal for the selected period. The available tabs cover store-level sales Profit & Loss, store-level sales Balance Sheet, shift summaries, day-wise sales, item and customer analysis, returns, gross profit, GST classification and note registers, sales registers, payment reconciliation, Z-report, POS inventory movement, GST handoff datasets, receivables, cash vs credit, user-wise sales, and tax summary.',
       },
       {
         name: 'Profit & Loss (Store-level)',
         explanation:
-          'This tab shows income minus expense for the selected period from the sales-side reporting workspace. It is useful for a fast store-level profitability review without opening the full accounting console.',
+          'A sales-only profit summary. Sales Before Discounts is taxable value plus discount amount. Less Discounts is the saved invoice discount. Net Billed Sales is taxable sales after discounts. Less Sales Returns uses approved returned amount. Net Sales equals billed sales minus returns. COGS is the saved POS item cost, and Gross Profit equals Net Sales minus COGS. This view excludes accounting-only ledger entries such as payroll, vendor bills, and non-POS expenses.',
       },
       {
         name: 'Balance Sheet (Store-level)',
         explanation:
-          'This tab shows a store-level position view for assets, liabilities, and net balance as of the selected period end. It helps management compare operating position against the sales-side activity period.',
+          'A POS-focused balance snapshot. Assets include catalog inventory value, open POS credit receivables, cash drawer cash, and pending digital settlements. Liabilities include output GST payable after return/note reversals. Store Net Position is total assets minus liabilities. This report is designed for POS and inventory oversight rather than the statutory accounting balance sheet.',
       },
       {
         name: 'Sales Summary (Daily / Shift)',
         explanation:
-          'This tab groups sales by business day and shift so the team can compare counters, timings, and day-close performance. It is useful for front desk and cash-control review.',
+          'Groups posted sales by business day and shift. It compares counter performance, invoice counts, returns, net sales, tax, COGS, and gross profit for each day or shift, making it useful for front desk and cashier review.',
       },
       {
         name: 'Daily Sales Summary',
         explanation:
-          'Adds all posted invoices day by day. Invoice count is the number of bills, sales amount is the saved bill total, tax amount comes from GST on those invoices, and outstanding is the unpaid balance still left.',
+          'Lists posted invoices by date. Invoice count is the number of bills, sales amount is the saved total, tax amount is the GST on those invoices, and outstanding is the unpaid balance still due.',
       },
       {
         name: 'Item-wise Sales',
         explanation:
-          'Reads each product line from saved sales invoices. Quantity sold is the total quantity, amount is the total line value, and tax comes from the GST recorded for those item lines.',
+          'Sums sales invoice item lines by product. It shows quantity sold, taxable value, tax amount, and line total for each item so you can see which products drive revenue and volume.',
       },
       {
         name: 'Customer-wise Sales',
         explanation:
-          'Groups posted invoices customer by customer. It shows how many invoices each customer received, the total billed value, and what is still pending from that customer.',
+          'Groups posted invoices by customer. It shows invoice count, total billed value, tax, total amount, and outstanding balance for each customer, helping track customer revenue and credit exposure.',
       },
       {
         name: 'Sales Returns',
         explanation:
-          'Uses approved return entries only. Returned amount is the value of goods coming back, returned tax is the tax reversal, and refund amount is the money given back or adjusted.',
+          'Uses approved return records only. It shows returned goods value, returned GST, and refund or adjustment value so you can understand how returns affect net sales and tax.',
       },
       {
         name: 'Gross Profit',
         explanation:
-          'Compares what was sold against the saved item cost. Revenue is sales value, cost of goods is item cost, and gross profit is the difference between them.',
+          'Compares posted sales revenue against saved item cost. Revenue is total sales value, cost of goods is item cost, Gross Profit is revenue minus cost, and Margin % shows profit as a percentage of revenue.',
       },
       {
         name: 'HSN-wise Sales',
         explanation:
-          'Groups posted sales by HSN or SAC classification so the business can review taxable value, tax amount, and product classification volume for GST-facing work.',
+          'Groups posted sales by HSN/SAC classification. It shows taxable value and GST by code, allowing easy review of product classification and GST reporting categories.',
       },
       {
         name: 'Taxable / Exempt / Nil / Non-GST',
         explanation:
-          'Separates billed values into GST treatment buckets. It helps users understand how much revenue was taxable and how much was exempt, nil-rated, or outside GST.',
+          'Separates billed values into GST treatment buckets. It shows how much revenue was taxable, exempt, nil-rated, or outside GST so you can confirm the sales mix for tax compliance.',
       },
       {
         name: 'B2B vs B2C Invoice Report',
         explanation:
-          'Splits invoices into registered-party and consumer billing groups. This is useful for GST review, invoice scrutiny, and return-preparation cross-checking.',
+          'Classifies invoices as B2B when a valid customer GSTIN exists and B2C otherwise. It shows counts and values for registered-party versus consumer billing.',
       },
       {
         name: 'Credit / Debit Note Register (GST)',
         explanation:
-          'Shows GST-impacting note activity linked to sales corrections. It helps users review why taxable value or tax changed after the original billing cycle.',
+          'Lists GST-impacting note records from credit note and sales return workflows. It shows taxable value and tax adjustments linked to the original invoice and correction type.',
       },
       {
         name: 'Sales Register (Detailed)',
         explanation:
-          'Lists invoice-level rows with customer, document, tax, value, and status details. It acts as the most detailed sales register for audit review and export.',
+          'Lists every posted invoice row with customer, document number, GSTIN, taxable value, tax split, total value, and status. This is the most detailed sales register for audit review and export.',
       },
       {
         name: 'Payment Reconciliation Report',
         explanation:
-          'Compares invoice-side values with recorded payment-side values so the team can identify what is settled, partially settled, or still mismatched.',
+          'Compares posted invoice values with payment settlement values. It shows invoice count, taxable value, tax, total billed amount, outstanding amount, and pending settlement when payments are not completed.',
       },
       {
         name: 'Z-Report (End of Day)',
         explanation:
-          'Summarizes the end-of-day sales closure view for counter operations. It helps verify daily billing totals, payment mix, and shift-close confidence before handoff.',
+          'Summarizes end-of-day counter performance. It shows day invoice totals, approved returns, payment mode totals, and closing cash values for daily billing close review.',
       },
       {
         name: 'Inventory Movement (POS only)',
         explanation:
-          'Shows stock movement caused by POS selling activity only. It helps the team review how billing reduced item quantities without mixing procurement-side stock changes.',
-      },
-      {
-        name: 'Membership Sales Report',
-        explanation:
-          'Separately summarizes plan and membership-related billing captured through sales flows. It helps users review subscription-linked revenue without opening the memberships module.',
+          'Shows stock movement caused only by posted POS invoice sales. It helps verify how selling activity reduced inventory quantities without mixing procurement or adjustment activity.',
       },
       {
         name: 'GST Handoff Datasets',
         explanation:
-          'Prepares GST-facing export or verification datasets from sales-side transactions. It is used as handoff data for deeper GST workspace review and filing preparation.',
+          'Prepares GST-facing export datasets from sales transactions, returns, and note activity. It is used to hand off sales-side data for GST review, verification, or filing preparation.',
       },
       {
         name: 'Outstanding Receivables',
         explanation:
-          'Lists posted credit invoices that still have balance left to collect. Total outstanding is the sum of all remaining unpaid amounts.',
-      },
-      {
-        name: 'Attendance Report',
-        explanation:
-          'This report surfaces attendance-linked operational counts inside the sales reporting workspace for quick management comparison with business activity in the same period.',
+          'Lists remaining unpaid credit invoices. Total outstanding is the sum of unpaid sales credit balances for the selected period, helping track what customers still owe.',
       },
       {
         name: 'Cash vs Credit Sales',
         explanation:
-          'Separates invoices by invoice type so the team can compare immediate collections against receivable-based billing. Each side shows invoice count and value.',
+          'Splits invoices into cash and credit categories by invoice payment type. It shows invoice count and value for immediate collections versus receivable-based billing.',
       },
       {
         name: 'User-wise Sales',
         explanation:
-          'Groups invoices by the staff user who handled them and shows count, total billed value, and payment-mode mix such as cash, card, and UPI.',
+          'Groups posted invoices by the staff user who handled them. It shows invoice count, billed value, and payment-mode mix so you can review staff sales performance.',
       },
       {
         name: 'Tax Summary',
         explanation:
-          'Builds GST totals from invoice item lines and approved return lines so the business can see billed tax and reversed tax by tax rate.',
+          'Summarizes GST totals by tax rate and includes approved return tax reversals. It shows billed taxable value and tax amounts so you can validate sales tax for the filtered date range.',
       },
     ],
   },
@@ -1306,9 +1513,9 @@ const sampleEntrySections: SampleEntryGroup[] = [
       {
         title: 'Sales Invoice',
         sample:
-          'Sell Yonex Mavis 350 Shuttle quantity 10 and Badminton Grip quantity 4, Customer Phone 9847001122, Customer Name Anjali Nair, Customer Email anjali@example.com, Discount 100 amount, Payment Method UPI, Invoice Type Cash Invoice, Invoice Status Post Invoice, GST Bill On, Notes Counter sale after coaching session.',
+          'Sell Yonex Mavis 350 Shuttle quantity 10 and Badminton Grip quantity 4, Customer Phone 9847001122, Customer Name Anjali Nair, Membership / Member ID ANJ-MEMBER-02, Email ID anjali@example.com, Discount Mode Amount with Discount 100, Payment Method UPI, Invoice Type Paid Now, Save Mode Finalise Invoice, Tax Mode GST Bill, Notes Counter sale after coaching session.',
         result:
-          'Sales, item-wise sales, customer-wise sales, GST totals, and stock movement update immediately.',
+          'Sales, item-wise sales, customer-wise sales, GST totals, payment-mode summaries, and stock movement update immediately after final posting.',
       },
       {
         title: 'Quotation',
@@ -1508,6 +1715,171 @@ const sampleEntrySections: SampleEntryGroup[] = [
   },
 ];
 
+const salesInvoiceFieldGuide: FieldGuideRow[] = [
+  {
+    field: 'Quick actions: New Sale, Hold, Recall, Print, Sync Now, More',
+    whyItMatters: 'These controls manage the current bill lifecycle without forcing staff to leave the billing page.',
+    howToUse: 'Use New Sale to start over, Hold to park the bill, Recall to reopen held or draft bills, Print for invoice output, Sync Now for offline queue upload, and More for recovery or round-off tools.',
+    example: 'Hold a half-finished bill during a phone call, then reopen it from Recall when the customer returns.',
+  },
+  {
+    field: 'Walk-in Customer',
+    whyItMatters: 'Walk-in mode tells the system to save the sale without customer lookup, customer credit, or CRM linking.',
+    howToUse: 'Turn it on only when the sale truly does not need customer identification. Leave it off for customer-linked billing.',
+    example: 'Use Walk-in Customer for a quick anonymous counter sale of grips and shuttle tubes.',
+  },
+  {
+    field: 'Customer Phone',
+    whyItMatters: 'This is the main customer identity field and it controls lookup, repeat billing, store credit, and receivable linking.',
+    howToUse: 'Enter a valid 10-digit mobile number, use Arrow keys to move through matches, and press Enter to select an existing customer when a match appears.',
+    example: 'Type 9847001122, press Arrow Down to highlight Anjali Nair, then press Enter.',
+  },
+  {
+    field: 'Customer Name',
+    whyItMatters: 'The visible invoice name must stay aligned with the customer who is actually being billed.',
+    howToUse: 'Confirm or edit the name after selecting the customer phone. Keep it blank only until the correct linked customer is identified.',
+    example: 'After selecting the phone match, confirm Customer Name shows Anjali Nair.',
+  },
+  {
+    field: 'Membership / Member ID (optional)',
+    whyItMatters: 'This helps the cashier connect the bill to a member reference during customer verification.',
+    howToUse: 'Type the member code or reference when the customer belongs to a membership or loyalty flow.',
+    example: 'Enter ANJ-MEMBER-02 while verifying a known member at the front desk.',
+  },
+  {
+    field: 'Invoice No., Auto / Manual, and Manual Invoice Number',
+    whyItMatters: 'Invoice numbering must stay clean for audit, print output, and migrated or pre-printed number workflows.',
+    howToUse: 'Use Auto for normal billing. Switch to Manual only when a specific external or legacy invoice number must be preserved, then fill Manual Invoice Number.',
+    example: 'Choose Manual and enter MAN-APR-001 for a migrated legacy invoice reference.',
+  },
+  {
+    field: 'Date and Tax Bill quick toggle',
+    whyItMatters: 'The invoice date, current status, and GST quick toggle tell staff what business mode the bill is in before checkout.',
+    howToUse: 'Review the current date card and use the GST quick switch only when tax mode needs to change immediately.',
+    example: 'Switch GST off for a non-taxable invoice before reviewing totals.',
+  },
+  {
+    field: 'Scanner Settings and Scanner On / Off',
+    whyItMatters: 'Different counters use different barcode devices and submit keys.',
+    howToUse: 'Open Scanner Settings to set behavior, then turn scanner mode on only when staff is actively scanning SKU or barcode input.',
+    example: 'Enable scanner mode before a rush-hour batch of barcode-based sales.',
+  },
+  {
+    field: 'Scan / Search Product',
+    whyItMatters: 'This is the fastest product-entry lane on the billing screen.',
+    howToUse: 'In scanner mode, scan and submit with the configured key. In manual mode, type product name, SKU, or barcode, move through results with Arrow keys, and press Enter to add the highlighted result.',
+    example: 'Type TEN, Arrow Down to Tennis Racket, then press Enter to add it.',
+  },
+  {
+    field: 'Open Product Search',
+    whyItMatters: 'The full product catalog dialog is needed when quick search is not enough or staff needs the full list.',
+    howToUse: 'Open the dialog, search the cached catalog, move row by row with the keyboard, and press Enter or click the row to add the product.',
+    example: 'Open Product Search, search Football, highlight Football A, and press Enter to add it.',
+  },
+  {
+    field: 'Items table',
+    whyItMatters: 'This is the live billing grid that decides what stock will move and what value will be charged.',
+    howToUse: 'Review every row after adding products. Confirm item, variant, quantity, row amount, and any stock-control details before checkout.',
+    example: 'After adding 3 items, check that every row shows the right product and price before payment.',
+  },
+  {
+    field: 'Variant',
+    whyItMatters: 'Variant-level size, color, and price must match the exact unit sold.',
+    howToUse: 'Pick the correct variant in the row whenever the product has size, color, or variant-specific pricing.',
+    example: 'Change the row from Size 5 / White to Size 6 / Blue before posting.',
+  },
+  {
+    field: 'Quantity',
+    whyItMatters: 'Quantity directly affects stock reduction, line totals, taxable value, and final billing amount.',
+    howToUse: 'Use the minus and plus buttons in the row to reduce or increase units for that line.',
+    example: 'Press plus once to change a shuttle tube row from 1 unit to 2 units.',
+  },
+  {
+    field: 'Serial Tracking',
+    whyItMatters: 'Serial capture should happen only on the rows that truly require unit-level traceability.',
+    howToUse: 'Leave it off for normal retail items. Turn it on only for serial-enabled products that need warranty, audit, or service follow-up tracking.',
+    example: 'Turn Serial Tracking on for a warranty racket and leave it off for grips or cones.',
+  },
+  {
+    field: 'Batch No and Expiry Date',
+    whyItMatters: 'These fields preserve traceability and compliance for stock that is batch-controlled or expiry-controlled.',
+    howToUse: 'Fill them only for the rows whose product setup requires batch and expiry data.',
+    example: 'Enter batch LOT-APR-02 and expiry 2026-12-31 for a nutrition item.',
+  },
+  {
+    field: 'Serial Numbers',
+    whyItMatters: 'This stores the actual serial list used by the sale when serial tracking is enabled on the row.',
+    howToUse: 'Enter one serial per line or comma-separated values until the captured count matches the billed quantity.',
+    example: 'Enter RK-2401-001 and RK-2401-002 for two serial-tracked rackets.',
+  },
+  {
+    field: 'Bill Summary totals',
+    whyItMatters: 'This is the cashier’s last financial checkpoint before posting.',
+    howToUse: 'Review Subtotal, GST, Discount, Store Credit, Grand Total, Round-off, and the current collection figure before clicking the final action button.',
+    example: 'Confirm that Grand Total is Rs3,150 and Collect Now is also Rs3,150 before taking payment.',
+  },
+  {
+    field: 'Discount',
+    whyItMatters: 'Discount changes the payable amount and affects net sales and tax basis.',
+    howToUse: 'Choose Amount for flat discount or % for percentage discount, then enter the number.',
+    example: 'Choose Amount and enter 100 for a flat Rs100 discount.',
+  },
+  {
+    field: 'Points & Membership',
+    whyItMatters: 'This area applies member benefits and loyalty-point redemption to the current bill.',
+    howToUse: 'Enter Redeem Points, then click Apply after identifying the customer with a valid phone number.',
+    example: 'Enter 200 redeem points and click Apply to preview the benefit.',
+  },
+  {
+    field: 'Store Credit',
+    whyItMatters: 'Store credit reduces the collectible amount without changing the item rows.',
+    howToUse: 'Review available balance, choose a credit note, enter Apply Amount, then click Apply Credit. Clear removes the selection.',
+    example: 'Select CN-APR-02 and apply Rs300 to reduce the bill by Rs300.',
+  },
+  {
+    field: 'Payment Method',
+    whyItMatters: 'Collection reporting depends on the real payment channel used by the customer.',
+    howToUse: 'Choose Cash, Card, UPI, or Bank Transfer to match the actual payment mode.',
+    example: 'Choose UPI when the customer completes the bill by scanning the QR code.',
+  },
+  {
+    field: 'Split Payments',
+    whyItMatters: 'Mixed-mode collection must be captured accurately for reconciliation and cashier control.',
+    howToUse: 'Add split rows, enter Method and Amount, and use Cash Received for cash rows so the screen can show Change Due.',
+    example: 'Use Cash Rs1,000 and UPI Rs1,500 on the same bill.',
+  },
+  {
+    field: 'Credit Settlement',
+    whyItMatters: 'Partial collection on a Pay Later invoice must leave the correct outstanding balance behind.',
+    howToUse: 'When Invoice Type is Pay Later, enter the amount collected now and review the Outstanding figure before posting.',
+    example: 'For a Rs10,000 credit invoice, record Rs3,000 paid now and leave Rs7,000 outstanding.',
+  },
+  {
+    field: 'Invoice Type, Save Mode, and Tax Mode',
+    whyItMatters: 'These controls decide whether the invoice is settled or receivable, draft or posted, and GST or non-GST.',
+    howToUse: 'Choose Paid Now or Pay Later, Finalise Invoice or Save as Draft, and GST Bill or Non-GST Bill before final checkout.',
+    example: 'For a normal counter sale use Paid Now, Finalise Invoice, and GST Bill.',
+  },
+  {
+    field: 'Invoice Notes',
+    whyItMatters: 'Notes preserve context that may matter later for service, audit, or customer follow-up.',
+    howToUse: 'Add short meaningful notes only when the sale needs explanation beyond the standard line items and payment fields.',
+    example: 'Enter Counter sale after coaching session.',
+  },
+  {
+    field: 'Advanced Options: Email, Address, Round-off, Print Profile, Snapshot',
+    whyItMatters: 'These are lower-frequency billing details that still matter for delivery, print behavior, and final review.',
+    howToUse: 'Open Advanced Options for Email ID, Address, Round-off Mode, Print Profile, and Invoice Snapshot review when those details are needed.',
+    example: 'Enter customer email for delivery, confirm the print profile, and review the invoice snapshot before save.',
+  },
+  {
+    field: 'Hold and Post Invoice / Save Draft button',
+    whyItMatters: 'These are the final actions that convert the screen state into a stored billing transaction.',
+    howToUse: 'Use Hold to park the sale. Use the final button only after all row details, totals, and collection values are verified.',
+    example: 'Click Hold during interruption, then return later and press Post Invoice Rs2,593.64 after review.',
+  },
+];
+
 const transactionGuideSections: TransactionGuideSection[] = [
   {
     id: 'transactions-front-desk',
@@ -1569,13 +1941,14 @@ const transactionGuideSections: TransactionGuideSection[] = [
         navigation: 'Top menu > Sales > Sales Dashboard',
         route: '/sales',
         whatItDoes:
-          'Use this screen to create a customer bill for products, apply discount or membership benefits, and post the invoice as cash or credit.',
+          'Use this screen to create a customer bill for products, apply discount, membership, or store credit, and then save the invoice as a paid-now sale, pay-later invoice, draft, or held bill.',
         businessLogic:
-          'The screen totals the cart, applies discount, adds GST when chosen, and then saves the invoice. Cash invoices normally close immediately, while credit invoices keep an outstanding balance until payment is collected later.',
+          'The screen works in five stages. First, the cashier chooses linked-customer or walk-in mode. Second, items are added by scanner, typed search, or the full catalog dialog. Third, row-level controls such as variant, quantity, batch, expiry, and optional serial tracking are completed only for the products that need them. Fourth, discount, points, store credit, and payment settings shape the collectible amount. Finally, invoice type, save mode, tax mode, and optional round-off decide how the invoice is saved and how it appears in reports.',
         practicalExample:
-          'Sell Yonex Mavis 350 Shuttle quantity 10 and Badminton Grip quantity 4 to Anjali Nair, apply discount 100, choose UPI payment, select Cash Invoice and Post Invoice, then create the bill.',
+          'Sell Yonex Mavis 350 Shuttle quantity 10 and Badminton Grip quantity 4 to Anjali Nair, keep Walk-in off, confirm Customer Phone 9847001122, apply Discount Amount 100, choose UPI payment, keep Paid Now + Finalise Invoice + GST Bill, then post the bill.',
         reportFlow:
           'The invoice updates daily sales, item-wise sales, customer-wise sales, tax summaries, user-wise sales, stock movement, and receivable totals when credit is used.',
+        fieldGuide: salesInvoiceFieldGuide,
         note:
           'The help button on this screen opens this manual section directly.',
       },
@@ -2113,13 +2486,731 @@ const topicIndexGroups: TopicIndexGroup[] = [
   },
 ];
 
+const TOPIC_TREE_STORAGE_KEY = 'helpCenterTopicTreeState';
+
+const createDefaultTopicTreeState = (): TopicTreeState =>
+  topicIndexGroups.reduce<TopicTreeState>((acc, group, index) => {
+    acc[group.title] = index < 4;
+    return acc;
+  }, {});
+
+const resolveTopicGroupMeta = (title: string) => {
+  const normalized = title.toLowerCase();
+
+  if (normalized.includes('overview')) {
+    return { icon: BookOpen, tone: 'border-cyan-400/20 bg-cyan-500/10 text-cyan-100' };
+  }
+  if (normalized.includes('main modules')) {
+    return { icon: LayoutGrid, tone: 'border-indigo-400/20 bg-indigo-500/10 text-indigo-100' };
+  }
+  if (normalized.includes('home')) {
+    return { icon: Home, tone: 'border-sky-400/20 bg-sky-500/10 text-sky-100' };
+  }
+  if (normalized.includes('sales')) {
+    return { icon: ShoppingCart, tone: 'border-emerald-400/20 bg-emerald-500/10 text-emerald-100' };
+  }
+  if (normalized.includes('catalog')) {
+    return { icon: Boxes, tone: 'border-amber-400/20 bg-amber-500/10 text-amber-100' };
+  }
+  if (normalized.includes('people')) {
+    return { icon: Users, tone: 'border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-100' };
+  }
+  if (normalized.includes('accounts')) {
+    return { icon: Wallet, tone: 'border-violet-400/20 bg-violet-500/10 text-violet-100' };
+  }
+  if (normalized.includes('validation')) {
+    return { icon: ShieldCheck, tone: 'border-teal-400/20 bg-teal-500/10 text-teal-100' };
+  }
+  if (normalized.includes('admin') || normalized.includes('operations')) {
+    return { icon: Settings2, tone: 'border-rose-400/20 bg-rose-500/10 text-rose-100' };
+  }
+  if (normalized.includes('transaction')) {
+    return { icon: FileText, tone: 'border-cyan-400/20 bg-cyan-500/10 text-cyan-100' };
+  }
+  if (normalized.includes('report')) {
+    return { icon: BarChart3, tone: 'border-emerald-400/20 bg-emerald-500/10 text-emerald-100' };
+  }
+
+  return { icon: Sparkles, tone: 'border-white/10 bg-white/5 text-gray-100' };
+};
+
 export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false }) => {
   const location = useLocation();
-  const settings = useMemo(() => getGeneralSettings(), []);
-  const supportEmail = settings.business.email?.trim() || '';
-  const supportPhone = settings.business.phone?.trim() || '';
   const routeActionLabel = isPublic ? 'Login to open' : 'Open page';
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [searchFilter, setSearchFilter] = useState<HelpSearchFilter>('all');
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('helpCenterRecentSearches');
+      return saved ? JSON.parse(saved) : ['balance', 'attendance', 'invoice', 'booking', 'payroll'];
+    } catch {
+      return ['balance', 'attendance', 'invoice', 'booking', 'payroll'];
+    }
+  });
+  const [recentViewedTopics, setRecentViewedTopics] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('helpCenterRecentTopics');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Chatbot state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  // Collapsible sections state
+  const [collapsedSections, setCollapsedSections] = useState<CollapsedSections>(() => {
+    const saved = localStorage.getItem('helpCenterCollapsedSections');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // TOC state
+  const [activeSection, setActiveSection] = useState<string>('');
+  const [topicTreeState, setTopicTreeState] = useState<TopicTreeState>(() => {
+    try {
+      const saved = localStorage.getItem(TOPIC_TREE_STORAGE_KEY);
+      return saved ? { ...createDefaultTopicTreeState(), ...JSON.parse(saved) } : createDefaultTopicTreeState();
+    } catch {
+      return createDefaultTopicTreeState();
+    }
+  });
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const suggestionButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
   const resolveRouteTarget = (to: string) => (isPublic && to !== '/user-manual' ? '/login' : to);
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Collapsible sections persistence
+  useEffect(() => {
+    localStorage.setItem('helpCenterCollapsedSections', JSON.stringify(collapsedSections));
+  }, [collapsedSections]);
+
+  useEffect(() => {
+    localStorage.setItem(TOPIC_TREE_STORAGE_KEY, JSON.stringify(topicTreeState));
+  }, [topicTreeState]);
+
+  // Hash scrolling
+  useEffect(() => {
+    const hash = String(location.hash || '').replace(/^#/, '').trim();
+    if (!hash) return;
+
+    const scrollToHash = () => {
+      const target = document.getElementById(hash);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    const timer = window.setTimeout(scrollToHash, 80);
+    return () => window.clearTimeout(timer);
+  }, [location.hash]);
+
+  const scrollToSection = useCallback((sectionId: string) => {
+    const target = document.getElementById(sectionId);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (window.location.hash !== `#${sectionId}`) {
+      window.history.replaceState(null, '', `#${sectionId}`);
+    }
+  }, []);
+
+  const toggleTopicTreeGroup = useCallback((groupTitle: string) => {
+    setTopicTreeState((prev) => ({ ...prev, [groupTitle]: !prev[groupTitle] }));
+  }, []);
+
+  const expandAllTopicGroups = useCallback(() => {
+    setTopicTreeState(
+      topicIndexGroups.reduce<TopicTreeState>((acc, group) => {
+        acc[group.title] = true;
+        return acc;
+      }, {})
+    );
+  }, []);
+
+  const collapseAllTopicGroups = useCallback(() => {
+    setTopicTreeState(
+      topicIndexGroups.reduce<TopicTreeState>((acc, group) => {
+        acc[group.title] = false;
+        return acc;
+      }, {})
+    );
+  }, []);
+
+  // TOC intersection observer
+  const sectionIds = useMemo(() => topicIndexGroups.flatMap(group => group.links.map(link => link.id)), []);
+  useEffect(() => {
+    const observedSections = sectionIds
+      .map((id) => document.getElementById(id))
+      .filter((node): node is HTMLElement => Boolean(node));
+
+    if (!observedSections.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => {
+            if (left.intersectionRatio !== right.intersectionRatio) {
+              return right.intersectionRatio - left.intersectionRatio;
+            }
+            return left.boundingClientRect.top - right.boundingClientRect.top;
+          });
+
+        if (visibleEntries[0]) {
+          setActiveSection(visibleEntries[0].target.id);
+        }
+      },
+      {
+        rootMargin: '-120px 0px -62% 0px',
+        threshold: [0.05, 0.2, 0.4, 0.7],
+      }
+    );
+
+    observedSections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [sectionIds]);
+
+  const helpSearchDocuments = useMemo<HelpSearchDocument[]>(() => {
+    const documents: HelpSearchDocument[] = [];
+
+    overviewSections.forEach((section, index) => {
+      documents.push({
+        id: section.id,
+        title: section.title,
+        description: section.description,
+        breadcrumb: ['Help Guide', 'Overview'],
+        category: 'guides',
+        route: '/user-manual',
+        routeLabel: 'User Manual',
+        keywords: [...section.bullets, 'guide', 'manual', 'overview'],
+        badges: ['Guide'],
+        quickLinks: [{ label: 'Open Table of Contents', to: '/user-manual#topic-index' }],
+        updatedLabel: HELP_RESULT_UPDATED_LABELS[index % HELP_RESULT_UPDATED_LABELS.length],
+      });
+    });
+
+    moduleSummaries.forEach((module, index) => {
+      documents.push({
+        id: module.id,
+        title: module.title,
+        description: module.description,
+        breadcrumb: ['Modules', module.title],
+        category: 'modules',
+        route: module.route,
+        routeLabel: routeActionLabel,
+        keywords: [module.purpose, module.navigation, ...module.keyUses],
+        badges: ['Module'],
+        quickLinks: module.links,
+        updatedLabel: HELP_RESULT_UPDATED_LABELS[(index + 1) % HELP_RESULT_UPDATED_LABELS.length],
+      });
+    });
+
+    menuSections.forEach((section, sectionIndex) => {
+      section.pages.forEach((page, pageIndex) => {
+        documents.push({
+          id: page.id,
+          title: page.title,
+          description: page.description,
+          breadcrumb: [section.title, page.title],
+          category: 'modules',
+          route: page.route,
+          routeLabel: routeActionLabel,
+          keywords: [page.purpose, page.navigation, ...page.keyUses],
+          badges: [section.title],
+          quickLinks: page.links,
+          updatedLabel: HELP_RESULT_UPDATED_LABELS[(sectionIndex + pageIndex + 2) % HELP_RESULT_UPDATED_LABELS.length],
+        });
+      });
+    });
+
+    reportLogicSections.forEach((section, sectionIndex) => {
+      section.topics.forEach((topic, topicIndex) => {
+        documents.push({
+          id: topic.id || section.id,
+          title: topic.name,
+          description: topic.explanation,
+          breadcrumb: ['Reports', section.title],
+          category: 'reports',
+          route: '/reports',
+          routeLabel: routeActionLabel,
+          keywords: [section.description, section.title, 'report', 'logic', 'summary'],
+          badges: ['Report'],
+          quickLinks: [{ label: 'Open Reports', to: '/reports' }],
+          updatedLabel: HELP_RESULT_UPDATED_LABELS[(sectionIndex + topicIndex + 1) % HELP_RESULT_UPDATED_LABELS.length],
+        });
+      });
+    });
+
+    sampleEntrySections.forEach((section, sectionIndex) => {
+      section.entries.forEach((entry, entryIndex) => {
+        documents.push({
+          id: section.id,
+          title: entry.title,
+          description: `${entry.sample} ${entry.result}`,
+          breadcrumb: ['Reports', section.title],
+          category: 'reports',
+          route: '/reports',
+          routeLabel: routeActionLabel,
+          keywords: [section.description, entry.sample, entry.result, 'example'],
+          badges: ['Example'],
+          quickLinks: [{ label: 'Open Reports', to: '/reports' }],
+          updatedLabel: HELP_RESULT_UPDATED_LABELS[(sectionIndex + entryIndex + 3) % HELP_RESULT_UPDATED_LABELS.length],
+        });
+      });
+    });
+
+    transactionGuideSections.forEach((section, sectionIndex) => {
+      section.guides.forEach((guide, guideIndex) => {
+        documents.push({
+          id: guide.id,
+          title: guide.title,
+          description: guide.whatItDoes,
+          breadcrumb: ['Transactions', section.title],
+          category: 'transactions',
+          route: guide.route,
+          routeLabel: routeActionLabel,
+          keywords: [guide.navigation, guide.businessLogic, guide.practicalExample, guide.reportFlow, guide.note],
+          badges: ['Guide', section.title],
+          quickLinks: [{ label: routeActionLabel, to: guide.route }],
+          updatedLabel: HELP_RESULT_UPDATED_LABELS[(sectionIndex + guideIndex) % HELP_RESULT_UPDATED_LABELS.length],
+        });
+      });
+    });
+
+    return documents.map((document) => ({
+      ...document,
+      keywords: Array.from(new Set(
+        document.keywords
+          .flatMap((value) => {
+            const tokens = tokenizeSearch(value);
+            const expanded = tokens.flatMap((token) => [token, ...(HELP_SEARCH_SYNONYMS[token] || [])]);
+            return [...tokens, ...expanded];
+          })
+      )),
+    }));
+  }, [routeActionLabel]);
+
+  const helpSearchDocumentMap = useMemo(
+    () => new Map(helpSearchDocuments.map((document) => [document.id, document])),
+    [helpSearchDocuments]
+  );
+
+  const helpSearchVocabulary = useMemo(() => {
+    const words = new Set<string>();
+    helpSearchDocuments.forEach((document) => {
+      [document.title, document.description, ...document.breadcrumb, ...document.keywords].forEach((value) => {
+        tokenizeSearch(value).forEach((token) => words.add(token));
+      });
+    });
+    Object.entries(HELP_SEARCH_SYNONYMS).forEach(([key, values]) => {
+      words.add(key);
+      values.forEach((value) => words.add(value));
+    });
+    return Array.from(words);
+  }, [helpSearchDocuments]);
+
+  const expandedSearchQuery = useMemo(() => {
+    const tokens = tokenizeSearch(debouncedQuery);
+    if (!tokens.length) return '';
+    const expanded = tokens.flatMap((token) => [token, ...(HELP_SEARCH_SYNONYMS[token] || [])]);
+    return Array.from(new Set([debouncedQuery.trim(), ...expanded])).join(' ');
+  }, [debouncedQuery]);
+
+  const didYouMean = useMemo(() => {
+    const tokens = tokenizeSearch(debouncedQuery);
+    if (!tokens.length) return '';
+
+    const correctedTokens = tokens.map((token) => {
+      let bestWord = token;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      helpSearchVocabulary.forEach((candidate) => {
+        const distance = levenshteinDistance(token, candidate);
+        if (
+          distance < bestDistance
+          && distance <= Math.max(1, Math.floor(candidate.length / 3))
+        ) {
+          bestWord = candidate;
+          bestDistance = distance;
+        }
+      });
+
+      return bestWord;
+    });
+
+    const suggestion = correctedTokens.join(' ').trim();
+    return suggestion && suggestion !== normalizeSearchValue(debouncedQuery) ? suggestion : '';
+  }, [debouncedQuery, helpSearchVocabulary]);
+
+  const fuse = useMemo(() => new Fuse(helpSearchDocuments, {
+    keys: [
+      { name: 'title', weight: 0.5 },
+      { name: 'breadcrumb', weight: 0.18 },
+      { name: 'keywords', weight: 0.2 },
+      { name: 'description', weight: 0.12 },
+    ],
+    threshold: 0.34,
+    includeMatches: true,
+    includeScore: true,
+    ignoreLocation: true,
+    minMatchCharLength: 2,
+    shouldSort: true,
+  }), [helpSearchDocuments]);
+
+  const baseSearchResults = useMemo(() => {
+    if (!debouncedQuery.trim()) return [];
+    const normalizedQuery = normalizeSearchValue(debouncedQuery);
+    const queryTokens = tokenizeSearch(debouncedQuery);
+
+    return fuse.search(expandedSearchQuery).map((result) => {
+      const titleNormalized = normalizeSearchValue(result.item.title);
+      const exactTitleMatch = titleNormalized === normalizedQuery;
+      const partialTitleMatch = normalizedQuery.length >= 2 && titleNormalized.includes(normalizedQuery);
+      const keywordMatch = queryTokens.some((token) => result.item.keywords.some((keyword) => keyword.includes(token)));
+      const breadcrumbMatch = queryTokens.some((token) => result.item.breadcrumb.some((crumb) => normalizeSearchValue(crumb).includes(token)));
+
+      return {
+        ...result.item,
+        matches: result.matches as SearchMatch[] | undefined,
+        score: Number(result.score || 0),
+        exactTitleMatch,
+        partialTitleMatch,
+        keywordMatch,
+        breadcrumbMatch,
+      };
+    }).sort((left, right) => {
+      if (left.exactTitleMatch !== right.exactTitleMatch) return left.exactTitleMatch ? -1 : 1;
+      if (left.partialTitleMatch !== right.partialTitleMatch) return left.partialTitleMatch ? -1 : 1;
+      if (left.keywordMatch !== right.keywordMatch) return left.keywordMatch ? -1 : 1;
+      if (left.breadcrumbMatch !== right.breadcrumbMatch) return left.breadcrumbMatch ? -1 : 1;
+      return left.score - right.score;
+    });
+  }, [debouncedQuery, expandedSearchQuery, fuse]);
+
+  const resultCountsByFilter = useMemo(() => ({
+    all: baseSearchResults.length,
+    modules: baseSearchResults.filter((result) => result.category === 'modules').length,
+    transactions: baseSearchResults.filter((result) => result.category === 'transactions').length,
+    reports: baseSearchResults.filter((result) => result.category === 'reports').length,
+    guides: baseSearchResults.filter((result) => result.category === 'guides').length,
+  }), [baseSearchResults]);
+
+  const filteredItems = useMemo(() => {
+    const filtered = searchFilter === 'all'
+      ? baseSearchResults
+      : baseSearchResults.filter((result) => result.category === searchFilter);
+    return filtered.slice(0, 12);
+  }, [baseSearchResults, searchFilter]);
+
+  const suggestionItems = useMemo(() => filteredItems.slice(0, 5), [filteredItems]);
+
+  const popularTopics = useMemo(
+    () => ['trial-balance-report', 'transaction-facility-booking', 'manual-attendance-review', 'transaction-sales-invoice', 'attendance-register']
+      .map((id) => helpSearchDocumentMap.get(id))
+      .filter((item): item is HelpSearchDocument => Boolean(item)),
+    [helpSearchDocumentMap]
+  );
+
+  const quickNavigationCards = useMemo(
+    () => moduleSummaries.slice(0, 6).map((module) => ({
+      id: module.id,
+      label: module.title,
+      route: module.route,
+    })),
+    []
+  );
+
+  const quickActionCards = useMemo(() => {
+    const actions: Array<{ label: string; to: string }> = [];
+    filteredItems.forEach((item) => {
+      if (item.route && !actions.some((action) => action.to === item.route)) {
+        actions.push({
+          label: `${routeActionLabel} ${item.title}`,
+          to: item.route,
+        });
+      }
+      item.quickLinks.forEach((link) => {
+        if (!actions.some((action) => action.to === link.to && action.label === link.label)) {
+          actions.push({ label: link.label, to: link.to });
+        }
+      });
+    });
+    return actions.slice(0, 4);
+  }, [filteredItems, routeActionLabel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('helpCenterRecentSearches', JSON.stringify(recentSearches.slice(0, 8)));
+    } catch {
+      // ignore local storage failures
+    }
+  }, [recentSearches]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('helpCenterRecentTopics', JSON.stringify(recentViewedTopics.slice(0, 8)));
+    } catch {
+      // ignore local storage failures
+    }
+  }, [recentViewedTopics]);
+
+  useEffect(() => {
+    setSelectedSuggestionIndex(-1);
+    suggestionButtonRefs.current = [];
+  }, [debouncedQuery, searchFilter]);
+
+  useEffect(() => {
+    const handleSlashFocus = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== '/') return;
+      const target = event.target as HTMLElement | null;
+      const tagName = String(target?.tagName || '').toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target?.isContentEditable) return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleSlashFocus);
+    return () => window.removeEventListener('keydown', handleSlashFocus);
+  }, []);
+
+  const rememberRecentSearch = useCallback((value: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return;
+    setRecentSearches((prev) => [normalized, ...prev.filter((entry) => entry.toLowerCase() !== normalized.toLowerCase())].slice(0, 8));
+  }, []);
+
+  const rememberViewedTopic = useCallback((id: string) => {
+    if (!id) return;
+    setRecentViewedTopics((prev) => [id, ...prev.filter((entry) => entry !== id)].slice(0, 8));
+  }, []);
+
+  const handleOpenSearchItem = useCallback((item: Pick<HelpSearchDocument, 'id'>) => {
+    rememberViewedTopic(item.id);
+    if (debouncedQuery.trim()) {
+      rememberRecentSearch(debouncedQuery);
+    }
+    scrollToSection(item.id);
+  }, [debouncedQuery, rememberRecentSearch, rememberViewedTopic, scrollToSection]);
+
+  const applySearchQuery = useCallback((nextQuery: string) => {
+    setSearchQuery(nextQuery);
+    setDebouncedQuery(nextQuery);
+    setSelectedSuggestionIndex(-1);
+    if (nextQuery.trim()) {
+      rememberRecentSearch(nextQuery);
+    }
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [rememberRecentSearch]);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+    setDebouncedQuery('');
+    setSelectedSuggestionIndex(-1);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  const applyDidYouMean = useCallback(() => {
+    if (!didYouMean) return;
+    applySearchQuery(didYouMean);
+  }, [applySearchQuery, didYouMean]);
+
+  const handleSearchInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!debouncedQuery.trim() || suggestionItems.length === 0) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = selectedSuggestionIndex >= 0
+        ? Math.min(selectedSuggestionIndex + 1, suggestionItems.length - 1)
+        : 0;
+      setSelectedSuggestionIndex(nextIndex);
+      suggestionButtonRefs.current[nextIndex]?.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = selectedSuggestionIndex >= 0
+        ? Math.max(selectedSuggestionIndex - 1, 0)
+        : suggestionItems.length - 1;
+      setSelectedSuggestionIndex(nextIndex);
+      suggestionButtonRefs.current[nextIndex]?.focus();
+      return;
+    }
+
+    if (event.key === 'Enter' && suggestionItems[0]) {
+      event.preventDefault();
+      handleOpenSearchItem(suggestionItems[Math.max(selectedSuggestionIndex, 0)]);
+    }
+  }, [debouncedQuery, handleOpenSearchItem, selectedSuggestionIndex, suggestionItems]);
+
+  const getMatchRanges = useCallback((matches: SearchMatch[] | undefined, key: 'title' | 'description') => {
+    if (!Array.isArray(matches)) return [];
+    return matches
+      .filter((match) => match.key === key)
+      .flatMap((match) => match.indices || [])
+      .sort((left, right) => left[0] - right[0]);
+  }, []);
+
+  const renderHighlightedText = useCallback((text: string, ranges: ReadonlyArray<readonly [number, number]>) => {
+    if (!ranges.length) return text;
+
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+
+    ranges.forEach(([start, end], index) => {
+      if (start > cursor) {
+        nodes.push(<React.Fragment key={`plain-${index}-${cursor}`}>{text.slice(cursor, start)}</React.Fragment>);
+      }
+      nodes.push(
+        <mark key={`hit-${index}-${start}`} className="rounded bg-amber-300/20 px-0.5 text-amber-100">
+          {text.slice(start, end + 1)}
+        </mark>
+      );
+      cursor = end + 1;
+    });
+
+    if (cursor < text.length) {
+      nodes.push(<React.Fragment key={`plain-tail-${cursor}`}>{text.slice(cursor)}</React.Fragment>);
+    }
+
+    return nodes;
+  }, []);
+
+  // Chatbot functions
+  const handleSendMessage = useCallback(async () => {
+    if (!currentQuestion.trim()) return;
+
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: currentQuestion,
+      timestamp: new Date(),
+    };
+
+    setChatMessages(prev => [...prev, userMessage]);
+    setCurrentQuestion('');
+    setIsTyping(true);
+
+    try {
+      const aiResponse = await askAI(currentQuestion);
+      const aiMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        content: aiResponse,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        content: 'Sorry, I encountered an error. Please try again.',
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
+  }, [currentQuestion]);
+
+  useEffect(() => {
+    if (!isChatOpen) return;
+    setChatMessages((prev) => {
+      if (prev.length) return prev;
+      return [
+        {
+          id: 'help-center-welcome',
+          type: 'ai',
+          content: 'Ask about memberships, billing, reports, bookings, or accounting setup. [Read more in Table of Contents](#topic-index)',
+          timestamp: new Date(),
+        },
+      ];
+    });
+  }, [isChatOpen]);
+
+  useEscapeKey(() => setIsChatOpen(false), { enabled: isChatOpen });
+
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  }, []);
+
+  const toggleSection = useCallback((sectionId: string) => {
+    setCollapsedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }, []);
+
+  const copySectionLink = useCallback((sectionId: string) => {
+    const url = `${window.location.origin}${window.location.pathname}#${sectionId}`;
+    copyToClipboard(url);
+  }, [copyToClipboard]);
+
+  const handlePrint = useCallback(() => {
+    window.print();
+  }, []);
+
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const renderChatContent = useCallback((content: string) => {
+    const nodes: React.ReactNode[] = [];
+    const linkPattern = /\[([^\]]+)\]\((#[^)]+)\)/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = linkPattern.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        nodes.push(
+          <React.Fragment key={`chat-text-${lastIndex}`}>
+            {content.slice(lastIndex, match.index)}
+          </React.Fragment>
+        );
+      }
+
+      const [, label, hash] = match;
+      nodes.push(
+        <button
+          key={`chat-link-${hash}-${match.index}`}
+          type="button"
+          onClick={() => {
+            setIsChatOpen(false);
+            scrollToSection(String(hash || '').replace(/^#/, ''));
+          }}
+          className="font-semibold text-cyan-200 underline underline-offset-2 hover:text-cyan-100"
+        >
+          {label}
+        </button>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < content.length) {
+      nodes.push(
+        <React.Fragment key={`chat-tail-${lastIndex}`}>
+          {content.slice(lastIndex)}
+        </React.Fragment>
+      );
+    }
+
+    return nodes;
+  }, [scrollToSection]);
 
   useEffect(() => {
     const hash = String(location.hash || '').replace(/^#/, '').trim();
@@ -2136,24 +3227,27 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
     return () => window.clearTimeout(timer);
   }, [location.hash]);
 
+  const hasSearchResultsView = debouncedQuery.trim().length >= 2;
+  const showSuggestions = hasSearchResultsView && suggestionItems.length > 0;
+
   return (
     <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
       {isPublic ? <PublicSeo routeKey="user-manual" /> : null}
       <div className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl space-y-6">
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-          <div className="grid gap-0 lg:grid-cols-[1.55fr_0.95fr]">
-            <div className="bg-gradient-to-br from-indigo-500/20 via-sky-500/10 to-transparent p-6 sm:p-8">
+          <div className="grid gap-0 lg:grid-cols-[1.25fr_0.95fr]">
+            <div className="bg-gradient-to-br from-indigo-500/20 via-sky-500/10 to-transparent p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-200">
                 {isPublic ? 'Public User Manual' : 'User Manual and Product Documentation'}
               </p>
-              <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">{APPLICATION_TITLE}</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-gray-200 sm:text-base">
-                This manual explains how the application is structured, what each module is used for, and how every
-                major page or form supports day-to-day business operations. Each section below includes direct
-                hyperlinks so staff can jump to the exact screen they need.
+              <h1 className="mt-2 text-3xl font-bold text-white sm:text-[2.15rem]">{APPLICATION_TITLE}</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-gray-200 sm:text-base">
+                Search the manual, jump to the exact section you need, and move quickly across modules,
+                transactions, and reports without leaving this page.
               </p>
-              <div className="mt-5 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 {isPublic ? (
                   <>
                     <Link
@@ -2166,7 +3260,7 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                       href="#topic-index"
                       className="inline-flex items-center rounded-md border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
                     >
-                      Open Topic Index
+                      Open Table of Contents
                     </a>
                   </>
                 ) : (
@@ -2181,102 +3275,638 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                       href="#topic-index"
                       className="inline-flex items-center rounded-md border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-white/10"
                     >
-                      Open Topic Index
+                      Open Table of Contents
                     </a>
                   </>
                 )}
               </div>
-              <div className="mt-6 flex flex-wrap gap-2 text-xs text-gray-300">
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Module-by-module guide</span>
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Direct hyperlinks included</span>
-                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Expanded page descriptions</span>
+              <div className="mt-5 flex flex-wrap gap-2 text-xs text-gray-300">
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Fast help search</span>
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Direct section links</span>
+                <span className="rounded-full border border-white/10 bg-gray-950/30 px-3 py-1">Keyboard friendly</span>
               </div>
+
             </div>
 
-            <div className="border-t border-white/10 bg-gray-950/35 p-6 sm:p-8 lg:border-l lg:border-t-0">
+            <div className="border-t border-white/10 bg-gray-950/35 p-5 sm:p-6 lg:border-l lg:border-t-0">
               <div className="space-y-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Quick Orientation</p>
-                  <p className="mt-2 text-sm text-white">The application usually follows this sequence in real usage:</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Search Help Fast</p>
+                    <div className="flex items-center gap-2 text-xs text-gray-400 no-print">
+                      <span>Press</span>
+                      <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-semibold text-gray-200">/</span>
+                      <span>to search</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        placeholder='Search help... (e.g., "trial balance", "booking", "payroll")'
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={handleSearchInputKeyDown}
+                        className="w-full rounded-2xl border border-indigo-400/40 bg-gray-950/50 py-3 pl-12 pr-28 text-base text-white placeholder-gray-500 shadow-[0_0_0_1px_rgba(129,140,248,0.12)] focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400/20"
+                      />
+                      <div className="absolute inset-y-0 right-3 flex items-center gap-2">
+                        {hasSearchResultsView ? (
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-gray-300">
+                            {resultCountsByFilter.all}
+                          </span>
+                        ) : null}
+                        {searchQuery.trim() ? (
+                          <button
+                            type="button"
+                            onClick={clearSearch}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10"
+                            aria-label="Clear search"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsChatOpen(true)}
+                      className="rounded-2xl border border-purple-300/25 bg-purple-500/20 px-3 py-3 text-sm text-purple-200 hover:bg-purple-500/30 transition-colors no-print"
+                      title="Ask AI Assistant"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={handlePrint}
+                      className="rounded-2xl border border-white/15 bg-gray-950/30 px-3 py-3 text-sm text-gray-400 hover:text-white hover:bg-gray-950/50 no-print"
+                      title="Print Manual"
+                    >
+                      <Printer className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                    {showSuggestions ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-300">
+                          <p>
+                            Showing results for <span className="font-semibold text-indigo-200">"{debouncedQuery}"</span>
+                          </p>
+                          {didYouMean ? (
+                            <button type="button" onClick={applyDidYouMean} className="text-sm text-gray-300 hover:text-white">
+                              Did you mean <span className="font-semibold text-indigo-200">"{didYouMean}"</span>?
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="space-y-1">
+                          {suggestionItems.map((item, index) => (
+                            <button
+                              key={`suggestion-${item.id}`}
+                              ref={(node) => {
+                                suggestionButtonRefs.current[index] = node;
+                              }}
+                              type="button"
+                              onClick={() => handleOpenSearchItem(item)}
+                              onFocus={() => setSelectedSuggestionIndex(index)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'ArrowDown') {
+                                  event.preventDefault();
+                                  const nextIndex = Math.min(index + 1, suggestionItems.length - 1);
+                                  suggestionButtonRefs.current[nextIndex]?.focus();
+                                  setSelectedSuggestionIndex(nextIndex);
+                                  return;
+                                }
+                                if (event.key === 'ArrowUp') {
+                                  event.preventDefault();
+                                  if (index === 0) {
+                                    searchInputRef.current?.focus();
+                                    setSelectedSuggestionIndex(-1);
+                                    return;
+                                  }
+                                  const nextIndex = Math.max(index - 1, 0);
+                                  suggestionButtonRefs.current[nextIndex]?.focus();
+                                  setSelectedSuggestionIndex(nextIndex);
+                                }
+                              }}
+                              className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                                selectedSuggestionIndex === index
+                                  ? 'bg-indigo-500/15 text-white'
+                                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-white">
+                                  {renderHighlightedText(item.title, getMatchRanges(item.matches as SearchMatch[] | undefined, 'title'))}
+                                </p>
+                                <p className="truncate text-xs text-gray-400">{item.breadcrumb.join(' → ')}</p>
+                              </div>
+                              <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('search-results-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-200 hover:text-indigo-100"
+                        >
+                          View all results for "{debouncedQuery}"
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : hasSearchResultsView ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-300">
+                          <Search className="h-4 w-4 text-indigo-200" />
+                          <p>No instant suggestions found for <span className="font-semibold text-indigo-200">"{debouncedQuery}"</span>.</p>
+                        </div>
+                        {didYouMean ? (
+                          <button
+                            type="button"
+                            onClick={applyDidYouMean}
+                            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200 hover:bg-white/10"
+                          >
+                            Search instead for "{didYouMean}"
+                            <ArrowRight className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          {popularTopics.slice(0, 4).map((topic) => (
+                            <button
+                              key={`fallback-topic-${topic.id}`}
+                              type="button"
+                              onClick={() => handleOpenSearchItem(topic)}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/10"
+                            >
+                              {topic.title}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-300">
+                          <Sparkles className="h-4 w-4 text-indigo-200" />
+                          <p>Search across help content, modules, transactions, and reports.</p>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-200">Popular topics</p>
+                            <div className="mt-3 space-y-2">
+                              {popularTopics.slice(0, 4).map((topic) => (
+                                <button
+                                  key={`hero-topic-${topic.id}`}
+                                  type="button"
+                                  onClick={() => handleOpenSearchItem(topic)}
+                                  className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-gray-100 hover:bg-white/10"
+                                >
+                                  <span>{topic.title}</span>
+                                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-200">Quick links</p>
+                            <div className="mt-3 space-y-2">
+                              {quickNavigationCards.slice(0, 4).map((card) => (
+                                <Link
+                                  key={`hero-quick-link-${card.id}`}
+                                  to={resolveRouteTarget(card.route)}
+                                  className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-100 hover:bg-white/10"
+                                >
+                                  <span>{card.label}</span>
+                                  <ArrowRight className="h-4 w-4 text-gray-500" />
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
+                    <Filter className="h-3.5 w-3.5" />
+                    <span>
+                      {hasSearchResultsView
+                        ? `Showing ${filteredItems.length} ranked help matches in ${searchFilter === 'all' ? 'all categories' : searchFilter}.`
+                        : 'Start typing to search titles, descriptions, routes, and keywords across the full manual.'}
+                    </span>
+                  </div>
                 </div>
-                <ul className="space-y-2 text-sm text-gray-300">
-                  {navigationFlowSteps.map((step) => (
-                    <li key={step} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                      {step}
-                    </li>
-                  ))}
-                </ul>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Support Contact</p>
-                  <p className="mt-2 text-sm text-gray-100">
-                    {supportEmail ? supportEmail : 'Contact your administrator or internal support desk.'}
-                  </p>
-                  {supportPhone ? <p className="mt-1 text-sm text-gray-300">{supportPhone}</p> : null}
+
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Quick Navigation</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {quickNavigationCards.map((card) => (
+                      <Link
+                        key={card.id}
+                        to={resolveRouteTarget(card.route)}
+                        className="inline-flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-100 hover:bg-white/10"
+                      >
+                        <span>{card.label}</span>
+                        <ArrowRight className="h-4 w-4 text-gray-500" />
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+        </section>
+
+        <section id="search-results-panel" className="scroll-mt-28 grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)_280px]">
+          <aside className="space-y-4">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-indigo-200" />
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-indigo-200">Popular Topics</p>
+              </div>
+              <div className="mt-4 space-y-2">
+                {popularTopics.map((topic) => (
+                  <button
+                    key={`popular-topic-${topic.id}`}
+                    type="button"
+                    onClick={() => handleOpenSearchItem(topic)}
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-gray-950/30 px-3 py-2 text-left text-sm text-gray-100 hover:bg-white/10"
+                  >
+                    <span>{topic.title}</span>
+                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="h-4 w-4 text-indigo-200" />
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-indigo-200">Browse Modules</p>
+              </div>
+              <div className="mt-4 space-y-2">
+                {quickNavigationCards.map((card) => (
+                  <Link
+                    key={`browse-module-${card.id}`}
+                    to={resolveRouteTarget(card.route)}
+                    className="flex items-center justify-between rounded-xl border border-white/10 bg-gray-950/30 px-3 py-2 text-sm text-gray-100 hover:bg-white/10"
+                  >
+                    <span>{card.label}</span>
+                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </aside>
+
+          <div className="space-y-4">
+            {hasSearchResultsView ? (
+              <>
+                <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Search Results</p>
+                      <h2 className="mt-1 text-2xl font-bold text-white">
+                        Search results for <span className="text-indigo-300">"{debouncedQuery}"</span>{' '}
+                        <span className="text-lg font-medium text-gray-400">({resultCountsByFilter.all} results)</span>
+                      </h2>
+                    </div>
+                    {didYouMean ? (
+                      <button type="button" onClick={applyDidYouMean} className="text-sm text-gray-300 hover:text-white">
+                        Did you mean <span className="font-semibold text-indigo-200">"{didYouMean}"</span>?
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-gray-400">Filter by:</span>
+                      {([
+                        { key: 'all', label: 'All', count: resultCountsByFilter.all },
+                        { key: 'modules', label: 'Modules', count: resultCountsByFilter.modules },
+                        { key: 'transactions', label: 'Transactions', count: resultCountsByFilter.transactions },
+                        { key: 'reports', label: 'Reports', count: resultCountsByFilter.reports },
+                      ] as const).map((filter) => (
+                        <button
+                          key={filter.key}
+                          type="button"
+                          onClick={() => setSearchFilter(filter.key)}
+                          className={`rounded-xl border px-3 py-2 text-sm transition ${
+                            searchFilter === filter.key
+                              ? 'border-indigo-400/40 bg-indigo-500/85 text-white'
+                              : 'border-white/10 bg-gray-950/30 text-gray-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {filter.label} ({filter.count})
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <Search className="h-4 w-4" />
+                      <span>Press Enter to open the top result.</span>
+                    </div>
+                  </div>
+                </div>
+
+                {filteredItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {filteredItems.map((item, index) => (
+                      <button
+                        key={`search-result-${item.id}-${index}`}
+                        type="button"
+                        onClick={() => handleOpenSearchItem(item)}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 p-5 text-left transition hover:border-white/20 hover:bg-white/10"
+                      >
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="flex min-w-0 gap-4">
+                            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${
+                              item.category === 'reports'
+                                ? 'bg-blue-500/20 text-blue-200'
+                                : item.category === 'transactions'
+                                  ? 'bg-emerald-500/20 text-emerald-200'
+                                  : item.category === 'modules'
+                                    ? 'bg-amber-500/20 text-amber-100'
+                                    : 'bg-indigo-500/20 text-indigo-200'
+                            }`}>
+                              {item.category === 'reports' ? <BarChart3 className="h-6 w-6" /> : null}
+                              {item.category === 'transactions' ? <FileText className="h-6 w-6" /> : null}
+                              {item.category === 'modules' ? <LayoutGrid className="h-6 w-6" /> : null}
+                              {item.category === 'guides' ? <BookOpen className="h-6 w-6" /> : null}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xl font-semibold text-white">
+                                {index + 1}. {renderHighlightedText(item.title, getMatchRanges(item.matches as SearchMatch[] | undefined, 'title'))}
+                              </p>
+                              <p className="mt-1 text-sm text-gray-400">{item.breadcrumb.join(' > ')}</p>
+                              <p className="mt-3 text-sm leading-6 text-gray-300">
+                                {renderHighlightedText(item.description, getMatchRanges(item.matches as SearchMatch[] | undefined, 'description'))}
+                              </p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {item.badges.map((badge) => (
+                                  <span key={`${item.id}-${badge}`} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-semibold text-gray-200">
+                                    {badge}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-left lg:text-right">
+                            <p className="text-sm text-gray-300">{item.updatedLabel || 'Updated recently'}</p>
+                            <p className="mt-3 text-xs uppercase tracking-[0.16em] text-gray-500">{item.category}</p>
+                            <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-indigo-200">
+                              Open topic
+                              <ChevronRight className="h-4 w-4" />
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-white/15 bg-white/5 p-8 text-center">
+                    <p className="text-lg font-semibold text-white">No results found for "{debouncedQuery}"</p>
+                    <p className="mt-2 text-sm text-gray-400">Try a simpler keyword, switch the filter, or use a corrected spelling.</p>
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      {didYouMean ? (
+                        <button type="button" onClick={applyDidYouMean} className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400">
+                          Search for "{didYouMean}"
+                        </button>
+                      ) : null}
+                      {popularTopics.slice(0, 3).map((topic) => (
+                        <button
+                          key={`empty-topic-${topic.id}`}
+                          type="button"
+                          onClick={() => handleOpenSearchItem(topic)}
+                          className="rounded-xl border border-white/10 bg-gray-950/30 px-4 py-2 text-sm text-gray-200 hover:bg-white/10"
+                        >
+                          {topic.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="space-y-4 rounded-3xl border border-white/10 bg-white/5 p-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Discover Help</p>
+                  <h2 className="mt-1 text-2xl font-bold text-white">Start with a topic or module</h2>
+                  <p className="mt-2 max-w-3xl text-sm text-gray-300">
+                    This help center supports typo-tolerant search, direct deep links, quick module navigation, and AI-guided help for staff who need the answer fast.
+                  </p>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-gray-950/30 p-4">
+                    <p className="text-sm font-semibold text-white">Popular Topics</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {popularTopics.map((topic) => (
+                        <button
+                          key={`discover-topic-${topic.id}`}
+                          type="button"
+                          onClick={() => handleOpenSearchItem(topic)}
+                          className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:bg-white/10"
+                        >
+                          <p className="font-semibold text-white">{topic.title}</p>
+                          <p className="mt-2 text-xs text-gray-400">{topic.breadcrumb.join(' > ')}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-gray-950/30 p-4">
+                    <p className="text-sm font-semibold text-white">Recently Viewed</p>
+                    <div className="mt-4 space-y-3">
+                      {recentViewedTopics.length ? recentViewedTopics
+                        .map((id) => helpSearchDocumentMap.get(id))
+                        .filter((item): item is HelpSearchDocument => Boolean(item))
+                        .slice(0, 5)
+                        .map((topic) => (
+                          <button
+                            key={`recent-topic-${topic.id}`}
+                            type="button"
+                            onClick={() => handleOpenSearchItem(topic)}
+                            className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-left hover:bg-white/10"
+                          >
+                            <div>
+                              <p className="font-medium text-white">{topic.title}</p>
+                              <p className="mt-1 text-xs text-gray-400">{topic.breadcrumb.join(' > ')}</p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-gray-500" />
+                          </button>
+                        )) : (
+                        <p className="text-sm text-gray-500">Open a few help topics and they will appear here for quick return access.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <aside className="space-y-4">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-indigo-200">Quick Actions</p>
+              </div>
+              <div className="mt-4 space-y-2">
+                {(quickActionCards.length ? quickActionCards : [{ label: 'Browse all modules', to: '/user-manual#topic-index' }]).map((action) => (
+                  action.to.startsWith('/user-manual#') ? (
+                    <button
+                      key={`quick-action-${action.label}`}
+                      type="button"
+                      onClick={() => scrollToSection(action.to.split('#')[1] || 'topic-index')}
+                      className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-gray-950/30 px-3 py-2 text-left text-sm text-gray-100 hover:bg-white/10"
+                    >
+                      <span>{action.label}</span>
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    </button>
+                  ) : (
+                    <Link
+                      key={`quick-action-${action.label}`}
+                      to={resolveRouteTarget(action.to)}
+                      className="flex items-center justify-between rounded-xl border border-white/10 bg-gray-950/30 px-3 py-2 text-sm text-gray-100 hover:bg-white/10"
+                    >
+                      <span>{action.label}</span>
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    </Link>
+                  )
+                ))}
+              </div>
+            </div>
+          </aside>
         </section>
 
         <section id="topic-index" className="scroll-mt-28 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Topic Index</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Table of Contents</p>
               <h2 className="text-2xl font-bold text-white">Jump directly to any topic in this manual</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              Use this index to move straight to the explanation you need instead of scrolling through the full manual.
-            </p>
-          </div>
-
-          <div className="columns-1 gap-4 md:columns-2 2xl:columns-3">
-            {topicIndexGroups.map((group) => (
-              <article key={group.title} className="mb-4 break-inside-avoid rounded-3xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-200">{group.title}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {group.links.map((link) => (
-                    <a
-                      key={`${group.title}-${link.id}`}
-                      href={`#${link.id}`}
-                      className="rounded-full border border-white/15 bg-gray-950/30 px-3 py-1.5 text-xs font-semibold text-gray-100 hover:bg-white/10"
-                    >
-                      {link.label}
-                    </a>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section id="overview" className="scroll-mt-28 space-y-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Overview</p>
-              <h2 className="text-2xl font-bold text-white">Introduction, objective, structure, and flow</h2>
+            <div className="flex flex-wrap gap-2 no-print">
+              <button
+                type="button"
+                onClick={expandAllTopicGroups}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                Expand all
+              </button>
+              <button
+                type="button"
+                onClick={collapseAllTopicGroups}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10"
+              >
+                Collapse all
+              </button>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              These sections explain what the application is for and how the business typically moves through the
-              system.
-            </p>
           </div>
 
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            {overviewSections.map((section) => (
-              <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
-                <h3 className="text-lg font-semibold text-white">{section.title}</h3>
-                <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
-                <ul className="mt-4 space-y-2">
-                  {section.bullets.map((bullet) => (
-                    <li key={bullet} className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200">
-                      {bullet}
-                    </li>
-                  ))}
-                </ul>
+          <p className="max-w-3xl text-sm text-gray-300">
+            Use this navigation tree to move straight to the explanation you need instead of scrolling through the full manual.
+          </p>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {topicIndexGroups.map((group) => (
+              <article key={group.title} className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                {(() => {
+                  const groupMeta = resolveTopicGroupMeta(group.title);
+                  const GroupIcon = groupMeta.icon;
+                  const isOpen = topicTreeState[group.title] !== false;
+
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => toggleTopicTreeGroup(group.title)}
+                        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-left hover:bg-white/5"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${groupMeta.tone}`}>
+                            <GroupIcon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-200">{group.title}</p>
+                            <p className="mt-1 text-xs text-gray-400">{group.links.length} topic{group.links.length === 1 ? '' : 's'}</p>
+                          </div>
+                        </div>
+                        <div className={`rounded-full border border-white/10 p-1.5 text-gray-300 transition ${isOpen ? 'bg-white/10' : 'bg-transparent'}`}>
+                          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </div>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="relative mt-4 ml-5 space-y-2 border-l border-white/10 pl-5">
+                          {group.links.map((link) => (
+                            <button
+                              key={`${group.title}-${link.id}`}
+                              type="button"
+                              onClick={() => scrollToSection(link.id)}
+                              className={`relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition before:absolute before:-left-[1.4rem] before:top-1/2 before:h-px before:w-4 before:-translate-y-1/2 before:bg-white/10 ${
+                                activeSection === link.id
+                                  ? 'bg-indigo-500/15 text-white'
+                                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <span className={`h-2 w-2 shrink-0 rounded-full ${activeSection === link.id ? 'bg-indigo-300' : 'bg-gray-500/70'}`} />
+                              <span>{link.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </article>
             ))}
           </div>
         </section>
+
+        <div className="space-y-6">
+            <section id="overview" className="scroll-mt-28 space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Overview</p>
+                  <h2 className="text-2xl font-bold text-white">Introduction, objective, structure, and flow</h2>
+                </div>
+                <div className="flex gap-2 no-print">
+                  <button
+                    onClick={() => toggleSection('overview')}
+                    className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                  >
+                    {collapsedSections['overview'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  </button>
+                  <button
+                    onClick={() => copySectionLink('overview')}
+                    className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                    title="Copy link"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {!collapsedSections['overview'] && (
+                <>
+                  <p className="max-w-2xl text-sm text-gray-300">
+                    These sections explain what the application is for and how the business typically moves through the
+                    system.
+                  </p>
+
+                  <div className="grid items-start gap-4 lg:grid-cols-2">
+                    {overviewSections.map((section) => (
+                      <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
+                        <h3 className="text-lg font-semibold text-white">{section.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-300">{section.description}</p>
+                        <ul className="mt-4 space-y-2">
+                          {section.bullets.map((bullet, index) => (
+                            <li key={index} className="flex items-start gap-2 text-sm text-gray-300">
+                              <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-indigo-400"></span>
+                              {bullet}
+                            </li>
+                          ))}
+                        </ul>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
 
         <section id="main-modules" className="scroll-mt-28 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -2390,18 +4020,36 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Detailed Menu Guides</p>
               <h2 className="text-2xl font-bold text-white">Expanded description of every major page</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              Each page card below includes purpose, a longer description, key uses, and direct hyperlinks to related
-              screens.
-            </p>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('menu-guides')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+              >
+                {collapsedSections['menu-guides'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('menu-guides')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          {menuSections.map((section) => (
-            <section
-              key={section.id}
-              id={section.id}
-              className={`scroll-mt-28 rounded-3xl border border-white/10 bg-gradient-to-br ${section.accent} p-6 shadow-[0_18px_60px_rgba(15,23,42,0.28)]`}
-            >
+          {!collapsedSections['menu-guides'] && (
+            <>
+              <p className="max-w-2xl text-sm text-gray-300">
+                Each page card below includes purpose, a longer description, key uses, and direct hyperlinks to related
+                screens.
+              </p>
+
+              {menuSections.map((section) => (
+                <article
+                  key={section.id}
+                  id={section.id}
+                  className={`scroll-mt-28 rounded-3xl border border-white/10 bg-gradient-to-br ${section.accent} p-6 shadow-[0_18px_60px_rgba(15,23,42,0.28)]`}
+                >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-200">{section.title}</p>
@@ -2459,8 +4107,10 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                   </article>
                 ))}
               </div>
-            </section>
+            </article>
           ))}
+            </>
+          )}
         </section>
 
         <section id="transaction-guides" className="scroll-mt-28 space-y-6">
@@ -2469,14 +4119,32 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Transaction Screen Guides</p>
               <h2 className="text-2xl font-bold text-white">Practical, screen-by-screen guidance for daily entries</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              Each guide below explains what the screen does, how it works in business terms, one realistic example,
-              and how the saved entry flows into reports.
-            </p>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('transaction-guides')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+              >
+                {collapsedSections['transaction-guides'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('transaction-guides')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          {transactionGuideSections.map((section) => (
-            <section key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
+          {!collapsedSections['transaction-guides'] && (
+            <>
+              <p className="max-w-2xl text-sm text-gray-300">
+                Each guide below explains what the screen does, how it works in business terms, one realistic example,
+                and how the saved entry flows into reports.
+              </p>
+
+              {transactionGuideSections.map((section) => (
+                <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-200">{section.title}</p>
@@ -2587,14 +4255,42 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
                       </div>
                     ) : null}
 
+                    {guide.fieldGuide?.length ? (
+                      <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="mb-3 text-sm font-semibold text-sky-200">Field Guide</p>
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-gray-300">
+                              <th className="px-2 py-2">Field</th>
+                              <th className="px-2 py-2">Why It Matters</th>
+                              <th className="px-2 py-2">How To Use It</th>
+                              <th className="px-2 py-2">Example</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {guide.fieldGuide.map((row) => (
+                              <tr key={`${guide.id}-${row.field}`} className="border-t border-white/10 align-top">
+                                <td className="px-2 py-2 font-semibold text-white">{row.field}</td>
+                                <td className="px-2 py-2 text-gray-300">{row.whyItMatters}</td>
+                                <td className="px-2 py-2 text-gray-300">{row.howToUse}</td>
+                                <td className="px-2 py-2 text-gray-300">{row.example}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+
                     <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-gray-300">
                       <span className="font-semibold text-gray-100">Note:</span> {guide.note}
                     </div>
                   </article>
                 ))}
               </div>
-            </section>
+            </article>
           ))}
+            </>
+          )}
         </section>
 
         <section id="report-logic" className="scroll-mt-28 space-y-4">
@@ -2603,15 +4299,33 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Report Logic</p>
               <h2 className="text-2xl font-bold text-white">How report figures are derived in simple business language</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              These notes explain what each report figure means and which saved transactions feed that figure, without
-              using technical or code-level language.
-            </p>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('report-logic')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+              >
+                {collapsedSections['report-logic'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('report-logic')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="grid gap-4">
-            {reportLogicSections.map((section) => (
-              <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
+          {!collapsedSections['report-logic'] && (
+            <>
+              <p className="max-w-2xl text-sm text-gray-300">
+                These notes explain what each report figure means and which saved transactions feed that figure, without
+                using technical or code-level language.
+              </p>
+
+              <div className="grid gap-4">
+                {reportLogicSections.map((section) => (
+                  <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <h3 className="text-xl font-semibold text-white">{section.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
                 <div className="mt-5 grid items-start gap-3 xl:grid-cols-2">
@@ -2629,6 +4343,8 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               </article>
             ))}
           </div>
+            </>
+          )}
         </section>
 
         <section id="sample-entries" className="scroll-mt-28 space-y-4">
@@ -2637,15 +4353,33 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">Sample Entries</p>
               <h2 className="text-2xl font-bold text-white">Realistic examples for each major transaction screen</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              These examples can be used during training so staff know the style of values to enter on booking, sales,
-              membership, accounting, settlement, and procurement screens.
-            </p>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('sample-entries')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+              >
+                {collapsedSections['sample-entries'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('sample-entries')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="grid gap-4">
-            {sampleEntrySections.map((section) => (
-              <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
+          {!collapsedSections['sample-entries'] && (
+            <>
+              <p className="max-w-2xl text-sm text-gray-300">
+                These examples can be used during training so staff know the style of values to enter on booking, sales,
+                membership, accounting, settlement, and procurement screens.
+              </p>
+
+              <div className="grid gap-4">
+                {sampleEntrySections.map((section) => (
+                  <article key={section.id} id={section.id} className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
                 <h3 className="text-xl font-semibold text-white">{section.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-gray-300">{section.description}</p>
                 <div className="mt-5 grid items-start gap-4 xl:grid-cols-2">
@@ -2664,6 +4398,8 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               </article>
             ))}
           </div>
+            </>
+          )}
         </section>
 
         <section id="report-data-flow" className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -2672,12 +4408,30 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-200">Report Data Flow</p>
               <h2 className="text-2xl font-bold text-white">How reports get their data from daily work</h2>
             </div>
-            <p className="max-w-2xl text-sm text-gray-300">
-              This flow shows how the business moves from data entry to report output in plain language.
-            </p>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('report-data-flow')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+              >
+                {collapsedSections['report-data-flow'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('report-data-flow')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="mt-5 grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+          {!collapsedSections['report-data-flow'] && (
+            <>
+              <p className="max-w-2xl text-sm text-gray-300">
+                This flow shows how the business moves from data entry to report output in plain language.
+              </p>
+
+              <div className="mt-5 grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
             <div className="rounded-3xl border border-white/10 bg-gray-950/30 p-5">
               <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-200">Step By Step Flow</p>
               <ul className="mt-4 space-y-3">
@@ -2700,29 +4454,147 @@ export const HelpCenter: React.FC<{ isPublic?: boolean }> = ({ isPublic = false 
               </ul>
             </div>
           </div>
+            </>
+          )}
         </section>
 
         <section id="final-summary" className="scroll-mt-28 rounded-3xl border border-white/10 bg-white/5 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Final Summary</p>
-          <h2 className="mt-2 text-2xl font-bold text-white">One complete platform for sports complex operations</h2>
-          <p className="mt-4 max-w-4xl text-sm leading-7 text-gray-300">
-            {APPLICATION_NAME} is a complete system for managing sports facility operations, sales, staff,
-            memberships, and financial activity in one place. Each module plays a specific role, which keeps the
-            overall workflow smooth, structured, and efficient.
-          </p>
-          <ul className="mt-4 space-y-2">
-            {finalSummaryPoints.map((point) => (
-              <li
-                key={point}
-                className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200"
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Final Summary</p>
+              <h2 className="mt-2 text-2xl font-bold text-white">One complete platform for sports complex operations</h2>
+            </div>
+            <div className="flex gap-2 no-print">
+              <button
+                onClick={() => toggleSection('final-summary')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
               >
-                {point}
-              </li>
-            ))}
-          </ul>
+                {collapsedSections['final-summary'] ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => copySectionLink('final-summary')}
+                className="rounded-lg border border-white/15 bg-gray-950/30 px-3 py-1 text-xs text-gray-300 hover:bg-white/10"
+                title="Copy link"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {!collapsedSections['final-summary'] && (
+            <>
+              <p className="mt-4 max-w-4xl text-sm leading-7 text-gray-300">
+                {APPLICATION_NAME} is a complete system for managing sports facility operations, sales, staff,
+                memberships, and financial activity in one place. Each module plays a specific role, which keeps the
+                overall workflow smooth, structured, and efficient.
+              </p>
+              <ul className="mt-4 space-y-2">
+                {finalSummaryPoints.map((point) => (
+                  <li
+                    key={point}
+                    className="rounded-2xl border border-white/10 bg-gray-950/25 px-4 py-3 text-sm leading-6 text-gray-200"
+                  >
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
       </div>
+    </div>
+  </div>
+
+    <button
+      type="button"
+      onClick={scrollToTop}
+      className="fixed bottom-24 right-6 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-gray-950/80 text-white shadow-[0_16px_36px_rgba(15,23,42,0.35)] transition hover:bg-gray-900 no-print"
+      aria-label="Back to top"
+      title="Back to top"
+    >
+      <ArrowUp className="h-4 w-4" />
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setIsChatOpen(true)}
+      className="fixed bottom-6 right-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full border border-purple-300/25 bg-purple-500/85 text-white shadow-[0_18px_40px_rgba(147,51,234,0.32)] transition hover:bg-purple-400 no-print"
+      aria-label="Open AI help assistant"
+      title="Ask AI Help Assistant"
+    >
+      <MessageCircle className="h-5 w-5" />
+    </button>
+
+    {/* AI Chatbot Modal */}
+    {isChatOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 no-print">
+        <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-gray-950 p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-white">AI Help Assistant</h3>
+            <button
+              onClick={() => setIsChatOpen(false)}
+              className="rounded-lg p-1 text-gray-400 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mt-4 h-96 overflow-y-auto rounded-lg border border-white/10 bg-gray-900/50 p-4">
+            {chatMessages.map((message, index) => (
+              <div key={index} className={`mb-4 flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-xs rounded-lg px-3 py-2 text-sm ${
+                    message.type === 'user'
+                      ? 'bg-indigo-500 text-white'
+                      : 'bg-gray-700 text-gray-200'
+                  }`}
+                >
+                  {message.type === 'ai' ? renderChatContent(message.content) : message.content}
+                  {message.type === 'ai' && (
+                    <button
+                      onClick={() => void copyToClipboard(message.content)}
+                      className="ml-2 text-xs text-gray-400 hover:text-white"
+                      title="Copy response"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="max-w-xs rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-200">
+                  <div className="flex items-center gap-1">
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-gray-400"></div>
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <input
+              type="text"
+              value={currentQuestion}
+              onChange={(e) => setCurrentQuestion(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder="Ask me anything about the help manual..."
+              className="flex-1 rounded-lg border border-white/15 bg-gray-950/30 px-3 py-2 text-sm text-white placeholder-gray-400 focus:border-indigo-400 focus:outline-none"
+            />
+            <button
+              onClick={handleSendMessage}
+              disabled={!currentQuestion.trim() || isTyping}
+              className="rounded-lg border border-white/15 bg-indigo-500 px-3 py-2 text-sm text-white hover:bg-indigo-400 disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       </div>
+    )}
     </>
   );
 };

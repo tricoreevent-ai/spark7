@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { ManualHelpLink } from '../components/ManualHelpLink';
 import { Table, Column } from '../components/Table';
 import { Product, useProducts } from '../hooks/useProducts';
 
@@ -142,8 +143,12 @@ export const ProductAlerts: React.FC = () => {
           <p className="mt-3 max-w-3xl text-sm text-gray-300">
             Review product issues that need action from catalog managers, store operators, or procurement.
           </p>
+          <p className="mt-2 max-w-3xl text-xs text-gray-500 sm:text-sm">
+            Low Stock means stock is above 0 but at or below Min Stock. Out of Stock means stock is 0 or lower. Auto-Reorder Queue applies the same threshold only to products with Auto Reorder enabled. Inactive Products are hidden from active catalog operations.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ManualHelpLink anchor="stock-alerts-logic" />
           <Link to="/products" className="rounded-md bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20">
             Product Center
           </Link>
